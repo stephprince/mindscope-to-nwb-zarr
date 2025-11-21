@@ -8,7 +8,7 @@ This project converts Allen Brain Observatory neurophysiology data from the Alle
 
 ## Development Setup
 
-This project uses `uv` for dependency management. Requires Python 3.10+.
+This project uses `uv` for dependency management. Requires Python 3.11+.
 
 ```bash
 # Install dependencies
@@ -23,3 +23,4 @@ uv run python <script.py>
 - **pynwb**: Core library for reading/writing NWB files
 - **hdmf-zarr**: Enables Zarr backend storage for NWB (instead of HDF5)
 - **aind-data-schema**: Allen Institute for Neural Dynamics data schemas
+- **allensdk**: Allen Institute SDK for accessing MindScope data
