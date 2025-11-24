@@ -2,6 +2,7 @@ from pynwb import NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 from hdmf.build import ObjectMapper
 
+from nwbinspector import inspect_nwbfile_object
 
 filename = "data/sub-703279277_ses-719161530_probe-729445654_ecephys.nwb"
 zarr_filename = "data/sub-703279277_ses-719161530_probe-729445654_ecephys.nwb.zarr"
@@ -52,3 +53,8 @@ with NWBHDF5IO(filename, 'r') as read_io:
     
     with NWBZarrIO(zarr_filename, mode='w') as export_io:
         export_io.export(src_io=read_io, write_args=dict(link_data=False))
+
+# inspect file for validation errors
+with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
+    nwbfile = zarr_io.read()
+    messages = list(inspect_nwbfile_object(nwbfile))
