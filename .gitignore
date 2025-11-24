@@ -211,3 +211,6 @@ __marimo__/
 
 # Claude
 .claude/
+
+# Hatch version
+_version.py
