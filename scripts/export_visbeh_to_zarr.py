@@ -1,0 +1,43 @@
+from pynwb import NWBHDF5IO, load_namespaces
+from hdmf_zarr.nwb import NWBZarrIO
+from hdmf.build import ObjectMapper
+
+
+filename = "data/sub-703279277_ses-719161530_probe-729445654_ecephys.nwb"
+zarr_filename = "data/sub-703279277_ses-719161530_probe-729445654_ecephys.nwb.zarr"
+
+# Load the updated ndx-aibs-ecephys extension into the global type map
+# This extension will be used instead of the older extension cached in the NWB file
+extension_spec = "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"
+load_namespaces(extension_spec)
+
+# The NWB extension ndx-aibs-ecephys 0.2.0 specifies a required "strain" text attribute in
+# the new data type EcephysSpecimen which extends the NWB core data type Subject.
+# However, since the time that the extension was created, the NWB core Subject data type
+# has added an optional "strain" dataset. As a result, when reading the NWB file, the
+# EcephysSpecimen "strain" field is not populated, leading to a MissingRequiredBuildWarning.
+# To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
+# by getting the "strain" value from the builder "strain" attribute.
+
+class CustomEcephysSpecimenMapper(ObjectMapper):
+
+    @ObjectMapper.constructor_arg("strain")
+    def strain_carg(self, builder, manager):
+        strain_builder = builder.get('strain')
+        assert isinstance(strain_builder, str)
+        return strain_builder
+
+
+with NWBHDF5IO(filename, 'r') as read_io:
+    manager = read_io.manager
+    EcephysSpecimen = manager.type_map.get_dt_container_cls('EcephysSpecimen', 'ndx-aibs-ecephys')
+    manager.type_map.register_map(EcephysSpecimen, CustomEcephysSpecimenMapper)
+
+    # Reading the NWB file will cause an expected warning:
+    # Ignoring the following cached namespace(s) because another version is already loaded:
+    # ndx-aibs-ecephys - cached version: 0.2.0, loaded version: 0.3.0
+    # The loaded extension(s) may not be compatible with the cached extension(s) in the file.
+    # Please check the extension documentation and ignore this warning if these versions are compatible.
+    
+    with NWBZarrIO(zarr_filename, mode='w') as export_io:
+        export_io.export(src_io=read_io, write_args=dict(link_data=False))
