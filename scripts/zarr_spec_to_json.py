@@ -1,0 +1,116 @@
+"""
+Convert NWB specification files from a Zarr store to standard JSON files.
+
+This script reads the specifications group from an NWB Zarr store, iterates over
+each spec namespace (e.g., core, ndx-aibs-ecephys), and for each namespace and
+version, converts the Zarr chunks containing JSON text into proper JSON files.
+
+Output files are named with pattern: {namespace}_{version}_{spec_file}.json, e.g.:
+core_2.9.0_nwb.base.json
+
+Example usage:
+    python scripts/zarr_spec_to_json.py path/to/nwb_file.nwb.zarr -o output_directory
+"""
+
+import json
+import argparse
+from pathlib import Path
+import zarr
+
+
+def extract_specs_from_zarr(zarr_path: str, output_dir: str):
+    """
+    Extract all specification files from an NWB Zarr store and save as JSON files.
+
+    Args:
+        zarr_path: Path to the NWB Zarr store
+        output_dir: Directory to write the JSON files
+    """
+    # Open the Zarr store
+    store = zarr.open(zarr_path, mode='r')
+
+    # Check if specifications group exists
+    if 'specifications' not in store:
+        raise ValueError(f"No 'specifications' group found in {zarr_path}")
+
+    specs_group = store['specifications']
+
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Track statistics
+    total_specs = 0
+
+    # Iterate over each namespace
+    namespaces = list(specs_group.keys())
+    print(f"Found {len(namespaces)} namespaces: {namespaces}")
+    print()
+
+    for namespace in namespaces:
+        namespace_group = specs_group[namespace]
+
+        # Iterate over each version in the namespace
+        versions = list(namespace_group.keys())
+        print(f"Namespace '{namespace}' has {len(versions)} version(s): {versions}")
+
+        for version in versions:
+            version_group = namespace_group[version]
+
+            # Iterate over each spec file in the version
+            spec_files = list(version_group.keys())
+            print(f"  Version '{version}' has {len(spec_files)} spec file(s): {spec_files}")
+
+            for spec_file in spec_files:
+                # Read the spec data (should be a 1-element array)
+                spec_array = version_group[spec_file]
+                spec_data = spec_array[:]
+
+                # Verify it's a single chunk
+                assert len(spec_data) == 1, f"Expected 1 chunk, got {len(spec_data)}"
+
+                # Extract the JSON data (stored as a JSON string)
+                json_string = spec_data[0]
+
+                # Parse the JSON string to get the actual data
+                json_data = json.loads(json_string)
+
+                # Create output filename
+                output_filename = f"{namespace}_{version}_{spec_file}.json"
+                output_filepath = output_path / output_filename
+
+                # Write the JSON file
+                with open(output_filepath, 'w') as fout:
+                    json.dump(json_data, fout, indent=2)
+
+                print(f"    Wrote: {output_filename}")
+                total_specs += 1
+
+            print()
+
+    print(f"Successfully extracted {total_specs} specification files to {output_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Extract NWB specifications from a Zarr store to JSON files"
+    )
+    parser.add_argument(
+        'zarr_path',
+        type=str,
+        help='Path to the NWB Zarr store'
+    )
+    parser.add_argument(
+        '-o', '--output-dir',
+        type=str,
+        default='extracted_specs',
+        help='Output directory for JSON files (default: extracted_specs)'
+    )
+
+    args = parser.parse_args()
+
+    extract_specs_from_zarr(args.zarr_path, args.output_dir)
+
+
+if __name__ == '__main__':
+    main()
