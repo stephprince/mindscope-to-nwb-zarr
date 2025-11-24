@@ -19,6 +19,17 @@ load_namespaces(extension_spec)
 # To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
 # by getting the "strain" value from the builder "strain" attribute.
 
+# NOTE: The original NWB HDF5 files for Visual Behavior - Neuropixels use NWB schema 2.2.0
+# where the "filtering" column (VectorData dataset) of the electrodes table is specified
+# as a float32 dtype. However, the dataset in the file contains string values. This means
+# the original NWB HDF5 file is technically invalid and the current pynwb validator raises
+# this as a validation error. The earlier version of the validator did not catch this 
+# validation error. In NWB schema 2.4.0, the "filtering" column was 
+# updated to be a variable-length string dtype. When exporting the original NWB file to 
+# Zarr using NWBZarrIO using PyNWB 3.1.2 which uses NWB schema 2.9.0, the "filtering" 
+# column is correctly read as a string dataset and written to Zarr without error or loss of
+# data, so no special handling is needed here.
+
 class CustomEcephysSpecimenMapper(ObjectMapper):
 
     @ObjectMapper.constructor_arg("strain")
