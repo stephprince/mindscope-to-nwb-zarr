@@ -2,7 +2,9 @@ from pynwb import NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 from hdmf.build import ObjectMapper
 
-from nwbinspector import inspect_nwbfile_object
+from pathlib import Path
+from nwbinspector import inspect_nwbfile_object, format_messages, save_report
+from pynwb.validation import validate
 
 filename = "data/sub-703279277_ses-719161530_probe-729445654_ecephys.nwb"
 zarr_filename = "data/sub-703279277_ses-719161530_probe-729445654_ecephys.nwb.zarr"
@@ -57,4 +59,22 @@ with NWBHDF5IO(filename, 'r') as read_io:
 # inspect file for validation errors
 with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
     nwbfile = zarr_io.read()
+
+    # inspect nwb file with io object
+    # NOTE - this does not run pynwb validation, will run that separately
     messages = list(inspect_nwbfile_object(nwbfile))
+
+    # format and print messages nicely
+    if messages:
+        formatted_messages = format_messages(
+            messages=messages,
+            levels=["importance", "file_path"],
+            reverse=[True, False]
+        )
+        save_report(report_file_path=f"data/{Path(zarr_filename).stem}_report.txt", 
+                    formatted_messages=formatted_messages,
+                    overwrite=True)
+
+    # validate file with IO object
+    # TODO - waiting to fix hdmf-zarr related validation issues before including
+    # validate(io=nwbfile)  
