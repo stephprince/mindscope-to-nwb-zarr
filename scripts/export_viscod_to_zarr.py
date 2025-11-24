@@ -19,7 +19,7 @@ load_namespaces(extension_spec)
 # To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
 # by getting the "strain" value from the builder "strain" attribute.
 
-# NOTE: The original NWB HDF5 files for Visual Behavior - Neuropixels use NWB schema 2.2.0
+# NOTE: The original NWB HDF5 files for Visual Coding - Neuropixels use NWB schema 2.2.0
 # where the "filtering" column (VectorData dataset) of the electrodes table is specified
 # as a float32 dtype. However, the dataset in the file contains string values. This means
 # the original NWB HDF5 file is invalid and the current pynwb validator raises
