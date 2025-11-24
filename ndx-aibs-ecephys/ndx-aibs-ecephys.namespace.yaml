@@ -1,0 +1,22 @@
+namespaces:
+- author: 
+  - Ryan Ly
+  - Stephanie Prince
+  - Saskia de Vries
+  contact: 
+  - rly@lbl.gov
+  - smprince@lbl.gov
+  - saskiad@alleninstitute.org
+  doc: 
+    Allen Institute Ecephys Extension.
+    0.3.0 version includes support for NWB 2.3.0 and later. 
+    Includes support for NWB 2.3.0 and later. In version 0.2.0, 
+    the data type `EcephysSpecimen` extends `Subject` and specifies 
+    a required attribute "strain". This attribute has been made into 
+    a dataset in version 0.3.0 to be compatible with NWB 2.3.0 and 
+    later where the data type `Subject` specifies "strain" as a dataset.
+  name: ndx-aibs-ecephys
+  schema:
+  - namespace: core
+  - source: ndx-aibs-ecephys.extension.yaml
+  version: 0.3.0
