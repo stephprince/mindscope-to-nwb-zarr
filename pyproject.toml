@@ -8,6 +8,7 @@ dependencies = [
     "aind-data-schema>=2.1.0",
     "hdmf",
     "hdmf-zarr>=0.2.0",
+    "nwbinspector>=0.6.5",
     "pynwb>=2.8.3",
 ]
 
