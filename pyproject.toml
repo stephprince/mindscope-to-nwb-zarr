@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "aind-data-schema>=2.1.0",
-    "allensdk>=2.16.2",
     "hdmf-zarr>=0.2.0",
     "pynwb>=2.8.3",
 ]

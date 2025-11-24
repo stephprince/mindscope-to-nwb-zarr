@@ -23,4 +23,3 @@ uv run python <script.py>
 - **pynwb**: Core library for reading/writing NWB files
 - **hdmf-zarr**: Enables Zarr backend storage for NWB (instead of HDF5)
 - **aind-data-schema**: Allen Institute for Neural Dynamics data schemas
-- **allensdk**: Allen Institute SDK for accessing MindScope data
