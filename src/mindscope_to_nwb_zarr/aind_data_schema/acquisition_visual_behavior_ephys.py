@@ -20,7 +20,6 @@ from aind_data_schema.components.configs import (
 )
 from aind_data_schema.components.coordinates import (
     Translation,
-    Rotation,
     AtlasCoordinate,
     AtlasLibrary,
     CoordinateSystemLibrary,
@@ -282,4 +281,4 @@ acquisition = Acquisition(
 if __name__ == "__main__":
     serialized = acquisition.model_dump_json()
     deserialized = Acquisition.model_validate_json(serialized)
-    deserialized.write_standard_file(prefix="ephys")
+    deserialized.write_standard_file(prefix="ephys_visual_behavior")
