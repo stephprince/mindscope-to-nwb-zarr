@@ -1,0 +1,305 @@
+"""Generates an example JSON file for visual behavior ephys acquisition"""
+
+from datetime import datetime, timezone
+
+
+from aind_data_schema.components.identifiers import Software, Code
+from aind_data_schema.core.acquisition import (
+    Acquisition,
+    StimulusEpoch,
+    DataStream,
+    AcquisitionSubjectDetails,
+)
+from aind_data_schema.components.configs import (
+    ManipulatorConfig,
+    EphysAssemblyConfig,
+    ProbeConfig,
+    LaserConfig,
+)
+from aind_data_schema.components.coordinates import (
+    Translation,
+    Rotation,
+    AtlasCoordinate,
+    AtlasLibrary,
+    CoordinateSystemLibrary,
+)
+from aind_data_schema.components.stimulus import VisualStimulation, OptoStimulation
+from aind_data_schema_models.units import TimeUnit
+from aind_data_schema_models.brain_atlas import CCFv3
+from aind_data_schema_models.stimulus_modality import StimulusModality
+
+import pandas as pd
+from pynwb import read_nwb
+from src.mindscope_to_nwb_zarr.pynwb_utils import get_acquisition_end_time, get_modalities
+
+# example file for initial debugging
+# TODO - replace with more general ingestion/generation script
+subject_id = 506940
+session_id = 1043752325
+nwbfile_lfp = read_nwb(f"/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-None_probe-1158270876_ecephys.nwb")
+nwbfile = read_nwb(f"/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-20200817T222149.nwb")
+ephys_session_table = pd.read_csv("/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/.cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/ecephys_sessions.csv")
+session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
+
+
+def get_subject_id(nwbfile, session_info=None):
+    if session_info is not None:
+        assert session_info['mouse_id'].values[0] == nwbfile.subject.subject_id
+    return nwbfile.subject.subject_id
+
+def get_session_start_time(nwbfile, session_info=None):
+    if session_info is not None:
+        assert session_info['date_of_acquisition'].values[0] == nwbfile.session_start_time
+    return nwbfile.session_start_time
+
+def get_instrument_id(nwbfile, session_info=None):
+    instrument = next(iter(nwbfile.devices))
+    if session_info is not None:
+        assert session_info['equipment_name'].values[0] == instrument
+    return instrument
+
+def get_total_reward_volume(nwbfile):
+    if 'reward_volume' in nwbfile.trials.colnames:
+        return float(nwbfile.trials['reward_volume'][:].sum())
+    return None
+
+
+acquisition = Acquisition(
+    subject_id=get_subject_id(nwbfile, session_info=session_info),
+    specimen_id=None, # TODO - confirm not necessary for these file (unless we want to store both donor + specimen id info)
+    acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
+    acquisition_end_time=get_acquisition_end_time(nwbfile),
+    experimenters=None, # TODO - determine where to extract
+    protocol_id=None, # TODO - confirm not shared on protocols.io
+    ethics_review_id=None,
+    instrument_id=get_instrument_id(nwbfile, session_info=session_info),
+    acquisition_type=nwbfile.session_description, # TODO - confirm consistent across experiments or if better option
+    notes=None,
+    coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct system library
+    calibrations=None,
+    maintenance=None,
+    data_streams=[ # TODO - fill in, should behavior + ephys be one data stream or multiple? what is the point of multiple streams?
+        DataStream(
+            stream_start_time=datetime(year=2023, month=4, day=25, hour=2, minute=45, second=0, tzinfo=timezone.utc),
+            stream_end_time=datetime(year=2023, month=4, day=25, hour=3, minute=16, second=0, tzinfo=timezone.utc),
+            modalities=get_modalities(nwbfile),
+            code=None,
+            notes=None,
+            active_devices=[ # TODO - determine active devices names that would apply
+                None
+            ],
+            configurations=[ # TODO - determine which configurations apply to us
+                EphysAssemblyConfig(
+                    device_name="EPHYS_1",
+                    manipulator=ManipulatorConfig(
+                        device_name=None,
+                        coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
+                        local_axis_positions=Translation(),
+                    ),
+                    probes=[
+                        ProbeConfig(
+                            device_name="ProbeB",
+                            primary_targeted_structure=CCFv3.LC,
+                            other_targeted_structures=None,
+                            atlas_coordinate=AtlasCoordinate(
+                                coordinate_system=AtlasLibrary.CCFv3_10um,
+                                translation=[8150, 3250, 7800],
+                            ),
+                            coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
+                            transform=[Translation(translation=[5000, 5000, 0, 1],),],
+                            notes=None,
+                        )
+                    ],
+                ),
+                LaserConfig(), # TODO - right config to use for optotagging?
+            ],
+         ),
+    ],
+    # TODO - determine best way to divide this task into stimulus epochs
+    # different stimulus epochs for each type of intervals table?
+    # separate active vs. passive if same stimulus set?
+    # also include optotagging?
+    # what are spontaneous presentations?
+    stimulus_epochs=[    
+        StimulusEpoch(
+            stimulus_start_time=nwbfile.intervals['Natural_Images_Lum_Matched_set_ophys_G_2019_presentations']['start_time'][0],
+            stimulus_end_time=nwbfile.intervals['Natural_Images_Lum_Matched_set_ophys_G_2019_presentations']['end_time'][-1],
+            stimulus_name="Change detection natural images",
+            code=Code(
+                url=None,
+                name=None,
+                version=None,
+                container=None,
+                run_script=None,
+                language=None,
+                language_version=None,
+                input_data=None,
+                core_dependency=Software(
+                    name=None,
+                    version=None,), # TODO - add software if available
+                parameters=VisualStimulation(
+                    stimulus_name="'Natural_Images_Lum_Matched_set_ophys_G_2019_presentations'",
+                    # stimulus_parameters={
+                    #     "grating_orientations": [0, 45, 90, 135],
+                    #     "grating_orientation_unit": "degrees",
+                    #     "grating_spatial_frequencies": [0.02, 0.04, 0.08, 0.16, 0.32],
+                    #     "grating_spatial_frequency_unit": "cycles/degree",
+                    # },
+                    stimulus_template_name=None,
+                    notes=None,
+                ),
+            ),
+            stimulus_modalities=[StimulusModality.VISUAL],
+            performance_metrics=None,
+            notes=None,
+            active_devices=None,
+            configurations=None, # TODO - think the options provided do not apply, except maybe labor configurations
+            training_protocol_name=None,
+            curriculum_status=None,
+        ),
+        StimulusEpoch(
+            stimulus_start_time=nwbfile.intervals['flash_250ms_presentations']['start_time'][0],
+            stimulus_end_time=nwbfile.intervals['flash_250ms_presentations']['end_time'][-1],
+            stimulus_name="Full-field flashes",
+            code=Code(
+                url=None,
+                name=None,
+                version=None,
+                container=None,
+                run_script=None,
+                language=None,
+                language_version=None,
+                input_data=None,
+                core_dependency=Software(
+                    name=None,
+                    version=None,), # TODO - add software if available
+                parameters=VisualStimulation(
+                    stimulus_name="flash_250ms_presentations",
+                    stimulus_parameters={},
+                    stimulus_template_name=None,
+                    notes=None,
+                ),
+            ),
+            stimulus_modalities=[StimulusModality.VISUAL],
+            performance_metrics=None,
+            notes=None,
+            active_devices=None,
+            configurations=None, # TODO - think the options provided do not apply, except maybe labor configurations
+            training_protocol_name=None,
+            curriculum_status=None,
+        ),
+        StimulusEpoch(
+            stimulus_start_time=nwbfile.intervals['gabor_20_deg_250ms_presentations']['start_time'][0],
+            stimulus_end_time=nwbfile.intervals['gabor_20_deg_250ms_presentations']['end_time'][-1],
+            stimulus_name="Gabors",
+            code=Code(
+                url=None,
+                name=None,
+                version=None,
+                container=None,
+                run_script=None,
+                language=None,
+                language_version=None,
+                input_data=None,
+                core_dependency=Software(
+                    name=None,
+                    version=None,), # TODO - add software if available
+                parameters=VisualStimulation(
+                    stimulus_name="Gabor 20 deg 250 ms presentations",
+                    stimulus_parameters={},
+                    stimulus_template_name=None,
+                    notes=None,
+                ),
+            ),
+            stimulus_modalities=[StimulusModality.VISUAL],
+            performance_metrics=None,
+            notes=None,
+            active_devices=None,
+            configurations=None, # TODO - think the options provided do not apply, except maybe labor configurations
+            training_protocol_name=None,
+            curriculum_status=None,
+        ),
+        StimulusEpoch(
+            stimulus_start_time=nwbfile.processing['optotagging']['optogenetic_stimulation']['start_time'][0],
+            stimulus_end_time=nwbfile.processing['optotagging']['optogenetic_stimulation']['end_time'][-1],
+            stimulus_name="Optotagging",
+            code=Code(
+                url=None,
+                name=None,
+                version=None,
+                container=None,
+                run_script=None,
+                language=None,
+                language_version=None,
+                input_data=None,
+                core_dependency=Software(
+                    name=None,
+                    version=None,), # TODO - add software if available
+                parameters={
+                    OptoStimulation( # TODO - add multiple types of opto stimulation?
+                        stimulus_name="Pulse",
+                        pulse_shape=(nwbfile
+                                    .processing['optotagging']['optogenetic_stimulation']
+                                    .to_dataframe()
+                                    .query('stimulus_name == "pulse"')['condition']
+                                    .values[0]),
+                        pulse_frequency=None, # TODO - calculate
+                        pulse_frequency_unit=TimeUnit.SECONDS,
+                        number_pulse_trains=None, # TODO - calculate
+                        pulse_width=(nwbfile
+                                    .processing['optotagging']['optogenetic_stimulation']
+                                    .to_dataframe()
+                                    .query('stimulus_name == "pulse"'))['duration'],
+                        pulse_width_unit=TimeUnit.SECONDS,
+                        baseline_duration=None, # TODO - calculate and add if needed
+                        baseline_duration_unit=None,
+                        other_parameters=None,
+                        notes=None,
+                    ),
+                    OptoStimulation(
+                        stimulus_name="Raised cosine",
+                        pulse_shape=(nwbfile
+                                    .processing['optotagging']['optogenetic_stimulation']
+                                    .to_dataframe()
+                                    .query('stimulus_name == "raised_cosine"')['condition']
+                                    .values[0]),
+                        pulse_frequency=None, # TODO - calculate
+                        pulse_frequency_unit=TimeUnit.SECONDS,
+                        number_pulse_trains=None, # TODO - calculate
+                        pulse_width=(nwbfile
+                                    .processing['optotagging']['optogenetic_stimulation']
+                                    .to_dataframe()
+                                    .query('stimulus_name == "raised_cosine"'))['duration'], # convert to mss
+                        pulse_width_unit=TimeUnit.SECONDS,
+                        baseline_duration=None, # TODO - calculate and add if needed
+                        baseline_duration_unit=None,
+                        other_parameters=None,
+                        notes=None,
+                    ),
+                },
+            ),
+            stimulus_modalities=[StimulusModality.OPTOGENETICS],
+            performance_metrics=None,
+            notes=None,
+            active_devices=None,
+            configurations=None, # TODO - think the options provided do not apply, except maybe labor configurations
+            training_protocol_name=None,
+            curriculum_status=None,
+        ),
+    ], 
+    manipulations=None, # TODO - think this is None (seems to be injections)
+    subject_details=AcquisitionSubjectDetails(
+        animal_weight_prior=None,
+        animal_weight_post=None,
+        weight_unit="grams",
+        anaesthesia=None,
+        mouse_platform_name="running wheel", # TODO - determine where to extract if needed
+        reward_consumed_total=get_total_reward_volume(nwbfile), # TODO - check if calculation is sufficient
+    ),
+)
+
+
+if __name__ == "__main__":
+    serialized = acquisition.model_dump_json()
+    deserialized = Acquisition.model_validate_json(serialized)
+    deserialized.write_standard_file(prefix="ephys")
