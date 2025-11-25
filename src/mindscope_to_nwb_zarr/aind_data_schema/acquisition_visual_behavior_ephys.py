@@ -56,13 +56,11 @@ nwbfile = read_nwb(working_dir / f"data/sub-{subject_id}_ses-20200817T222149.nwb
 
 # load metadata files
 ephys_session_table = pd.read_csv(cache_dir / "ecephys_sessions.csv")
-probe_table = pd.read_csv(cache_dir / "probes.csv")
 session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
 if len(session_info) == 0:
     raise ValueError(f"No session info found for subject_id={subject_id}, session_id={session_id}")
-probe_info = probe_table.query("ecephys_session_id == @session_id")
 
-def get_probe_configs(nwbfile, probe_info):
+def get_probe_configs(nwbfile):
     probe_configs = []
     for device in nwbfile.devices.values():
         if device.__class__.__name__ == "EcephysProbe":
@@ -87,6 +85,30 @@ def get_probe_configs(nwbfile, probe_info):
             )
     
     return probe_configs
+
+def get_optostimulation_parameters(nwbfile):
+    opto_stimulation = []
+    if 'optotagging' in nwbfile.processing:
+        opto_df = nwbfile.processing['optotagging']['optogenetic_stimulation'].to_dataframe()
+        for stimulus_name, df in opto_df.groupby('stimulus_name'):
+            opto_stimulation.append(
+                OptoStimulation(
+                    stimulus_name=stimulus_name,
+                    pulse_shape=(df['condition'].values[0]), # TODO - assert single value
+                    pulse_frequency=None, # TODO - calculate
+                    pulse_frequency_unit=TimeUnit.SECONDS,
+                    number_pulse_trains=len(df),
+                    pulse_width=df['duration'].values[0], # TODO - assert single value
+                    pulse_width_unit=TimeUnit.SECONDS,
+                    pulse_train_interval=1.5, # from technical whitepaper
+                    pulse_train_interval_unit=TimeUnit.SECONDS,
+                    baseline_duration=0.0, # TODO - is whole prior recording considered baseline? add if needed
+                    baseline_duration_unit=None,
+                    other_parameters=None,
+                    notes=f"Three light levels used: {df['level'].unique().tolist()}",
+                ),
+            )
+    return opto_stimulation
 
 
 acquisition = Acquisition(
@@ -255,48 +277,7 @@ acquisition = Acquisition(
                 core_dependency=Software(
                     name=None,
                     version=None,), # TODO - add software if available
-                parameters={
-                    OptoStimulation( # TODO - add multiple types of opto stimulation?
-                        stimulus_name="Pulse",
-                        pulse_shape=(nwbfile
-                                    .processing['optotagging']['optogenetic_stimulation']
-                                    .to_dataframe()
-                                    .query('stimulus_name == "pulse"')['condition']
-                                    .values[0]),
-                        pulse_frequency=None, # TODO - calculate
-                        pulse_frequency_unit=TimeUnit.SECONDS,
-                        number_pulse_trains=None, # TODO - calculate
-                        pulse_width=(nwbfile
-                                    .processing['optotagging']['optogenetic_stimulation']
-                                    .to_dataframe()
-                                    .query('stimulus_name == "pulse"'))['duration'],
-                        pulse_width_unit=TimeUnit.SECONDS,
-                        baseline_duration=None, # TODO - calculate and add if needed
-                        baseline_duration_unit=None,
-                        other_parameters=None,
-                        notes=None,
-                    ),
-                    OptoStimulation(
-                        stimulus_name="Raised cosine",
-                        pulse_shape=(nwbfile
-                                    .processing['optotagging']['optogenetic_stimulation']
-                                    .to_dataframe()
-                                    .query('stimulus_name == "raised_cosine"')['condition']
-                                    .values[0]),
-                        pulse_frequency=None, # TODO - calculate
-                        pulse_frequency_unit=TimeUnit.SECONDS,
-                        number_pulse_trains=None, # TODO - calculate
-                        pulse_width=(nwbfile
-                                    .processing['optotagging']['optogenetic_stimulation']
-                                    .to_dataframe()
-                                    .query('stimulus_name == "raised_cosine"'))['duration'], # convert to mss
-                        pulse_width_unit=TimeUnit.SECONDS,
-                        baseline_duration=None, # TODO - calculate and add if needed
-                        baseline_duration_unit=None,
-                        other_parameters=None,
-                        notes=None,
-                    ),
-                },
+                parameters=get_optostimulation_parameters(nwbfile),
             ),
             stimulus_modalities=[StimulusModality.OPTOGENETICS],
             performance_metrics=None,
@@ -313,7 +294,7 @@ acquisition = Acquisition(
         animal_weight_post=None,
         weight_unit="grams",
         anaesthesia=None,
-        mouse_platform_name="running wheel", # TODO - determine where to extract if needed
+        mouse_platform_name="Running Wheel",
         reward_consumed_total=get_total_reward_volume(nwbfile), # TODO - check if calculation is sufficient
     ),
 )
