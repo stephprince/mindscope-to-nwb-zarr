@@ -1,11 +1,12 @@
 from datetime import timedelta
 from pynwb.base import TimeSeries
 from pynwb.ecephys import ElectricalSeries
+from hdmf.common import DynamicTable
 
 from aind_data_schema_models.modalities import Modality
 
-def get_acquisition_end_time(nwbfile):
-    """Calculate acquisition end time from NWB file by finding the latest timestamp across all TimeSeries"""
+def get_latest_time(nwbfile):
+    """Calculate latest time from NWB file by finding the latest timestamp across all TimeSeries"""
     max_time = None
 
     # get last timestamp across all TimeSeries
@@ -21,9 +22,25 @@ def get_acquisition_end_time(nwbfile):
             if max_time is None or last_time > max_time:
                 max_time = last_time
 
+        # Handle DynamicTable objects with time columns
+        elif isinstance(obj, DynamicTable):
+            if "stop_time" in obj.colnames and len(obj["stop_time"]):
+                last_time = float(obj["stop_time"][-1])
+            elif "spike_times" in obj.colnames and len(obj["spike_times"]):
+                last_time = max(obj["spike_times"][:])
+
+            if max_time is None or last_time > max_time:
+                max_time = last_time
+            
+    return max_time
+
+def get_acquisition_end_time(nwbfile):
+    """Calculate acquisition end time from NWB file by finding the latest timestamp across all TimeSeries"""
+    latest_time = get_latest_time(nwbfile)
+
     # Calculate end time
-    if max_time is not None:
-        end_time = nwbfile.session_start_time + timedelta(seconds=float(max_time))
+    if latest_time is not None:
+        end_time = nwbfile.session_start_time + timedelta(seconds=float(latest_time))
     else:
         end_time = None
 
