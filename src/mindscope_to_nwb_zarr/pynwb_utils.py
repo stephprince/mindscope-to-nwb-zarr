@@ -1,13 +1,14 @@
 import numpy as np
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from pynwb import NWBFile
 from pynwb.base import TimeSeries
 from pynwb.ecephys import ElectricalSeries
 from hdmf.common import DynamicTable
 
 from aind_data_schema_models.modalities import Modality
 
-def get_latest_time(nwbfile):
+def get_latest_time(nwbfile: NWBFile) -> float | None:
     """Calculate latest time from NWB file by finding the latest timestamp across all TimeSeries"""
     max_time = None
 
@@ -33,7 +34,7 @@ def get_latest_time(nwbfile):
             
     return max_time
 
-def get_data_stream_end_time(nwbfile):
+def get_acquisition_end_time(nwbfile: NWBFile) -> datetime | None:
     """Calculate acquisition end time from NWB file by finding the latest timestamp across all TimeSeries"""
     latest_time = get_latest_time(nwbfile)
 
@@ -45,7 +46,7 @@ def get_data_stream_end_time(nwbfile):
 
     return end_time
 
-def get_data_stream_start_time(nwbfile):
+def get_data_stream_start_time(nwbfile: NWBFile) -> datetime | None:
     earliest_time = get_earliest_time(nwbfile)
 
     # Calculate end time
@@ -56,10 +57,10 @@ def get_data_stream_start_time(nwbfile):
 
     return start_time
 
-def get_modalities(nwbfile):
+def get_modalities(nwbfile: NWBFile) -> list[Modality]:
     modalities = set()
     # determine if ecephys modality present
-    if len(nwbfile.units) > 0:
+    if nwbfile.units and len(nwbfile.units) > 0:
         modalities.add(Modality.ECEPHYS)
 
     electrical_series_types = [c for c in nwbfile.all_children() if isinstance(c, ElectricalSeries)]
@@ -67,13 +68,16 @@ def get_modalities(nwbfile):
         modalities.add(Modality.ECEPHYS)
 
     # determine if behavior modality present (is this the best way to check?)
-    if len(nwbfile.trials) > 0:
+    if nwbfile.trials and len(nwbfile.trials) > 0:
         modalities.add(Modality.BEHAVIOR)
+
+    if nwbfile.imaging_planes and len(nwbfile.imaging_planes) > 0:
+        modalities.add(Modality.POPHYS)
     
     return list(modalities)
 
 
-def get_earliest_time(nwbfile):
+def get_earliest_time(nwbfile: NWBFile) -> datetime | None:
     """Calculate data stream start time from NWB file by finding the earliest timestamp across all TimeSeries"""
     earliest_time = None
 
