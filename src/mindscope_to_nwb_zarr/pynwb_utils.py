@@ -34,7 +34,7 @@ def get_latest_time(nwbfile: NWBFile) -> float | None:
             
     return max_time
 
-def get_acquisition_end_time(nwbfile: NWBFile) -> datetime | None:
+def get_data_stream_end_time(nwbfile: NWBFile) -> datetime | None:
     """Calculate acquisition end time from NWB file by finding the latest timestamp across all TimeSeries"""
     latest_time = get_latest_time(nwbfile)
 
