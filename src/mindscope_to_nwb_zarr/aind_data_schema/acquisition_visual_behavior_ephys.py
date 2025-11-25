@@ -30,39 +30,24 @@ from aind_data_schema_models.stimulus_modality import StimulusModality
 
 import pandas as pd
 from pynwb import read_nwb
-from src.mindscope_to_nwb_zarr.pynwb_utils import get_acquisition_end_time, get_modalities
+from pathlib import Path
+from mindscope_to_nwb_zarr.pynwb_utils import get_acquisition_end_time, get_modalities
+from mindscope_to_nwb_zarr.aind_data_schema.utils import (
+    get_subject_id,
+    get_session_start_time,
+    get_instrument_id,
+    get_total_reward_volume,
+)
 
 # example file for initial debugging
 # TODO - replace with more general ingestion/generation script
 subject_id = 506940
 session_id = 1043752325
-nwbfile_lfp = read_nwb(f"/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-None_probe-1158270876_ecephys.nwb")
-nwbfile = read_nwb(f"/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-20200817T222149.nwb")
-ephys_session_table = pd.read_csv("/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/.cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/ecephys_sessions.csv")
+working_dir = Path("/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/")
+nwbfile_lfp = read_nwb(working_dir / f"data/sub-{subject_id}_ses-None_probe-1158270876_ecephys.nwb")
+nwbfile = read_nwb(working_dir / f"data/sub-{subject_id}_ses-20200817T222149.nwb")
+ephys_session_table = pd.read_csv(working_dir / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/ecephys_sessions.csv")
 session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
-
-
-def get_subject_id(nwbfile, session_info=None):
-    if session_info is not None:
-        assert session_info['mouse_id'].values[0] == nwbfile.subject.subject_id
-    return nwbfile.subject.subject_id
-
-def get_session_start_time(nwbfile, session_info=None):
-    if session_info is not None:
-        assert session_info['date_of_acquisition'].values[0] == nwbfile.session_start_time
-    return nwbfile.session_start_time
-
-def get_instrument_id(nwbfile, session_info=None):
-    instrument = next(iter(nwbfile.devices))
-    if session_info is not None:
-        assert session_info['equipment_name'].values[0] == instrument
-    return instrument
-
-def get_total_reward_volume(nwbfile):
-    if 'reward_volume' in nwbfile.trials.colnames:
-        return float(nwbfile.trials['reward_volume'][:].sum())
-    return None
-
 
 acquisition = Acquisition(
     subject_id=get_subject_id(nwbfile, session_info=session_info),
@@ -92,15 +77,15 @@ acquisition = Acquisition(
                 EphysAssemblyConfig(
                     device_name="EPHYS_1",
                     manipulator=ManipulatorConfig(
-                        device_name=None,
+                        device_name="None", # TODO - fill in
                         coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
-                        local_axis_positions=Translation(),
+                        local_axis_positions=Translation(translation=[0, 0, 0],), # TODO - fill in with correct positions
                     ),
                     probes=[
                         ProbeConfig(
                             device_name="ProbeB",
                             primary_targeted_structure=CCFv3.LC,
-                            other_targeted_structures=None,
+                            other_targeted_structure=None,
                             atlas_coordinate=AtlasCoordinate(
                                 coordinate_system=AtlasLibrary.CCFv3_10um,
                                 translation=[8150, 3250, 7800],
