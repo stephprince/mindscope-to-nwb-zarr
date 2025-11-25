@@ -1,3 +1,5 @@
+import numpy as np
+
 from datetime import timedelta
 from pynwb.base import TimeSeries
 from pynwb.ecephys import ElectricalSeries
@@ -27,7 +29,7 @@ def get_latest_time(nwbfile):
             if "stop_time" in obj.colnames and len(obj["stop_time"]):
                 last_time = float(obj["stop_time"][-1])
             elif "spike_times" in obj.colnames and len(obj["spike_times"]):
-                last_time = max(obj["spike_times"][:])
+                last_time = max(np.asarray(obj["spike_times"].target.data[:]) )
 
             if max_time is None or last_time > max_time:
                 max_time = last_time

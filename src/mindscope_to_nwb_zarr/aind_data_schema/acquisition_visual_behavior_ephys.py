@@ -15,6 +15,9 @@ from aind_data_schema.components.configs import (
     EphysAssemblyConfig,
     ProbeConfig,
     LaserConfig,
+    LickSpoutConfig,
+    Liquid,
+    Valence,
 )
 from aind_data_schema.components.coordinates import (
     Translation,
@@ -24,7 +27,7 @@ from aind_data_schema.components.coordinates import (
     CoordinateSystemLibrary,
 )
 from aind_data_schema.components.stimulus import VisualStimulation, OptoStimulation
-from aind_data_schema_models.units import TimeUnit
+from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
@@ -37,6 +40,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_session_start_time,
     get_instrument_id,
     get_total_reward_volume,
+    get_individual_reward_volume,
 )
 
 # example file for initial debugging
@@ -44,17 +48,52 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
 subject_id = 506940
 session_id = 1043752325
 working_dir = Path("/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/")
+cache_dir = working_dir / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/"
+
+# load nwb files
 nwbfile_lfp = read_nwb(working_dir / f"data/sub-{subject_id}_ses-None_probe-1158270876_ecephys.nwb")
 nwbfile = read_nwb(working_dir / f"data/sub-{subject_id}_ses-20200817T222149.nwb")
-ephys_session_table = pd.read_csv(working_dir / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/ecephys_sessions.csv")
+
+# load metadata files
+ephys_session_table = pd.read_csv(cache_dir / "ecephys_sessions.csv")
+probe_table = pd.read_csv(cache_dir / "probes.csv")
 session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
+if len(session_info) == 0:
+    raise ValueError(f"No session info found for subject_id={subject_id}, session_id={session_id}")
+probe_info = probe_table.query("ecephys_session_id == @session_id")
+
+def get_probe_configs(nwbfile, probe_info):
+    probe_configs = []
+    for device in nwbfile.devices.values():
+        if device.__class__.__name__ == "EcephysProbe":
+            # TODO - this may miss some targeted structures if not an exact string match
+            locations = (nwbfile.electrodes.to_dataframe()
+                         .query('group_name == @device.name')['location'].unique().tolist())
+            targeted_structures = [getattr(CCFv3, l) for l in locations if getattr(CCFv3, l, None) is not None]
+            
+            probe_configs.append(
+                ProbeConfig(
+                    device_name=device.name,
+                    primary_targeted_structure=CCFv3.VIS, # TODO - update if need to be more specific
+                    other_targeted_structure=targeted_structures,
+                    atlas_coordinate=AtlasCoordinate(
+                        coordinate_system=AtlasLibrary.CCFv3_10um,
+                        translation=[8150, 3250, 7800], # TODO - should be target region coordinate
+                    ),
+                    coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB, # TODO - what should this be?
+                    transform=[Translation(translation=[5000, 5000, 0, 1],),], # TODO - what should this be?
+                    notes=None,
+                )
+            )
+    
+    return probe_configs
+
 
 acquisition = Acquisition(
     subject_id=get_subject_id(nwbfile, session_info=session_info),
     specimen_id=None, # TODO - confirm not necessary for these file (unless we want to store both donor + specimen id info)
     acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
-    acquisition_end_time=get_acquisition_end_time(nwbfile), # TODO - update with function from https://github.com/dandi/dandi-cli/pull/1714/
-    experimenters=None, # TODO - determine where to extract
+    acquisition_end_time=get_acquisition_end_time(nwbfile),
     protocol_id=None, # TODO - confirm not shared on protocols.io
     ethics_review_id=None,
     instrument_id=get_instrument_id(nwbfile, session_info=session_info),
@@ -70,8 +109,10 @@ acquisition = Acquisition(
             modalities=get_modalities(nwbfile),
             code=None,
             notes=None,
-            active_devices=[ # TODO - determine active devices names that would apply
-                None
+            active_devices=[ # TODO - determine active devices names that would apply, any other ones
+                "EPHYS_1",
+                "Laser_473nm",
+                "Lick_Spout_1",
             ],
             configurations=[ # TODO - determine which configurations apply to us
                 EphysAssemblyConfig(
@@ -81,36 +122,30 @@ acquisition = Acquisition(
                         coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
                         local_axis_positions=Translation(translation=[0, 0, 0],), # TODO - fill in with correct positions
                     ),
-                    probes=[
-                        ProbeConfig(
-                            device_name="ProbeB",
-                            primary_targeted_structure=CCFv3.LC,
-                            other_targeted_structure=None,
-                            atlas_coordinate=AtlasCoordinate(
-                                coordinate_system=AtlasLibrary.CCFv3_10um,
-                                translation=[8150, 3250, 7800],
-                            ),
-                            coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
-                            transform=[Translation(translation=[5000, 5000, 0, 1],),],
-                            notes=None,
-                        )
-                    ],
+                    probes=get_probe_configs(nwbfile, probe_info),
                 ),
-                LaserConfig(), # TODO - right config to use for optotagging?
+                LaserConfig(
+                    device_name="Laser_473nm", # TODO - determine correct laser name
+                    wavelength=473, # from technical whitepaper
+                    wavelength_unit=SizeUnit.NM,
+                ),
+                LickSpoutConfig(
+                    device_name="Lick_Spout_1", # TODO - determine correct lick spout name
+                    solution=Liquid.WATER,
+                    solution_valence=Valence.POSITIVE, # TODO - is this correct
+                    volume=get_individual_reward_volume(nwbfile), # TODO - what to do if multiple?
+                    volume_unit=VolumeUnit.UL,
+                    relative_position=["Anterior"], # TODO - fill in if available
+                )
             ],
          ),
     ],
-    # TODO - determine best way to divide this task into stimulus epochs
-    # different stimulus epochs for each type of intervals table?
-    # separate active vs. passive if same stimulus set?
-    # also include optotagging?
-    # what are spontaneous presentations?
     stimulus_epochs=[    
         StimulusEpoch(
             stimulus_start_time=nwbfile.intervals['Natural_Images_Lum_Matched_set_ophys_G_2019_presentations']['start_time'][0],
             stimulus_end_time=nwbfile.intervals['Natural_Images_Lum_Matched_set_ophys_G_2019_presentations']['end_time'][-1],
-            stimulus_name="Change detection natural images",
-            code=Code(
+            stimulus_name="Visual change detection task",
+            code=Code( # TODO - acquire additional info about the code used for this task
                 url=None,
                 name=None,
                 version=None,
