@@ -1,5 +1,7 @@
 
 from datetime import datetime, timezone
+import json
+import numpy as np
 import pandas as pd
 from pynwb import NWBFile
 import warnings
@@ -31,17 +33,25 @@ def get_instrument_id(nwbfile: NWBFile, session_info) -> str:
     assert session_info['equipment_name'].values[0] == instrument, "instrument_id mismatch occurred"
     return instrument
 
-def get_total_reward_volume(nwbfile):
+def get_total_reward_volume(nwbfile: NWBFile) -> float | None:
     if 'reward_volume' in nwbfile.trials.colnames:
         return float(nwbfile.trials['reward_volume'][:].sum())
     return None
 
-def get_individual_reward_volume(nwbfile):
+def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
     if 'reward_volume' in nwbfile.trials.colnames:
         volumes = nwbfile.intervals['trials'].to_dataframe()['reward_volume'].unique()
         volumes = volumes[volumes > 0]
         if len(volumes) > 1:
-            warnings.warn("Multiple reward volumes found")
+            warnings.warn(f"Multiple non-zero reward volumes found: {volumes}. Using the first one.")
         return float(volumes[0])
     
     return None
+
+
+class NumpyJsonEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle NumPy data types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.floating, np.ndarray)):
+            return obj.tolist()
+        return super().default(obj)
