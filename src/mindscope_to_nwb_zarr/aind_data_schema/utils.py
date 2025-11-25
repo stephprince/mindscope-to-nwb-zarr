@@ -40,7 +40,8 @@ def get_individual_reward_volume(nwbfile):
     if 'reward_volume' in nwbfile.trials.colnames:
         volumes = nwbfile.intervals['trials'].to_dataframe()['reward_volume'].unique()
         volumes = volumes[volumes > 0]
-        if len(volumes) > 0:
-            warnings.warn("Multiple reward volumes found, using first value")
-            return float(volumes[0])
+        if len(volumes) > 1:
+            warnings.warn("Multiple reward volumes found")
+        return float(volumes[0])
+    
     return None
