@@ -68,7 +68,7 @@ acquisition = Acquisition(
     subject_id=get_subject_id(nwbfile, session_info=session_info),
     specimen_id=None, # TODO - confirm not necessary for these file (unless we want to store both donor + specimen id info)
     acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
-    acquisition_end_time=get_acquisition_end_time(nwbfile),
+    acquisition_end_time=get_acquisition_end_time(nwbfile), # TODO - update with function from https://github.com/dandi/dandi-cli/pull/1714/
     experimenters=None, # TODO - determine where to extract
     protocol_id=None, # TODO - confirm not shared on protocols.io
     ethics_review_id=None,
@@ -80,7 +80,7 @@ acquisition = Acquisition(
     maintenance=None,
     data_streams=[ # TODO - fill in, should behavior + ephys be one data stream or multiple? what is the point of multiple streams?
         DataStream(
-            stream_start_time=datetime(year=2023, month=4, day=25, hour=2, minute=45, second=0, tzinfo=timezone.utc),
+            stream_start_time=None, # TODO - fill in from timeseries (first value of group)
             stream_end_time=datetime(year=2023, month=4, day=25, hour=3, minute=16, second=0, tzinfo=timezone.utc),
             modalities=get_modalities(nwbfile),
             code=None,
