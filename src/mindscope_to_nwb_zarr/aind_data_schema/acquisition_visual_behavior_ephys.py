@@ -1,6 +1,7 @@
 """Generates an example JSON file for visual behavior ephys acquisition"""
 
 import numpy as np
+from datetime import timedelta
 
 from aind_data_schema.components.identifiers import Software, Code
 from aind_data_schema.core.acquisition import (
@@ -47,6 +48,10 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
 
 # example file for initial debugging
 # TODO - replace with more general ingestion/generation script
+# TODO - test with pure behavior files
+# TODO - add stimulation parameters for visual stim
+# TODO - add performance metrics for behavior if available
+# TODO - fill in additional missing sections
 subject_id = 506940
 session_id = 1043752325
 working_dir = Path("/Users/stephprince/Documents/code/mindscope-to-nwb-zarr/")
@@ -115,7 +120,7 @@ def get_optostimulation_parameters(optogenetic_stimulation):
                 pulse_train_interval_unit=TimeUnit.S,
                 baseline_duration=0.0, # TODO - is whole prior recording considered baseline? add if needed
                 baseline_duration_unit=TimeUnit.S,
-                notes=f"{pulse_shape} with three light levels: {df['level'].unique().tolist()}",
+                notes=f"{df['condition'].values[0]} with three light levels: {df['level'].unique().tolist()}",
             )
         )
 
@@ -141,8 +146,8 @@ def get_stimulation_epochs(nwbfile):
             intervals_table_filtered = nwbfile.intervals[table_key].to_dataframe()
 
         stim_epoch = StimulusEpoch(
-                stimulus_start_time=intervals_table_filtered['start_time'].values[0],
-                stimulus_end_time=intervals_table_filtered['stop_time'].values[-1],
+                stimulus_start_time=timedelta(seconds=intervals_table_filtered['start_time'].values[0]) + nwbfile.session_start_time,
+                stimulus_end_time=timedelta(seconds=intervals_table_filtered['stop_time'].values[-1]) + nwbfile.session_start_time,
                 stimulus_name=stimulus_name,
                 code=Code( # TODO - acquire additional info about the code used for this task
                     url="None",
@@ -173,15 +178,15 @@ def get_stimulation_epochs(nwbfile):
                 notes=None,
                 active_devices=["None"],
                 training_protocol_name=None,
-                curriculum_status=None, # TODO - add curriculum stage to behavior training parts
+                curriculum_status=None, # TODO - add curriculum stage to behavior training parts and familiar / novel
             )
         stimulation_epochs.append(stim_epoch)
     
     if 'optotagging' in nwbfile.processing:
         optogenetic_stimulation = nwbfile.processing['optotagging']['optogenetic_stimulation']
         opto_stim_epoch = StimulusEpoch(
-            stimulus_start_time=optogenetic_stimulation['start_time'][0],
-            stimulus_end_time=optogenetic_stimulation['stop_time'][-1],
+            stimulus_start_time=timedelta(seconds=optogenetic_stimulation['start_time'][0]) + nwbfile.session_start_time,
+            stimulus_end_time=timedelta(seconds=optogenetic_stimulation['stop_time'][-1]) + nwbfile.session_start_time,
             stimulus_name="Optotagging",
             code=Code(
                 url="None",
