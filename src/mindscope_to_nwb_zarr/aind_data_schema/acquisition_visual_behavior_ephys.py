@@ -1,6 +1,7 @@
 """Generates an example JSON file for visual behavior ephys acquisition"""
 
 import numpy as np
+import warnings
 from datetime import timedelta
 
 from aind_data_schema.components.identifiers import Software, Code
@@ -44,12 +45,12 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_instrument_id,
     get_total_reward_volume,
     get_individual_reward_volume,
+    get_curriculum_status,
 )
 
 # example file for initial debugging
 # TODO - replace with more general ingestion/generation script
 # TODO - test with pure behavior files
-# TODO - add stimulation parameters for visual stim
 # TODO - add performance metrics for behavior if available
 # TODO - fill in additional missing sections
 subject_id = 506940
@@ -65,9 +66,13 @@ nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-20200817T222149.nwb")
 
 # load metadata files
 ephys_session_table = pd.read_csv(cache_dir / "ecephys_sessions.csv")
+behavior_session_table = pd.read_csv(cache_dir / "behavior_sessions.csv")
 session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
-if len(session_info) == 0:
-    raise ValueError(f"No session info found for subject_id={subject_id}, session_id={session_id}")
+behavior_session_info = behavior_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
+if len(session_info) == 0 and len(behavior_session_info) == 1:
+    warnings.warn("Session info only found for behavioral data - defaulting to behavior only session")
+elif len(session_info) == 0 and len(behavior_session_info) == 0:
+    raise ValueError(f"No ephys session info found for subject_id={subject_id}, session_id={session_id}")
 
 def get_probe_configs(nwbfile):
     probe_configs = []
@@ -129,6 +134,49 @@ def get_optostimulation_parameters(optogenetic_stimulation):
 
     return opto_stimulation
 
+def get_visual_stimulation_prameters(table_key: str, intervals_table: pd.DataFrame) -> VisualStimulation:
+    # TODO - better way to select for different parameter options, see if there are any others to include
+    if "gabor" in table_key:
+        parameters = {"orientations": intervals_table['orientation'].unique().tolist(),
+                      "orientation_unit": "degrees",
+                      "spatial_frequencies": intervals_table['spatial_frequency'].unique().tolist(),
+                      "spatial_frequency_unit": "cycles/degree",
+                      "temporal_frequencies": intervals_table['temporal_frequency'].unique().tolist(),
+                      "temporal_frequency_unit": "Hz",
+                      "contrasts": intervals_table['contrast'].unique().tolist(),
+                      "contrast_unit": "percent",
+                      "durations": intervals_table['duration'].unique().tolist(),
+                      "duration_unit": "S"
+        }
+    elif "flash" in table_key:
+        parameters = {"contrasts": intervals_table['contrast'].unique().tolist(),
+                      "contrast_unit": "percent",
+                      "durations": intervals_table['duration'].unique().tolist(),
+                      "duration_unit": "S"
+            
+        }
+    elif "Natural_Images" in table_key:
+        parameters = {"mean_luminance": 50, # from technical whitepaper
+                      "mean_luminance_units": "cd/m2",
+                      "durations": intervals_table['duration'].unique().tolist(),
+                      "duration_unit": "S",
+                      "image_names": intervals_table["image_name"].unique().tolist()
+                      }
+    elif "spontaneous" in table_key:
+        parameters = {"durations": intervals_table['duration'].unique().tolist(),
+                      "duration_unit": "S"
+                      }
+    else:
+        parameters = {}
+
+    visual_stimulation = VisualStimulation(
+                            stimulus_name=table_key,
+                            stimulus_parameters=parameters,
+                            stimulus_template_name=["None"],
+                            notes=None,
+                        )
+    return visual_stimulation
+
 def get_stimulation_epochs(nwbfile):
     stimulation_epochs = []
     stimulation_mapping = {"Active behavior": "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations",
@@ -162,26 +210,16 @@ def get_stimulation_epochs(nwbfile):
                     language_version=None,
                     input_data=None,
                     core_dependency=Software(
-                        name="None",
-                        version=None,), # TODO - add software if available
-                    parameters=VisualStimulation(
-                        stimulus_name=table_key,
-                        stimulus_parameters={ # TODO - these are from template, update based on nwbfile data
-                            "grating_orientations": [0, 45, 90, 135],
-                            "grating_orientation_unit": "degrees",
-                            "grating_spatial_frequencies": [0.02, 0.04, 0.08, 0.16, 0.32],
-                            "grating_spatial_frequency_unit": "cycles/degree",
-                        },
-                        stimulus_template_name=["None"],
-                        notes=None,
-                    ),
+                        name="PsychoPy",
+                        version=None,), # TODO - add software version if available
+                    parameters=get_visual_stimulation_prameters(table_key, intervals_table_filtered),
                 ),
                 stimulus_modalities=[StimulusModality.VISUAL],
                 performance_metrics=None, # TODO - see if these are accessible anywhere?
                 notes=None,
                 active_devices=["None"],
-                training_protocol_name=None,
-                curriculum_status=None, # TODO - add curriculum stage to behavior training parts and familiar / novel
+                training_protocol_name=session_info["session_type"].values[0],  # e.g., "TRAINING_0_gratings_autorewards_15min"
+                curriculum_status=get_curriculum_status(session_info),
             )
         stimulation_epochs.append(stim_epoch)
     
@@ -243,7 +281,7 @@ acquisition = Acquisition(
             code=None,
             notes=None,
             active_devices=[ # TODO - determine all active devices names that would apply and their names
-                "EPHYS_1",
+                "EPHYS_1", # TODO - add conditional for behavioral data to select appropriate devices
                 "Laser_1",
                 "Lick_Spout_1",
             ],
