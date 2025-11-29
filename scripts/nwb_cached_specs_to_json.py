@@ -8,9 +8,12 @@ for each namespace and version, converts the cached specs to proper JSON files.
 Output files are named with pattern: {namespace}_{version}_{spec_file}.json, e.g.:
 core_2.2.2_nwb.base.json
 
+By default, output is saved to data/exported_specs/{input_filename_with_periods_as_underscores}/
+
 Example usage:
-    python scripts/nwb_cached_specs_to_json.py path/to/file.nwb -o output_directory
-    python scripts/nwb_cached_specs_to_json.py path/to/file.nwb.zarr -o output_directory
+    python scripts/nwb_cached_specs_to_json.py path/to/file.nwb
+    python scripts/nwb_cached_specs_to_json.py path/to/file.nwb.zarr
+    python scripts/nwb_cached_specs_to_json.py path/to/file.nwb -o custom_output_directory
 """
 
 import json
@@ -18,6 +21,7 @@ import argparse
 from pathlib import Path
 import zarr
 import h5py
+import shutil
 
 
 def extract_specs_from_zarr(zarr_path: str, output_dir: str):
@@ -37,8 +41,11 @@ def extract_specs_from_zarr(zarr_path: str, output_dir: str):
 
     specs_group = store['specifications']
 
-    # Create output directory
+    # Clear output directory if it exists, then create it
     output_path = Path(output_dir)
+    if output_path.exists():
+        shutil.rmtree(output_path)
+        print(f"Removed existing directory: {output_path}")
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Track statistics
@@ -109,8 +116,11 @@ def extract_specs_from_hdf5(hdf5_path: str, output_dir: str):
 
         specs_group = f['specifications']
 
-        # Create output directory
+        # Clear output directory if it exists, then create it
         output_path = Path(output_dir)
+        if output_path.exists():
+            shutil.rmtree(output_path)
+            print(f"Removed existing directory: {output_path}")
         output_path.mkdir(parents=True, exist_ok=True)
 
         # Track statistics
@@ -177,14 +187,21 @@ def main():
     parser.add_argument(
         '-o', '--output-dir',
         type=str,
-        default='extracted_specs',
-        help='Output directory for JSON files (default: extracted_specs)'
+        default=None,
+        help='Output directory for JSON files (default: data/exported_specs/{input_filename_with_underscores})'
     )
 
     args = parser.parse_args()
 
     # Determine file type based on extension or directory
     nwb_path = Path(args.nwb_path)
+
+    # Generate default output directory if not specified
+    if args.output_dir is None:
+        # Get the filename (with extension) and replace periods with underscores
+        input_filename = nwb_path.name
+        sanitized_filename = input_filename.replace('.', '_')
+        args.output_dir = f'data/exported_specs/{sanitized_filename}'
 
     if nwb_path.is_dir() or str(nwb_path).endswith('.zarr'):
         print(f"Detected Zarr store: {nwb_path}")
