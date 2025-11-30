@@ -1,8 +1,12 @@
 """Generates an example JSON file for visual behavior ephys acquisition"""
 
-import numpy as np
 import warnings
+import numpy as np
+import pandas as pd
+
 from datetime import timedelta
+from pathlib import Path
+from pynwb import read_nwb
 
 from aind_data_schema.components.identifiers import Software, Code
 from aind_data_schema.core.acquisition import (
@@ -31,9 +35,6 @@ from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit, Freque
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
-import pandas as pd
-from pynwb import read_nwb
-from pathlib import Path
 from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_start_time,
     get_data_stream_end_time, 
@@ -53,26 +54,28 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
 # TODO - test with pure behavior files
 # TODO - add performance metrics for behavior if available
 # TODO - fill in additional missing sections
-subject_id = 506940
-session_id = 1043752325
 
-# Get the repository root (3 levels up from this file)
+behavior_only = True # set to True to test with behavior only session
 repo_root = Path(__file__).parent.parent.parent.parent
 cache_dir = repo_root / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/"
 
-# load nwb files
-nwbfile_lfp = read_nwb(repo_root / f"data/sub-{subject_id}_ses-None_probe-1158270876_ecephys.nwb")
-nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-20200817T222149.nwb")
+subject_id = 506940
+if behavior_only:
+    session_id = 1014008383
+    nwbfile = read_nwb(repo_root / f"data/behavior_session_{session_id}.nwb")
+else:
+    session_id = 1043752325
+    # nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-20200817T222149.nwb")
+    nwbfile = read_nwb(repo_root / f"data/ecephys_session_{session_id}.nwb")
 
 # load metadata files
 ephys_session_table = pd.read_csv(cache_dir / "ecephys_sessions.csv")
 behavior_session_table = pd.read_csv(cache_dir / "behavior_sessions.csv")
 session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
-behavior_session_info = behavior_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
+behavior_session_info = behavior_session_table.query("mouse_id == @subject_id and behavior_session_id == @session_id")
 if len(session_info) == 0 and len(behavior_session_info) == 1:
     warnings.warn("Session info only found for behavioral data - defaulting to behavior only session")
-elif len(session_info) == 0 and len(behavior_session_info) == 0:
-    raise ValueError(f"No ephys session info found for subject_id={subject_id}, session_id={session_id}")
+    session_info = behavior_session_info
 
 def get_probe_configs(nwbfile):
     probe_configs = []
@@ -134,71 +137,36 @@ def get_optostimulation_parameters(optogenetic_stimulation):
 
     return opto_stimulation
 
-def get_visual_stimulation_prameters(table_key: str, intervals_table: pd.DataFrame) -> VisualStimulation:
-    # TODO - better way to select for different parameter options, see if there are any others to include
-    if "gabor" in table_key:
-        parameters = {"orientations": intervals_table['orientation'].unique().tolist(),
-                      "orientation_unit": "degrees",
-                      "spatial_frequencies": intervals_table['spatial_frequency'].unique().tolist(),
-                      "spatial_frequency_unit": "cycles/degree",
-                      "temporal_frequencies": intervals_table['temporal_frequency'].unique().tolist(),
-                      "temporal_frequency_unit": "Hz",
-                      "contrasts": intervals_table['contrast'].unique().tolist(),
-                      "contrast_unit": "percent",
-                      "durations": intervals_table['duration'].unique().tolist(),
-                      "duration_unit": "S"
-        }
-    elif "flash" in table_key:
-        parameters = {"contrasts": intervals_table['contrast'].unique().tolist(),
-                      "contrast_unit": "percent",
-                      "durations": intervals_table['duration'].unique().tolist(),
-                      "duration_unit": "S"
-            
-        }
-    elif "Natural_Images" in table_key:
-        parameters = {"mean_luminance": 50, # from technical whitepaper
-                      "mean_luminance_units": "cd/m2",
-                      "durations": intervals_table['duration'].unique().tolist(),
-                      "duration_unit": "S",
-                      "image_names": intervals_table["image_name"].unique().tolist()
-                      }
-    elif "spontaneous" in table_key:
-        parameters = {"durations": intervals_table['duration'].unique().tolist(),
-                      "duration_unit": "S"
-                      }
-    else:
-        parameters = {}
+def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFrame) -> VisualStimulation:
+    # TODO - determine if there are any other parameters to include
+    # NOTE - parameter serialization to JSON is not showing up correctly, also an issue in the example file
+    possible_parameters_and_units = {"orientation": "degrees",
+                                     "spatial_frequency": "cycles/degree",
+                                     "temporal_frequency": "Hz",
+                                     "contrast": "percent",
+                                     "duration": "S",
+                                     "phase": None,
+                                     "image_name": None,
+                                     "image_set": None,}
+    parameters = {}
+    for param_key, param_unit in possible_parameters_and_units.items():
+        if param_key in intervals_table.columns:
+            parameters.update({param_key: intervals_table[param_key].unique().tolist()})
+            if param_unit is not None:
+                parameters.update({f"{param_key}_unit": param_unit})
 
     visual_stimulation = VisualStimulation(
                             stimulus_name=table_key,
                             stimulus_parameters=parameters,
-                            stimulus_template_name=["None"],
+                            stimulus_template_name=intervals_table['stimulus_name'].unique().tolist(),
                             notes=None,
                         )
     return visual_stimulation
 
-def get_stimulation_epochs(nwbfile):
-    stimulation_epochs = []
-    stimulation_mapping = {"Active behavior": "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations",
-                           "Gabors": "gabor_20_deg_250ms_presentations",
-                           "Spontaneous": "spontaneous_presentations",
-                           "Passive replay": "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations",
-                           "Full-field flashes": "flash_250ms_presentations",}
-
-    for stimulus_name, table_key in stimulation_mapping.items():
-        # split active and passive sessions into two stimulation epochs
-        if table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations" and stimulus_name == "Active behavior":
-            intervals_table_filtered = (nwbfile.intervals[table_key].to_dataframe()
-                                        .query('active == True'))
-        elif table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations" and stimulus_name == "Passive replay":
-            intervals_table_filtered = (nwbfile.intervals[table_key].to_dataframe()
-                                        .query('active == False'))
-        else:
-            intervals_table_filtered = nwbfile.intervals[table_key].to_dataframe()
-
-        stim_epoch = StimulusEpoch(
-                stimulus_start_time=timedelta(seconds=intervals_table_filtered['start_time'].values[0]) + nwbfile.session_start_time,
-                stimulus_end_time=timedelta(seconds=intervals_table_filtered['stop_time'].values[-1]) + nwbfile.session_start_time,
+def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, intervals_table: pd.DataFrame) -> StimulusEpoch:
+    return StimulusEpoch(
+                stimulus_start_time=timedelta(seconds=intervals_table['start_time'].values[0]) + nwbfile.session_start_time,
+                stimulus_end_time=timedelta(seconds=intervals_table['stop_time'].values[-1]) + nwbfile.session_start_time,
                 stimulus_name=stimulus_name,
                 code=Code( # TODO - acquire additional info about the code used for this task
                     url="None",
@@ -212,7 +180,7 @@ def get_stimulation_epochs(nwbfile):
                     core_dependency=Software(
                         name="PsychoPy",
                         version=None,), # TODO - add software version if available
-                    parameters=get_visual_stimulation_prameters(table_key, intervals_table_filtered),
+                    parameters=get_visual_stimulation_parameters(table_key, intervals_table),
                 ),
                 stimulus_modalities=[StimulusModality.VISUAL],
                 performance_metrics=None, # TODO - see if these are accessible anywhere?
@@ -221,7 +189,40 @@ def get_stimulation_epochs(nwbfile):
                 training_protocol_name=session_info["session_type"].values[0],  # e.g., "TRAINING_0_gratings_autorewards_15min"
                 curriculum_status=get_curriculum_status(session_info),
             )
-        stimulation_epochs.append(stim_epoch)
+
+def get_stimulation_epochs(nwbfile):
+    # loop through all intervals tables
+    stimulation_epochs = []
+    stimulation_type = ["Gabors", "Spontaneous", "Passive replay", "Full-field flashes", "Grating"] # TODO - determine if any other types to consider
+    for table_key, intervals_table in nwbfile.intervals.items():
+        # skip generic trials table that contains behavioral data
+        if table_key == "trials":
+            continue
+        # split active and passive behavior sessions into different stimulus epochs
+        elif table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations":
+            active_intervals = intervals_table.to_dataframe()['active'].query('active == True')
+            stimulus_name = "Active behavior"
+            stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
+                                                            table_key=table_key, 
+                                                            intervals_table=active_intervals)
+            stimulation_epochs.append(stim_epoch)
+
+            passive_intervals = intervals_table.to_dataframe()['active'].query('active == False')
+            stimulus_name = "Passive replay"
+            stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
+                                                            table_key=table_key, 
+                                                            intervals_table=passive_intervals)
+            stimulation_epochs.append(stim_epoch)
+        else:
+            intervals_table_filtered = intervals_table.to_dataframe()
+            stimulus_name = next((stim for stim in stimulation_type if stim.lower() in table_key), None)
+            assert stimulus_name is not None, f"Associated stimulus type for intervals table was not found"
+
+            stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
+                                                              table_key=table_key, 
+                                                              intervals_table=intervals_table_filtered)
+
+            stimulation_epochs.append(stim_epoch)
     
     if 'optotagging' in nwbfile.processing:
         optogenetic_stimulation = nwbfile.processing['optotagging']['optogenetic_stimulation']
@@ -329,4 +330,4 @@ acquisition = Acquisition(
 if __name__ == "__main__":
     serialized = acquisition.model_dump_json()
     deserialized = Acquisition.model_validate_json(serialized)
-    deserialized.write_standard_file(prefix="ephys_visual_behavior")
+    deserialized.write_standard_file(prefix=repo_root / f"data/schema/ephys_visual_behavior_{session_id}")
