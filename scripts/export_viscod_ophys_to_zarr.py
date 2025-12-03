@@ -43,9 +43,9 @@ class CustomEcephysSpecimenMapper(ObjectMapper):
 
 
 with NWBHDF5IO(filename, 'r') as read_io:
-    manager = read_io.manager
-    EcephysSpecimen = manager.type_map.get_dt_container_cls('EcephysSpecimen', 'ndx-aibs-ecephys')
-    manager.type_map.register_map(EcephysSpecimen, CustomEcephysSpecimenMapper)
+    # manager = read_io.manager
+    # EcephysSpecimen = manager.type_map.get_dt_container_cls('EcephysSpecimen', 'ndx-aibs-ecephys')
+    # manager.type_map.register_map(EcephysSpecimen, CustomEcephysSpecimenMapper)
 
     # Reading the NWB file will cause an expected warning:
     # Ignoring the following cached namespace(s) because another version is already loaded:
@@ -53,6 +53,7 @@ with NWBHDF5IO(filename, 'r') as read_io:
     # The loaded extension(s) may not be compatible with the cached extension(s) in the file.
     # Please check the extension documentation and ignore this warning if these versions are compatible.
     
+
     with NWBZarrIO(zarr_filename, mode='w') as export_io:
         export_io.export(src_io=read_io, write_args=dict(link_data=False))
 
