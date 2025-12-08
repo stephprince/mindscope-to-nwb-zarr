@@ -73,6 +73,7 @@ behavior_session_info = behavior_session_table.query("mouse_id == @subject_id an
 if len(session_info) == 0 and len(behavior_session_info) == 1:
     warnings.warn("Session info only found for behavioral data - defaulting to behavior only session")
     session_info = behavior_session_info
+assert nwbfile.session_description == session_info['session_type'].values[0]
 
 def get_probe_configs(nwbfile):
     probe_configs = []
@@ -260,7 +261,7 @@ acquisition = Acquisition(
     acquisition_end_time=get_data_stream_end_time(nwbfile),
     ethics_review_id=None, #TODO - obtain if available - YES, @Saskia
     instrument_id=get_instrument_id(nwbfile, session_info=session_info),
-    acquisition_type=nwbfile.session_description, # TODO - pull from session_type through allensdk (e..g 3sessionA, 3sessionB, BrainObservatory1.1)
+    acquisition_type=nwbfile.session_description,
     notes=None,
     coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct coordinate system library, will also be defined with instrument (not required to be same as acquisition)
     # coordinate system info might not be available, will check @Saskia
