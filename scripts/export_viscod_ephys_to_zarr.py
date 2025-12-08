@@ -77,4 +77,4 @@ with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
 
     # validate file with IO object
     # TODO - waiting to fix hdmf-zarr related validation issues before including
-    # validate(io=nwbfile)  
+    # validate(io=zarr_io)  
