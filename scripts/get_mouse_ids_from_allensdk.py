@@ -65,6 +65,7 @@ with open(Path(output_dir) / 'experiment_containers.json', 'r') as f:
     experiment_containers = json.load(f)
 
 specimen_ids = set(list({e["specimen_id"] for e in experiment_containers})) # These match the subject IDs on DANDI
+donor_ids = set(list({e["specimen"]["donor_id"] for e in experiment_containers})) 
 specimen_ids_filtered = [s for s in specimen_ids if s <= 699502603] # dandiset and S3 bucket only includes data from these mouse ids
 donor_name_ids = set([s["donor_name"] for s in sessions])
 mouse_ids['visual_coding_ophys'] = specimen_ids_filtered
