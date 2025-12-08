@@ -1,10 +1,12 @@
 
-from datetime import datetime, timezone
 import json
 import numpy as np
 import pandas as pd
-from pynwb import NWBFile
 import warnings
+
+from datetime import datetime, timezone
+from pynwb import NWBFile
+
 
 def get_subject_id(nwbfile: NWBFile, session_info: pd.DataFrame) -> str:
     """Get the subject ID from the NWB file, cross-checked with the session info. e.g., "457841"."""
@@ -48,6 +50,13 @@ def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
     
     return None
 
+def get_curriculum_status(session_info):
+    # NOTE - nwbfile.lab_meta_data['task_parameters'] also has several task parameters for behavior files that might be useful to record
+    keys = ["experience_level", "image_set", "session_number", "prior_exposures_to_image_set",
+            "prior_exposures_to_omissions", "prior_exposures_to_session_type"]
+    curriculum_dict = {k: session_info[k].values[0] for k in keys if k in session_info.columns}
+    
+    return json.dumps(curriculum_dict, cls=NumpyJsonEncoder)
 
 class NumpyJsonEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle NumPy data types."""
