@@ -147,7 +147,6 @@ def get_optostimulation_parameters(optogenetic_stimulation):
 
 def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFrame) -> VisualStimulation:
     # TODO - determine if there are any other parameters to include
-    # NOTE - parameter serialization to JSON is not showing up correctly, also an issue in the example file, submit an issue to fix
     possible_parameters_and_units = {"orientation": "degrees",
                                      "spatial_frequency": "cycles/degree",
                                      "temporal_frequency": "Hz",
@@ -184,7 +183,7 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
                         name="PsychoPy",
                         version=None,
                     ), # TODO - from whitepaper, add version if available @Saskia
-                    parameters=get_visual_stimulation_parameters(table_key, intervals_table),
+                    parameters={table_key: get_visual_stimulation_parameters(table_key, intervals_table)},
                 ),
                 stimulus_modalities=[StimulusModality.VISUAL],
                 performance_metrics=None, # TODO - see if these are accessible anywhere?
