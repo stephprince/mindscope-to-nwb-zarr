@@ -58,6 +58,10 @@ def get_curriculum_status(session_info):
     
     return json.dumps(curriculum_dict, cls=NumpyJsonEncoder)
 
+def serialized_dict(**kwargs) -> str:
+    return json.dumps(dict(**kwargs), cls=NumpyJsonEncoder)
+
+
 class NumpyJsonEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle NumPy data types."""
     def default(self, obj):
