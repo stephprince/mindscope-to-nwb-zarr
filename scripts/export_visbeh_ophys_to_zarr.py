@@ -34,3 +34,7 @@ with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
         save_report(report_file_path=f"data/{Path(zarr_filename).stem}_report.txt", 
                     formatted_messages=formatted_messages,
                     overwrite=True)
+        
+    # validate file with IO object
+    # TODO - waiting to fix hdmf-zarr related validation issues before including
+    # validate(io=zarr_io)  

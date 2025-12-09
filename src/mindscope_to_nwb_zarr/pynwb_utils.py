@@ -26,6 +26,8 @@ def get_latest_time(nwbfile: NWBFile) -> float | None:
                 last_time = float(obj["stop_time"][-1])
             elif "spike_times" in obj.colnames and len(obj["spike_times"]):
                 last_time = max(np.asarray(obj["spike_times"].target.data[:]))
+            else:
+                continue
         else:
             continue
 
@@ -94,6 +96,8 @@ def get_earliest_time(nwbfile: NWBFile) -> datetime | None:
                 start_time = float(obj["start_time"][0])
             elif "spike_times" in obj.colnames and len(obj["spike_times"]):
                 start_time = min(np.asarray(obj["spike_times"].target.data[:]) )
+            else:
+                continue
         else:
             continue
 

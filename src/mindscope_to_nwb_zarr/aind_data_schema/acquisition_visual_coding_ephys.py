@@ -1,6 +1,5 @@
-"""Generates an example JSON file for visual behavior ephys acquisition"""
+"""Generates an example JSON file for visual coding ephys acquisition"""
 
-import warnings
 import numpy as np
 import pandas as pd
 
@@ -20,9 +19,6 @@ from aind_data_schema.components.configs import (
     EphysAssemblyConfig,
     ProbeConfig,
     LaserConfig,
-    LickSpoutConfig,
-    Liquid,
-    Valence,
 )
 from aind_data_schema.components.coordinates import (
     Translation,
@@ -30,52 +26,29 @@ from aind_data_schema.components.coordinates import (
     AtlasLibrary,
     CoordinateSystemLibrary,
 )
-from aind_data_schema.components.stimulus import VisualStimulation, PulseShape
+from aind_data_schema.components.stimulus import VisualStimulation, OptoStimulation, PulseShape
 from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit, FrequencyUnit, MassUnit
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
+from mindscope_to_nwb_zarr.aind_data_schema.custom_stimulus import OptotaggingStimulation
 from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_start_time,
     get_data_stream_end_time, 
     get_modalities
 )
-from mindscope_to_nwb_zarr.aind_data_schema.custom_stimulus import OptotaggingStimulation
-from mindscope_to_nwb_zarr.aind_data_schema.utils import (
-    get_subject_id,
-    get_session_start_time,
-    get_instrument_id,
-    get_total_reward_volume,
-    get_individual_reward_volume,
-    get_curriculum_status,
-)
 
 # example file for initial debugging
 # TODO - replace with more general ingestion/generation script
+# TODO - allensdk metadata more difficult for this file, need to cross-check or no?
 
-behavior_only = False # set to True to test with behavior only session
 repo_root = Path(__file__).parent.parent.parent.parent
-cache_dir = repo_root / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/"
-
-subject_id = 506940
-if behavior_only:
-    session_id = 1014008383
-    nwbfile = read_nwb(repo_root / f"data/behavior_session_{session_id}.nwb")
-else:
-    session_id = 1043752325
-    nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-20200817T222149.nwb")
-    # nwbfile = read_nwb(repo_root / f"data/ecephys_session_{session_id}.nwb")
+cache_dir = repo_root / ".cache/visual_coding_ephys_cache_dir/"
+subject_id = "703279277"
+session_id = "719161530"
+nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-{session_id}_probe-729445654_ecephys.nwb")
 
 # load metadata files
-ephys_session_table = pd.read_csv(cache_dir / "ecephys_sessions.csv")
-behavior_session_table = pd.read_csv(cache_dir / "behavior_sessions.csv")
-session_info = ephys_session_table.query("mouse_id == @subject_id and ecephys_session_id == @session_id")
-behavior_session_info = behavior_session_table.query("mouse_id == @subject_id and behavior_session_id == @session_id")
-if len(session_info) == 0 and len(behavior_session_info) == 1:
-    warnings.warn("Session info only found for behavioral data - defaulting to behavior only session")
-    session_info = behavior_session_info
-assert nwbfile.session_description == session_info['session_type'].values[0]
-
 def get_probe_configs(nwbfile):
     probe_configs = []
     all_targeted_structures = []
@@ -83,7 +56,7 @@ def get_probe_configs(nwbfile):
         if device.__class__.__name__ == "EcephysProbe":
             locations = (nwbfile.electrodes.to_dataframe()
                          .query('group_name == @device.name')['location'].unique().tolist())
-            locations = [l for l in locations if l]  # Filter out empty strings
+            locations = [l for l in locations if l]
             all_structures = [getattr(CCFv3, l.upper()) for l in locations if getattr(CCFv3, l.upper(), None) is not None]
             targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')] # get targeted visual area
             assert len(all_structures) == len(locations), "All probe locations not found in CCFv3 enum"
@@ -117,10 +90,10 @@ def get_optostimulation_parameters(optogenetic_stimulation):
     opto_df = optogenetic_stimulation.to_dataframe()
     for stimulus_name, df in opto_df.groupby('stimulus_name'):
         assert len(df['condition'].unique()) == 1, "Multiple pulse shapes found for stimulus_name"
-        if 'square' in df['condition'].values[0].lower():
-            pulse_shape = PulseShape.SQUARE
-        elif 'cosine' in df['condition'].values[0].lower():
-            pulse_shape = PulseShape.SINE
+        if 'pulse' in df['condition'].values[0]:
+            pulse_shape = PulseShape.SQUARE # TODO - double check if this is best descriptor for both slow and fast pulses
+        elif 'cosine' in df['condition'].values[0]:
+            pulse_shape = PulseShape.RAMP # TODO - described as "raised cosine ramp" in whitepaper, could define new enum if needed
 
         # get pulse duration and light levels used
         light_levels = sorted(df['level'].unique().tolist())
@@ -185,36 +158,20 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
                     parameters={table_key: get_visual_stimulation_parameters(table_key, intervals_table)},
                 ),
                 stimulus_modalities=[StimulusModality.VISUAL],
-                performance_metrics=None, # TODO - see if these are accessible anywhere?
                 notes=None,
                 active_devices=["None"],
-                training_protocol_name=session_info["session_type"].values[0],  # e.g., "TRAINING_0_gratings_autorewards_15min"
-                curriculum_status=get_curriculum_status(session_info),
             )
 
 def get_stimulation_epochs(nwbfile):
     # loop through all intervals tables
     stimulation_epochs = []
-    stimulation_type = ["Gabor", "Spontaneous", "Passive replay", "Flash", "Grating"] # TODO - determine if any other types to consider
+    stimulation_type = ["Drifting Gratings", "Static Gratings", "Natural Movie One", "Natural Movie Three", "Natural Images",
+        "Gabor", "Flashes", "Contrast tuning", "Spontaneous",  "Dot Motion"] 
+    # TODO - determine if any other stimulation types to consider
     for table_key, intervals_table in nwbfile.intervals.items():
-        # skip generic trials table that contains behavioral data
-        if table_key == "trials":
+        # skip generic trials table that contains behavioral data and invalid_times sections
+        if table_key in ["trials", "invalid_times"]:
             continue
-        # split active and passive behavior sessions into different stimulus epochs
-        elif table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations":
-            active_intervals = intervals_table.to_dataframe().query('active == True')
-            stimulus_name = "Change detection - Active"
-            stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
-                                                            table_key=table_key, 
-                                                            intervals_table=active_intervals)
-            stimulation_epochs.append(stim_epoch)
-
-            passive_intervals = intervals_table.to_dataframe().query('active == False')
-            stimulus_name = "Change detection - Passive replay"
-            stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
-                                                            table_key=table_key, 
-                                                            intervals_table=passive_intervals)
-            stimulation_epochs.append(stim_epoch)
         else:
             intervals_table_filtered = intervals_table.to_dataframe()
             stimulus_name = next((stim for stim in stimulation_type if stim.lower() in table_key), None)
@@ -239,6 +196,7 @@ def get_stimulation_epochs(nwbfile):
             stimulus_modalities=[StimulusModality.OPTOGENETICS],
             performance_metrics=None,
             notes=None,
+            # TODO - there was also a 465nm LED option in this dataset, need to determine which was used for which session
             active_devices=["Laser_1"],
             configurations=[LaserConfig(
                     device_name="Laser_1",
@@ -254,12 +212,12 @@ def get_stimulation_epochs(nwbfile):
     return stimulation_epochs
 
 acquisition = Acquisition(
-    subject_id=get_subject_id(nwbfile, session_info=session_info),
-    acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
+    subject_id=nwbfile.subject.subject_id,
+    acquisition_start_time=nwbfile.session_start_time,
     acquisition_end_time=get_data_stream_end_time(nwbfile),
     ethics_review_id=None, #TODO - obtain if available - YES, @Saskia
-    instrument_id=get_instrument_id(nwbfile, session_info=session_info),
-    acquisition_type=nwbfile.session_description,
+    instrument_id=next(iter(nwbfile.devices)),
+    acquisition_type=nwbfile.stimulus_notes, # TODO - assert correct field for this data and present in both functional connectivity and brain obeservatory datasets
     notes=None,
     coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct coordinate system library, will also be defined with instrument (not required to be same as acquisition)
     # coordinate system info might not be available, will check @Saskia
@@ -290,21 +248,13 @@ acquisition = Acquisition(
                     ),
                     probes=get_probe_configs(nwbfile),
                 ),
+                # TODO - there was also a 465nm LED stimulation option in this dataset, need to determine which was used for which session
                 LaserConfig( # TODO - should this go here or in the stimulation epochs configuration field?
                     device_name="Laser_1", # placeholder
                     wavelength=473, # from technical whitepaper
                     wavelength_unit=SizeUnit.NM,
                 ),
-                LickSpoutConfig(
-                    device_name="Lick_Spout_1", # placeholder
-                    solution=Liquid.WATER,
-                    solution_valence=Valence.POSITIVE,
-                    volume=get_individual_reward_volume(nwbfile),
-                    volume_unit=VolumeUnit.ML,
-                    relative_position=["Anterior"], # TODO - what is the correct information here? 
-                )
-                # TODO - add information about Monitor, Camera, LED from nwbfile.processing['eye_tracking_rig_metadata']['eye_tracking_rig_metadata']
-                # TODO - should we add MousePlatformConfig here too?
+                # TODO - confirm that no lick spout / reward was included in these experiments
             ],
          ),
     ],
@@ -314,8 +264,6 @@ acquisition = Acquisition(
         animal_weight_post=None,
         weight_unit=MassUnit.G,
         mouse_platform_name="Running Wheel",
-        reward_consumed_total=get_total_reward_volume(nwbfile),
-        reward_consumed_unit=VolumeUnit.ML
     ),
 )
 
@@ -323,4 +271,4 @@ acquisition = Acquisition(
 if __name__ == "__main__":
     serialized = acquisition.model_dump_json()
     deserialized = Acquisition.model_validate_json(serialized)
-    deserialized.write_standard_file(prefix=repo_root / f"data/schema/ephys_visual_behavior_{session_id}")
+    deserialized.write_standard_file(prefix=repo_root / f"data/schema/ephys_visual_coding_sub-{subject_id}_ses-{session_id}")
