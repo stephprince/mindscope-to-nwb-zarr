@@ -30,7 +30,7 @@ from aind_data_schema.components.coordinates import (
     AtlasLibrary,
     CoordinateSystemLibrary,
 )
-from aind_data_schema.components.stimulus import VisualStimulation, OptoStimulation, PulseShape
+from aind_data_schema.components.stimulus import VisualStimulation, PulseShape
 from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit, FrequencyUnit, MassUnit
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
@@ -40,6 +40,7 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_end_time, 
     get_modalities
 )
+from mindscope_to_nwb_zarr.aind_data_schema.custom_stimulus import OptotaggingStimulation
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_subject_id,
     get_session_start_time,
@@ -82,6 +83,7 @@ def get_probe_configs(nwbfile):
         if device.__class__.__name__ == "EcephysProbe":
             locations = (nwbfile.electrodes.to_dataframe()
                          .query('group_name == @device.name')['location'].unique().tolist())
+            locations = [l for l in locations if l]  # Filter out empty strings
             all_structures = [getattr(CCFv3, l.upper()) for l in locations if getattr(CCFv3, l.upper(), None) is not None]
             targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')] # get targeted visual area
             assert len(all_structures) == len(locations), "All probe locations not found in CCFv3 enum"
@@ -115,32 +117,29 @@ def get_optostimulation_parameters(optogenetic_stimulation):
     opto_df = optogenetic_stimulation.to_dataframe()
     for stimulus_name, df in opto_df.groupby('stimulus_name'):
         assert len(df['condition'].unique()) == 1, "Multiple pulse shapes found for stimulus_name"
-        if 'square' in df['condition'].values[0]:
+        if 'square' in df['condition'].values[0].lower():
             pulse_shape = PulseShape.SQUARE
-        elif 'cosine' in df['condition'].values[0]:
-            pulse_shape = PulseShape.SINE # TODO - also described as "raised cosine ramp" in whitepaper, may need to define new enum
-        
-        # convert mean intervals to frequency
-        pulse_frequency = 1.0 / np.mean(np.diff(df['start_time'])) 
+        elif 'cosine' in df['condition'].values[0].lower():
+            pulse_shape = PulseShape.SINE
 
-        opto_stimulation[stimulus_name] = (
-            # TODO - replace this with a new stimulation class inspired by this one with appropriate set of parameters / fields
-            OptoStimulation(
-                stimulus_name=stimulus_name,
-                pulse_shape=pulse_shape,
-                pulse_frequency=[pulse_frequency], # TODO - remove in custom class
-                pulse_frequency_unit=FrequencyUnit.HZ,
-                number_pulse_trains=[len(df)], # TODO - remove in custom class
-                pulse_width=(df['duration'].unique() * 100).astype(int).tolist(),
-                pulse_width_unit=TimeUnit.MS,
-                pulse_train_duration=(df['duration'].unique() * 100).astype(int).tolist(), # TODO - remove in custom class
-                pulse_train_interval=1.5, # from technical whitepaper
-                fixed_pulse_train_interval=False, # from technical whitepaper
-                pulse_train_interval_unit=TimeUnit.S,
-                baseline_duration=0.0, # TODO - remove in custom class
-                baseline_duration_unit=TimeUnit.S,
-                notes=f"{df['condition'].values[0]} with three light levels: {df['level'].unique().tolist()}",
-            )
+        # get pulse duration and light levels used
+        light_levels = sorted(df['level'].unique().tolist())
+        pulse_duration = df['duration'].unique()[0]
+        assert len(df['duration'].unique()) == 1, "Multiple pulse durations found for stimulus_name"
+
+        opto_stimulation[stimulus_name] = OptotaggingStimulation(
+            stimulus_name=stimulus_name,
+            pulse_shape=pulse_shape,
+            pulse_duration=np.round(pulse_duration, 10),
+            pulse_duration_unit=TimeUnit.S,
+            ramp_duration=0.0005,
+            ramp_duration_unit=TimeUnit.S,
+            inter_pulse_interval=1.5,
+            inter_pulse_interval_unit=TimeUnit.S,
+            inter_pulse_interval_delay_range=(0, 0.5),
+            inter_pulse_interval_delay_range_unit=TimeUnit.S,
+            light_levels=light_levels,
+            condition_description=df['condition'].values[0],
         )
 
     return opto_stimulation
@@ -314,7 +313,6 @@ acquisition = Acquisition(
         animal_weight_prior=None, # TODO - pull in extra info if available - likely not available @Saskia
         animal_weight_post=None,
         weight_unit=MassUnit.G,
-        anaesthesia=None,
         mouse_platform_name="Running Wheel",
         reward_consumed_total=get_total_reward_volume(nwbfile),
         reward_consumed_unit=VolumeUnit.ML
