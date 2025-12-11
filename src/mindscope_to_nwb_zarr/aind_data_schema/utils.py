@@ -1,5 +1,6 @@
 
 import json
+import re
 import numpy as np
 import pandas as pd
 import warnings
@@ -23,6 +24,23 @@ def get_subject_id(nwbfile: NWBFile, session_info: pd.DataFrame) -> str:
     assert session_info['mouse_id'].values[0] == int(nwbfile.subject.subject_id), "subject_id mismatch occurred"
     return nwbfile.subject.subject_id
 
+def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
+    """
+    Calculate the animal's date of birth from age and acquisition date in NWB file.
+    """
+    # Extract age in days from NWB file subject.age field
+    age_str = nwbfile.subject.age
+    match = re.match(r'P(\d+)D', age_str)
+    if not match:
+        raise ValueError(f"Unable to parse age from NWB file. Expected format 'P<days>D', got '{age_str}'")
+
+    age_in_days = int(match.group(1))
+
+    # Calculate date of birth by subtracting age from acquisition date
+    acquisition_datetime = nwbfile.session_start_time
+    date_of_birth = (acquisition_datetime - timedelta(days=age_in_days)).date()
+
+    return date_of_birth
 def get_session_start_time(nwbfile: NWBFile, session_info: pd.DataFrame) -> datetime:
     """Get the session start time from the NWB file, cross-checked with the session info. 
     e.g., datetime object for 2018-08-24T14:51:25.667000+00:00
