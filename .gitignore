@@ -215,3 +215,6 @@ __marimo__/
 
 # Hatch version
 _version.py
+
+# VSCode
+.vscode/
