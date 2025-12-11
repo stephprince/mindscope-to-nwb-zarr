@@ -18,12 +18,12 @@ class OptotaggingStimulation(GenericModel):
 
     stimulus_name: str = Field(..., title="Stimulus name")
     pulse_shape: PulseShape = Field(..., title="Pulse shape")
-    pulse_duration: Decimal = Field(
+    pulse_durations: List[Decimal] = Field(
         ...,
         title="Pulse duration",
         description="Duration of each individual pulse"
     )
-    pulse_duration_unit: TimeUnit = Field(default=TimeUnit.S, title="Pulse duration unit")
+    pulse_durations_unit: TimeUnit = Field(default=TimeUnit.S, title="Pulse duration unit")
     ramp_duration: Decimal = Field(
         ...,
         title="Ramp duration",

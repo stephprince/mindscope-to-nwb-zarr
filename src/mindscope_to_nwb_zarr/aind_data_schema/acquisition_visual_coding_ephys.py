@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import warnings
 
 from datetime import timedelta
 from pathlib import Path
@@ -26,8 +27,8 @@ from aind_data_schema.components.coordinates import (
     AtlasLibrary,
     CoordinateSystemLibrary,
 )
-from aind_data_schema.components.stimulus import VisualStimulation, OptoStimulation, PulseShape
-from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit, FrequencyUnit, MassUnit
+from aind_data_schema.components.stimulus import VisualStimulation, PulseShape
+from aind_data_schema_models.units import TimeUnit, SizeUnit, MassUnit
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
@@ -37,6 +38,10 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_end_time, 
     get_modalities
 )
+from mindscope_to_nwb_zarr.aind_data_schema.utils import (
+    get_brain_locations,
+    map_table_key_to_stimulus_name,
+)
 
 # example file for initial debugging
 # TODO - replace with more general ingestion/generation script
@@ -44,9 +49,9 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
 
 repo_root = Path(__file__).parent.parent.parent.parent
 cache_dir = repo_root / ".cache/visual_coding_ephys_cache_dir/"
-subject_id = "703279277"
-session_id = "719161530"
-nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-{session_id}_probe-729445654_ecephys.nwb")
+subject_id = "744912845"
+session_id = "766640955"
+nwbfile = read_nwb(repo_root / f"data/sub-{subject_id}_ses-{session_id}.nwb")
 
 # load metadata files
 def get_probe_configs(nwbfile):
@@ -54,13 +59,14 @@ def get_probe_configs(nwbfile):
     all_targeted_structures = []
     for device in nwbfile.devices.values():
         if device.__class__.__name__ == "EcephysProbe":
-            locations = (nwbfile.electrodes.to_dataframe()
-                         .query('group_name == @device.name')['location'].unique().tolist())
-            locations = [l for l in locations if l]
-            all_structures = [getattr(CCFv3, l.upper()) for l in locations if getattr(CCFv3, l.upper(), None) is not None]
+            # TODO - determine how to map 12 visual areas in coding dataset to CCFv3
+            # for debugging purposes mapping to a general VIS structure
+            # VISal, VISam, VISl, VISpl, VISp, VISrl, VISpm 
+            # (need to be mapped: VISm, VISli, VISlla, VISm, VISmma, VISmmp) 
+            all_structures = get_brain_locations(nwbfile, device)
             targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')] # get targeted visual area
-            assert len(all_structures) == len(locations), "All probe locations not found in CCFv3 enum"
-            assert len(targeted_structure) == 1, "More than one visual area found"
+            if len(targeted_structure) > 1:
+                warnings.warn(f"More than one visual area found: {targeted_structure}")
             all_targeted_structures.append(targeted_structure[0])
 
             probe_configs.append(
@@ -97,14 +103,13 @@ def get_optostimulation_parameters(optogenetic_stimulation):
 
         # get pulse duration and light levels used
         light_levels = sorted(df['level'].unique().tolist())
-        pulse_duration = df['duration'].unique()[0]
-        assert len(df['duration'].unique()) == 1, "Multiple pulse durations found for stimulus_name"
+        pulse_durations = df['duration'].unique()
 
         opto_stimulation[stimulus_name] = OptotaggingStimulation(
             stimulus_name=stimulus_name,
             pulse_shape=pulse_shape,
-            pulse_duration=np.round(pulse_duration, 10),
-            pulse_duration_unit=TimeUnit.S,
+            pulse_durations=[np.round(p, 10) for p in pulse_durations],
+            pulse_durations_unit=TimeUnit.S,
             ramp_duration=0.0005,
             ramp_duration_unit=TimeUnit.S,
             inter_pulse_interval=1.5,
@@ -125,12 +130,28 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
                                      "contrast": "percent",
                                      "duration": "S",
                                      "phase": None,
-                                     "image_name": None,
-                                     "image_set": None,}
+                                     "size": None,
+                                     "stimulus_name": None,
+                                     "stimulus_block": None,
+                                     "color": None,
+                                     "opacity": None,
+                                     "mask": None,
+                                     "speed": "degrees/second",
+                                     "dir": "degrees",
+                                     "coherence": "percent",
+                                     "dotLife": None,
+                                     "dotSize": None,
+                                     "nDots": None,
+                                     "fieldPos": None,
+                                     "fieldShape": None,
+                                     "fieldSize": None,
+                                     } # TODO - determine if any of these have better units
     parameters = {}
     for param_key, param_unit in possible_parameters_and_units.items():
         if param_key in intervals_table.columns:
-            parameters.update({param_key: intervals_table[param_key].unique().tolist()})
+            parameter_values = intervals_table[param_key].unique().tolist()
+            parameter_values = parameter_values[0] if len(parameter_values) == 1 else parameter_values
+            parameters.update({param_key: parameter_values})
             if param_unit is not None:
                 parameters.update({f"{param_key}_unit": param_unit})
 
