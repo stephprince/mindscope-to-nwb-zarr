@@ -120,14 +120,13 @@ def get_optostimulation_parameters(optogenetic_stimulation):
 
         # get pulse duration and light levels used
         light_levels = sorted(df['level'].unique().tolist())
-        pulse_duration = df['duration'].unique()[0]
-        assert len(df['duration'].unique()) == 1, "Multiple pulse durations found for stimulus_name"
+        pulse_duration = df['duration'].unique().tolist()
 
         opto_stimulation[stimulus_name] = OptotaggingStimulation(
             stimulus_name=stimulus_name,
             pulse_shape=pulse_shape,
-            pulse_duration=np.round(pulse_duration, 10),
-            pulse_duration_unit=TimeUnit.S,
+            pulse_durations=[np.round(p, 10) for p in pulse_duration],
+            pulse_durations_unit=TimeUnit.S,
             ramp_duration=0.0005,
             ramp_duration_unit=TimeUnit.S,
             inter_pulse_interval=1.5,
@@ -191,10 +190,10 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
 def get_stimulation_epochs(nwbfile):
     # loop through all intervals tables
     stimulation_epochs = []
-    stimulation_type = ["Gabor", "Spontaneous", "Passive replay", "Flash", "Grating"] # TODO - determine if any other types to consider
+
     for table_key, intervals_table in nwbfile.intervals.items():
-        # skip generic trials table that contains behavioral data
-        if table_key == "trials":
+        # skip generic trials table that contains behavioral data and invalid_times sections
+        if table_key in ["trials", "invalid_times"]:
             continue
         # split active and passive behavior sessions into different stimulus epochs
         elif table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations":
@@ -212,14 +211,11 @@ def get_stimulation_epochs(nwbfile):
                                                             intervals_table=passive_intervals)
             stimulation_epochs.append(stim_epoch)
         else:
-            intervals_table_filtered = intervals_table.to_dataframe()
-            stimulus_name = next((stim for stim in stimulation_type if stim.lower() in table_key), None)
-            assert stimulus_name is not None, f"Associated stimulus type for intervals table was not found"
-
+            # Convert table key to formatted stimulus name
+            stimulus_name = table_key.replace('_', ' ').title()
             stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
-                                                              table_key=table_key, 
-                                                              intervals_table=intervals_table_filtered)
-
+                                                                table_key=table_key, 
+                                                                intervals_table=intervals_table.to_dataframe())
             stimulation_epochs.append(stim_epoch)
     
     if 'optotagging' in nwbfile.processing:
