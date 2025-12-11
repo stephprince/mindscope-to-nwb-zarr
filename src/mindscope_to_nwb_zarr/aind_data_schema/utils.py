@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import warnings
 
+from aind_data_schema_models.brain_atlas import CCFv3
+
 from datetime import datetime, timezone
 from pynwb import NWBFile
 
@@ -58,9 +60,39 @@ def get_curriculum_status(session_info):
     
     return json.dumps(curriculum_dict, cls=NumpyJsonEncoder)
 
+def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
+    """Convert location names to CCFv3 brain structures.
+
+    For VIS regions that don't have an exact match in CCFv3, this function
+    falls back to the generic VIS structure.
+
+    """
+    # get locations from nwbfile
+    locations = (nwbfile.electrodes.to_dataframe()
+                .query('group_name == @device.name')['location'].unique().tolist())
+    locations = [l for l in locations if l]  # Filter out empty strings
+
+    # extract CCFv3 structures
+    all_structures = []
+    for location in locations:
+        location_upper = location.upper()
+        structure = getattr(CCFv3, location_upper, None)
+
+        if structure is not None:
+            all_structures.append(structure)
+        elif location_upper.startswith('VIS'):
+            all_structures.append(CCFv3.VIS) # use generic VIS if particular one is not found
+        else:
+            pass
+
+    # warn if missing any
+    if len(all_structures) != len(locations):
+        warnings.warn(f"All probe locations not found in CCFv3 enum: {locations}")
+
+    return all_structures
+
 def serialized_dict(**kwargs) -> str:
     return json.dumps(dict(**kwargs), cls=NumpyJsonEncoder)
-
 
 class NumpyJsonEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle NumPy data types."""

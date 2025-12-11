@@ -32,7 +32,6 @@ from aind_data_schema.components.coordinates import (
 )
 from aind_data_schema.components.stimulus import VisualStimulation, PulseShape
 from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit, FrequencyUnit, MassUnit
-from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
 from mindscope_to_nwb_zarr.pynwb_utils import (
@@ -48,6 +47,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_total_reward_volume,
     get_individual_reward_volume,
     get_curriculum_status,
+    get_brain_locations,
 )
 
 # example file for initial debugging
@@ -81,12 +81,8 @@ def get_probe_configs(nwbfile):
     all_targeted_structures = []
     for device in nwbfile.devices.values():
         if device.__class__.__name__ == "EcephysProbe":
-            locations = (nwbfile.electrodes.to_dataframe()
-                         .query('group_name == @device.name')['location'].unique().tolist())
-            locations = [l for l in locations if l]  # Filter out empty strings
-            all_structures = [getattr(CCFv3, l.upper()) for l in locations if getattr(CCFv3, l.upper(), None) is not None]
+            all_structures = get_brain_locations(nwbfile, device)
             targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')] # get targeted visual area
-            assert len(all_structures) == len(locations), "All probe locations not found in CCFv3 enum"
             assert len(targeted_structure) == 1, "More than one visual area found"
             all_targeted_structures.append(targeted_structure[0])
 
