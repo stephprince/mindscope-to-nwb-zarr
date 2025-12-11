@@ -40,7 +40,6 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
 )
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_brain_locations,
-    map_table_key_to_stimulus_name,
 )
 
 # example file for initial debugging
@@ -186,23 +185,21 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
 def get_stimulation_epochs(nwbfile):
     # loop through all intervals tables
     stimulation_epochs = []
-    stimulation_type = ["Drifting Gratings", "Static Gratings", "Natural Movie One", "Natural Movie Three", "Natural Images",
-        "Gabor", "Flashes", "Contrast tuning", "Spontaneous",  "Dot Motion"] 
-    # TODO - determine if any other stimulation types to consider
     for table_key, intervals_table in nwbfile.intervals.items():
         # skip generic trials table that contains behavioral data and invalid_times sections
         if table_key in ["trials", "invalid_times"]:
             continue
-        else:
-            intervals_table_filtered = intervals_table.to_dataframe()
-            stimulus_name = next((stim for stim in stimulation_type if stim.lower() in table_key), None)
-            assert stimulus_name is not None, f"Associated stimulus type for intervals table was not found"
 
-            stim_epoch = convert_intervals_to_stimulus_epochs(stimulus_name=stimulus_name, 
-                                                              table_key=table_key, 
-                                                              intervals_table=intervals_table_filtered)
+        # Convert table key to formatted timulus name
+        stimulus_name = table_key.replace('_', ' ').title()
 
-            stimulation_epochs.append(stim_epoch)
+        intervals_table_filtered = intervals_table.to_dataframe()
+        stim_epoch = convert_intervals_to_stimulus_epochs(
+            stimulus_name=stimulus_name,
+            table_key=table_key,
+            intervals_table=intervals_table_filtered
+        )
+        stimulation_epochs.append(stim_epoch)
     
     if 'optotagging' in nwbfile.processing:
         optogenetic_stimulation = nwbfile.processing['optotagging']['optogenetic_stimulation']
