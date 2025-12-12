@@ -304,7 +304,7 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
                         name="PsychoPy",
                         version=None,
                     ), # TODO - from whitepaper, add version if available @Saskia
-                    parameters={table_key: get_visual_stimulation_parameters(table_key, intervals_table)},
+                    parameters=get_visual_stimulation_parameters(table_key, intervals_table).model_dump(),
                 ),
                 stimulus_modalities=[StimulusModality.VISUAL],
                 notes=None,
