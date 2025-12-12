@@ -86,7 +86,6 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, is_single_plane: bool) -> dict[s
     else:   
         assert imaging_plane.imaging_rate == 11
 
-    # TODO where to store the emission lambda in the AIND metadata?
     assert len(imaging_plane.optical_channel) == 1
     assert imaging_plane.optical_channel[0].description == "2P Optical Channel"
     assert imaging_plane.optical_channel[0].emission_lambda == 520  # nm
@@ -342,7 +341,7 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
     if is_single_plane:
         microscope_name = f"Scientifica_VivoScope_2P_Rig_{device.name}"
     else:
-        microscope_name = f"Multiscope Dual-Beam Mesoscope 2P Rig ({device.name})"
+        microscope_name = f"Multiscope_Dual-Beam_Mesoscope_2P_Rig_{device.name}"
 
     all_imaging_configs = get_all_imaging_configs(microscope_name, imaging_plane_info_all)
 
