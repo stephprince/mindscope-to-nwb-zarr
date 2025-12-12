@@ -10,7 +10,7 @@ dependencies = [
     "hdmf-zarr>=0.2.0",
     "nwbinspector>=0.6.5",
     "pynwb>=2.8.3",
-    "allensdk", # note that it needs to be installed from a specific commit to be compatible with later numpy versions
+    "allensdk", # note that it needs to be installed from a specific branch (see tool.uv.sources) to be compatible with later numpy versions
 ]
 
 [build-system]
