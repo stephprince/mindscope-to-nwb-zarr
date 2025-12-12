@@ -1,9 +1,21 @@
 from pynwb import NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 
+from pathlib import Path
+from nwbinspector import inspect_nwbfile_object, format_messages, save_report
 
-filename = "data/sub-506940_ses-20200228T111117_image.nwb"
-zarr_filename = "data/sub-506940_ses-20200228T111117_image.nwb.zarr"
+
+# behavior only session
+# filename = "data/sub-506940_ses-20200228T111117_image.nwb"
+# zarr_filename = "data/sub-506940_ses-20200228T111117_image.nwb.zarr"
+
+# ecephys single probe example
+# filename = "data/sub-506940_ses-None_probe-1158270876_ecephys.nwb"
+# zarr_filename = "data/sub-506940_ses-None_probe-1158270876_ecephys.nwb.zarr"
+
+# ecephys all data
+filename = "data/sub-506940_ses-20200817T222149.nwb"
+zarr_filename = "data/sub-506940_ses-20200817T222149.nwb.zarr"
 
 # NOTE: Unlike the original NWB HDF5 files for Visual Coding - Neuropixels, 
 # the original NWB HDF5 files for Visual Behavior - Neuropixels use a 
@@ -38,4 +50,22 @@ with NWBHDF5IO(filename, 'r') as read_io:
 # TODO: Investigate why the exported Zarr file is only 4 MB while the original HDF5 file is 50 MB.
 # Everything was compressed in the Zarr file.
 
+# inspect file for validation errors
+with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
+    nwbfile = zarr_io.read()
+
+    # inspect nwb file with io object
+    # NOTE - this does not run pynwb validation, will run that separately
+    messages = list(inspect_nwbfile_object(nwbfile))
+
+    # format and print messages nicely
+    if messages:
+        formatted_messages = format_messages(
+            messages=messages,
+            levels=["importance", "file_path"],
+            reverse=[True, False]
+        )
+        save_report(report_file_path=f"data/{Path(zarr_filename).stem}_report.txt", 
+                    formatted_messages=formatted_messages,
+                    overwrite=True)
 
