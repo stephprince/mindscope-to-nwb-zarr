@@ -1,14 +1,12 @@
 """Generates an example JSON file for visual behavior ephys acquisition"""
 
-from datetime import datetime, timezone, timedelta
-import json
+from datetime import timedelta
 from pathlib import Path
-import re
 
 import numpy as np
 from pynwb import NWBFile
 
-from aind_data_schema.components.identifiers import Software, Code
+from aind_data_schema.components.identifiers import Code
 from aind_data_schema.core.acquisition import (
     Acquisition,
     StimulusEpoch,
@@ -16,24 +14,15 @@ from aind_data_schema.core.acquisition import (
     AcquisitionSubjectDetails,
 )
 from aind_data_schema.components.configs import (
-    ManipulatorConfig,
-    EphysAssemblyConfig,
-    ProbeConfig,
-    LaserConfig,
     LickSpoutConfig,
     Liquid,
     Valence,
 )
 from aind_data_schema.components.coordinates import (
-    Translation,
-    Rotation,
-    AtlasCoordinate,
-    AtlasLibrary,
     CoordinateSystemLibrary,
 )
-from aind_data_schema.components.stimulus import VisualStimulation, OptoStimulation
-from aind_data_schema_models.units import TimeUnit, SizeUnit, VolumeUnit, FrequencyUnit, MassUnit
-from aind_data_schema_models.brain_atlas import CCFv3
+from aind_data_schema.components.stimulus import VisualStimulation
+from aind_data_schema_models.units import VolumeUnit, MassUnit
 from aind_data_schema_models.stimulus_modality import StimulusModality
 from aind_data_schema_models.modalities import Modality
 
@@ -89,11 +78,7 @@ def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.DataFrame) -> Visu
     return visual_stimulation
 
 
-def generate_acquisition_json(
-    subject_id: int,
-    nwbfile_session_id: str,
-    file_path: str,
-) -> Acquisition:
+def generate_acquisition_json(file_path: str) -> Acquisition:
     """Generate Acquisition JSON for a behavior-only visual behavior ophys session from NWB file"""
     nwbfile = read_nwb(file_path)
     behavior_session_id = int(nwbfile.identifier)
@@ -203,7 +188,7 @@ if __name__ == "__main__":
 
     file_path = f"C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-{nwbfile_session_id}_image.nwb"
 
-    acquisition = generate_acquisition_json(subject_id, nwbfile_session_id, file_path)
+    acquisition = generate_acquisition_json(file_path)
 
     file_path_stem = Path(file_path).stem
     acquisition_json_path = f"vis_beh_ophys_{file_path_stem}_acquisition"
