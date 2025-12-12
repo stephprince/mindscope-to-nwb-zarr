@@ -10,6 +10,7 @@ dependencies = [
     "hdmf-zarr>=0.2.0",
     "nwbinspector>=0.6.5",
     "pynwb>=2.8.3",
+    "allensdk", # note that it needs to be installed from a specific commit to be compatible with later numpy versions
 ]
 
 [build-system]
@@ -23,4 +24,7 @@ source = "vcs"
 # this file is created/updated when the package is installed and used in
 # src/mindscope_to_nwb_zarr/__init__.py to set `mindscope_to_nwb_zarr.__version__`
 version-file = "src/mindscope_to_nwb_zarr/_version.py"
+
+[tool.uv.sources]
+allensdk = { git = "https://github.com/rly/AllenSDK.git", rev = "a1d68976874097bdcb9b3321eda539538b24bb8b" }
 
