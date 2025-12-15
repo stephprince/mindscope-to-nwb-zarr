@@ -54,7 +54,9 @@ full_session_table = build_and_execute(
 )
 donor_ids = set([s['donor_id'] for s in full_session_table['specimen'].tolist()])  # These match subject IDs on DANDI
 specimen_ids = coding_ephys_sessions['specimen_id'].unique().tolist() 
-mouse_ids['visual_coding_ephys'] = donor_ids
+external_specimen_ids = set([s['external_specimen_name'] for s in full_session_table['specimen'].tolist()])  # These match subject IDs on DANDI
+mouse_ids['visual_coding_ephys'] = external_specimen_ids
+# TODO - external_specimen_name here seems to be 6 digits
 
 # Download Visual Coding - Optophysiology data to local cache
 output_dir =  Path(".cache/visual_coding_ophys_cache_dir")
@@ -68,7 +70,8 @@ specimen_ids = set(list({e["specimen_id"] for e in experiment_containers})) # Th
 donor_ids = set(list({e["specimen"]["donor_id"] for e in experiment_containers})) 
 specimen_ids_filtered = [s for s in specimen_ids if s <= 699502603] # dandiset and S3 bucket only includes data from these mouse ids
 donor_name_ids = set([s["donor_name"] for s in sessions])
-mouse_ids['visual_coding_ophys'] = specimen_ids_filtered
+mouse_ids['visual_coding_ophys'] = donor_name_ids
+# TODO - donor name here seems to be correct
 
 # save output data
 mouse_ids_serializable = {k: sorted(list(v)) if isinstance(v, set) else sorted(v)
