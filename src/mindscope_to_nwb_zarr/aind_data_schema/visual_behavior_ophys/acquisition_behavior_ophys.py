@@ -147,7 +147,7 @@ def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> Imagin
                 channel_name="Green channel",
                 intended_measurement=imaging_plane.indicator,
                 detector=DetectorConfig(
-                    device_name="PMT 1", # TODO: A PMT seems to be used, but I cannot find these parameters
+                    device_name="PMT 1", # TODO: This should correspond to a device
                     exposure_time=0.1, 
                     trigger_type=TriggerType.INTERNAL,
                 ),
@@ -156,9 +156,7 @@ def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> Imagin
                         device_name="Laser A (Ti:Sapphire laser (Chameleon Vision, Coherent))",
                         wavelength=imaging_plane.excitation_lambda,
                         wavelength_unit=SizeUnit.NM,
-                        power=None,  # TODO was this information stored anywhere?? "Once a depth location was stabilized, a combination of PMT gain and laser power was selected to maximize laser power (based on a look-up table against depth) and dynamic range while avoiding pixel saturation." (de Vries et al., 2020)
-                        power_unit=None,  # TODO ^
-                        # TODO should this be recorded: Pulse dispersion compensation / pre-compensation = ~10,000 fs2
+                        power=None,  # NOTE: Laser power was adjusted per session and was not recorded in the NWB files
                     ),
                 ],
                 emission_filters=[],
@@ -167,21 +165,27 @@ def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> Imagin
             ),
         ],
         images=[
+            # TODO For multi-plane imaging, we should have all the planes here
             PlanarImage(
                 channel_name="Green channel",  # should match one of the defined channels above
                 image_to_acquisition_transform=[
                     # Translation(
                     #     translation=[1.5, 1.5],
-                    # ),  # TODO - where to find this information?
+                    # ),  # TODO - where to find this information? Saskia will follow up with the team
+                    # May not have this information anymore. For visual behavior multi-plane imaging,
+                    # probably want to represent this.
                 ],
                 dimensions=Scale(
                     scale=imaging_plane_dimensions
                 ),
                 planes=[
+                    # TODO For multi-plane imaging, we should use the coupled plane class and pass the index
+                    # Make 0, 1 from group 1. 2, 3 from group 2, etc.
+                    # For multi-plane imaging, there are up to 8 planes
                     Plane(
                         depth=imaging_plane_depth,
                         depth_unit=SizeUnit.UM,
-                        power=5,  # TODO: What is this required field? Maximum signal intensity deterioration from original intensity level??? Probably not.
+                        power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
                         power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
                         targeted_structure=imaging_plane_targeted_structure,
                     ),
@@ -208,8 +212,6 @@ def get_all_imaging_configs(microscope_name: str, imaging_plane_info_all: list[d
         A list of ImagingConfig objects representing the imaging configurations for all planes.
     """
     imaging_configs = list()
-    # TODO: consider ordering the configs in some way, e.g., how they are laid out in the combined NWB file
-    # that contains all imaging planes that pass QC
     for imaging_plane_info in imaging_plane_info_all:
         imaging_config = get_imaging_config(microscope_name, imaging_plane_info)
         imaging_configs.append(imaging_config)
@@ -294,6 +296,14 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
         # stimulus_frame_rate	60
         # targeted_imaging_depth	375
 
+        # TODO For visual coding, a container is all the data collected from the same FoV. 
+        # Current schema - no concept of a "session" but useful to maintain this information for continuity
+        # Put in notes in data description field. Same for container id
+        # There is "tags" field in the data description. Use that for container id. 
+
+        # For Visual Behavior
+        # Put experiment ID in the data stream notes for now
+
         assert ophys_behavior_metadata_plane.equipment_name == device.name
 
         if is_single_plane:
@@ -315,8 +325,8 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
             assert ophys_behavior_metadata_plane.imaging_plane_group_count == 0
             assert np.isnan(session_info_plane["imaging_plane_group"].values[0])
         else:
-            assert ophys_behavior_metadata_plane.imaging_plane_group >= 0
-            assert ophys_behavior_metadata_plane.imaging_plane_group_count == 4  # TODO Why is this 4?
+            assert ophys_behavior_metadata_plane.imaging_plane_group >= 0  # TODO Use this to figure out the coupled planes
+            assert ophys_behavior_metadata_plane.imaging_plane_group_count == 4
             assert session_info_plane["imaging_plane_group"].values[0] == ophys_behavior_metadata_plane.imaging_plane_group
     
         assert ophys_behavior_metadata_plane.ophys_container_id == session_info_plane["ophys_container_id"].values[0]
@@ -337,11 +347,8 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
         assert imaging_plane_targeted_structure_str == session_info_plane["targeted_structure"].values[0]
 
 
-    # TODO can the microscope name have spaces? the examples all replace spaces with underscores
-    if is_single_plane:
-        microscope_name = f"Scientifica_VivoScope_2P_Rig_{device.name}"
-    else:
-        microscope_name = f"Multiscope_Dual-Beam_Mesoscope_2P_Rig_{device.name}"
+    # TODO the microscope name will need to match the device name defined in the instrument file
+    microscope_name = device.name  # such as CAM2P.3 or MESO.1
 
     all_imaging_configs = get_all_imaging_configs(microscope_name, imaging_plane_info_all)
 
@@ -350,13 +357,13 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
         specimen_id=None,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        # experimenters=None, # TODO - determine where to extract
+        experimenters=None,
         protocol_id=None,
-        ethics_review_id=None,  # TODO get from Saskia
+        ethics_review_id=None,  # TODO @Saskia
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
-        acquisition_type=nwbfile.session_description, # TODO - confirm consistent across experiments or if better option
+        acquisition_type=nwbfile.session_description,
         notes=None,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct system library
+        coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct system library. depends on the transform
         # instrument and acquisition do not have the same coordinate system. 
         # For Ophys, it will define the location of the imaging FOV in a way that can be entered. Saskia will check.
         # calibrations=None,  # will be difficult to find, so leave out
@@ -370,8 +377,9 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
                 notes=None,
                 active_devices=[  # Instruments need to be defined
                     microscope_name,
-                    "BehaviorMonitoringRig",  # TODO: instrument or device name? see Instrument definition in instrument_behavior_camera.py
-                    "Lick_Spout_1",  # placeholder
+                    "BehaviorCamera",
+                    "EyeCamera",
+                    "Lick_Spout_1",  # placeholder - this falls into devices involved in stimulus
                     # ^^ Water rewards were delivered using a solenoid (NI Research, #161K011) 
                     # to deliver a calibrated volume of fluid (5-10µL) through a blunted, 82mm 
                     # 18g hypodermic needle (Hamilton) mounted to an air cylinder with stroke 
@@ -389,15 +397,16 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
                         device_name="BehaviorCamera",
                         exposure_time=33,
                         exposure_time_unit=TimeUnit.MS,
-                        trigger_type=TriggerType.INTERNAL,  # TODO - confirm
+                        trigger_type=TriggerType.INTERNAL,
                     ),
                     LickSpoutConfig(  # Lick spout is specific to the rig
                         device_name="Lick_Spout_1",  # placeholder
                         solution=Liquid.WATER,
                         solution_valence=Valence.POSITIVE,
-                        volume=get_individual_reward_volume(nwbfile), # TODO - what to do if multiple? this does happen
+                        volume=get_individual_reward_volume(nwbfile), # TODO - use the smallest reward volume if multiple
                         volume_unit=VolumeUnit.ML,
-                        relative_position=["Anterior"], # TODO - what is the correct information here? It looks like the relative position was determined per-subject and this is not stored anywhere
+                        relative_position=["Anterior"],
+                        notes="",  # TODO - write that reward volume was both x and y
                     )
                 ],
             ),
@@ -406,14 +415,14 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
         stimulus_epochs=[
             # TODO consult StimulusEpoch objects from acquisition_visual_behavior_ophys_behavior.py
         ], 
-        # manipulations=None, # TODO - think this is None (seems to be injections)
+        manipulations=None,
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,
             weight_unit=MassUnit.G,
             anaesthesia=None,
-            mouse_platform_name="Running Wheel", # TODO - determine where to extract if needed
-            reward_consumed_total=get_total_reward_volume(nwbfile), # TODO - check if calculation is sufficient
+            mouse_platform_name="Mindscope Disc",  # instrument will correspond to this
+            reward_consumed_total=get_total_reward_volume(nwbfile),
             reward_consumed_unit=VolumeUnit.ML
         ),
     )

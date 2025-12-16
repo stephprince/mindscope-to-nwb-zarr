@@ -189,7 +189,8 @@ instrument_coordinate_system = CoordinateSystem(
 )
 
 
-# Create the Instrument
+# Create the Instrument - this will include the microscope, running wheel, etc. - one per session
+# You can have devices in your instrument that you don't use in your experiment
 behavior_camera_instrument = Instrument(
     instrument_id="BehaviorMonitoringRig",
     modification_date=date.today(),  # TODO: update as needed

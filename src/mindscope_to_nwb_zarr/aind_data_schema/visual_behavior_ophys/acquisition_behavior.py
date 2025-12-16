@@ -191,7 +191,7 @@ if __name__ == "__main__":
     acquisition = generate_acquisition_json(file_path)
 
     file_path_stem = Path(file_path).stem
-    acquisition_json_path = f"vis_beh_ophys_{file_path_stem}_acquisition"
+    acquisition_json_path = f"vis_beh_ophys_{file_path_stem}_"
     print(acquisition_json_path)
 
     serialized = acquisition.model_dump_json()
