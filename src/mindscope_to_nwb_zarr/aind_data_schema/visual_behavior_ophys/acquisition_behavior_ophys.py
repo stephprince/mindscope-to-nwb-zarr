@@ -23,6 +23,7 @@ from aind_data_schema.components.configs import (
     LaserConfig,
     TriggerType,
     ImagingConfig,
+    CoupledPlane,
     Plane,
     PlanarImage,
     SamplingStrategy,
@@ -54,7 +55,7 @@ OPHYS_EXPERIMENT_TABLE_CSV_PATH = "C:/Users/Ryan/Documents/mindscope-to-nwb-zarr
 ophys_experiment_table = pd.read_csv(OPHYS_EXPERIMENT_TABLE_CSV_PATH)
 
 
-def process_nwb_imaging_plane(nwbfile: NWBFile, is_single_plane: bool) -> dict[str, Any]:
+def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_plane: bool) -> dict[str, Any]:
     """Check and process the imaging plane from an NWB file and extract metadata that changes across planes.
 
     Check that the imaging plane matches expected values for visual behavior behavior-ophys sessions,
@@ -72,8 +73,20 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, is_single_plane: bool) -> dict[s
             imaging_plane_targeted_structure_str: The targeted brain structure as a string.
             imaging_plane_depth: The depth of the imaging plane.
     """
-    assert len(nwbfile.imaging_planes) == 1, "Expected one plane per NWB file"
-    imaging_plane = next(iter(nwbfile.imaging_planes.values()))
+    nwbfile_plane = read_nwb(file_path)
+    ophys_experiment_id_plane = int(nwbfile_plane.identifier)  # e.g., 788490510, which corresponds to behavior_session_id 788017709, ophys_session_id 787661032, ophys_container_id 782536745
+    session_info_plane = ophys_experiment_table.query("mouse_id == @subject_id_int and ophys_experiment_id == @ophys_experiment_id_plane")
+    assert len(session_info_plane) == 1, (
+        "Expected exactly one matching ophys experiment table entry "
+        f"for mouse_id=={subject_id_int} and ophys_experiment_id=={ophys_experiment_id_plane}, "
+        f"instead found {len(session_info_plane)}"
+    )
+
+    assert len(nwbfile_plane.devices) == 1
+    device = next(iter(nwbfile_plane.devices.values()))
+
+    assert len(nwbfile_plane.imaging_planes) == 1, "Expected one plane per NWB file"
+    imaging_plane = next(iter(nwbfile_plane.imaging_planes.values()))
 
     assert imaging_plane.name == "imaging_plane_1"
     assert imaging_plane.indicator == "GCaMP6f"
@@ -108,37 +121,95 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, is_single_plane: bool) -> dict[s
 
     assert imaging_plane.location == imaging_plane_targeted_structure_str
 
+    # Check that the plane-specific metadata in each NWB file matches the expected values
+    # from elsewhere in the NWB file and from ophys_experiment_table.csv
+    # TODO: Store all of these values in the Acquisition JSON? or elsewhere??
+    ophys_behavior_metadata_plane = nwbfile_plane.lab_meta_data["metadata"]  # neurodata_type: OphysBehaviorMetadata
+    # Example values from a single-plane NWB file:
+    # behavior_session_uuid	"bdc41492-1797-4c91-81ba-18fc0a25d238"
+    # equipment_name	"CAM2P.5"
+    # field_of_view_height	512
+    # field_of_view_width	447
+    # imaging_depth	375
+    # imaging_plane_group	-1
+    # imaging_plane_group_count	0
+    # ophys_container_id	782536745
+    # ophys_experiment_id	788490510
+    # ophys_session_id	787661032
+    # project_code	"VisualBehavior"
+    # session_type	"OPHYS_6_images_B"
+    # stimulus_frame_rate	60
+    # targeted_imaging_depth	375
+
+    # TODO For visual coding, a container is all the data collected from the same FoV. 
+    # Current schema - no concept of a "session" but useful to maintain this information for continuity
+    # Put in notes in data description field. Same for container id
+    # There is "tags" field in the data description. Use that for container id. 
+
+    # For Visual Behavior
+    # Put experiment ID in the data stream notes for now
+
+    assert ophys_behavior_metadata_plane.equipment_name == device.name
+
+    if is_single_plane:
+        assert re.match("CAM2P\.\d", session_info_plane["equipment_name"].values[0])
+    else:
+        assert session_info_plane["equipment_name"].values[0] == "MESO.1"
+    assert session_info_plane["equipment_name"].values[0] == device.name
+
+    assert [
+        ophys_behavior_metadata_plane.field_of_view_width, 
+        ophys_behavior_metadata_plane.field_of_view_height
+    ] == imaging_plane_dimensions
+
+    assert ophys_behavior_metadata_plane.imaging_depth == imaging_plane_depth
+    assert imaging_plane_depth == session_info_plane["imaging_depth"].values[0]
+
+    if is_single_plane:
+        assert ophys_behavior_metadata_plane.imaging_plane_group == -1
+        assert ophys_behavior_metadata_plane.imaging_plane_group_count == 0
+        assert np.isnan(session_info_plane["imaging_plane_group"].values[0])
+    else:
+        # the imaging_plane_group (0-indexed) is used to group coupled planes together
+        assert ophys_behavior_metadata_plane.imaging_plane_group >= 0
+        assert ophys_behavior_metadata_plane.imaging_plane_group_count == 4
+        assert session_info_plane["imaging_plane_group"].values[0] == ophys_behavior_metadata_plane.imaging_plane_group
+
+    assert ophys_behavior_metadata_plane.ophys_container_id == session_info_plane["ophys_container_id"].values[0]
+    assert ophys_behavior_metadata_plane.ophys_experiment_id == session_info_plane["ophys_experiment_id"].values[0]
+    assert ophys_behavior_metadata_plane.ophys_session_id == session_info_plane["ophys_session_id"].values[0]
+    if is_single_plane:
+        assert ophys_behavior_metadata_plane.project_code in ("VisualBehavior", "VisualBehaviorTask1B")
+    else:
+        assert ophys_behavior_metadata_plane.project_code in ("VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d")
+    assert ophys_behavior_metadata_plane.project_code == session_info_plane["project_code"].values[0]
+    assert ophys_behavior_metadata_plane.session_type == session_info_plane["session_type"].values[0]
+
+    assert ophys_behavior_metadata_plane.stimulus_frame_rate == 60
+
+    assert ophys_behavior_metadata_plane.targeted_imaging_depth == session_info_plane["targeted_imaging_depth"].values[0]
+
+    # also cross-check other values from the NWB file with the session info
+    assert imaging_plane_targeted_structure_str == session_info_plane["targeted_structure"].values[0]
+
     return dict(
+        device=device,
         imaging_plane=imaging_plane,
         imaging_plane_dimensions=imaging_plane_dimensions,
         imaging_plane_targeted_structure=imaging_plane_targeted_structure,
         imaging_plane_targeted_structure_str=imaging_plane_targeted_structure_str,
         imaging_plane_depth=imaging_plane_depth,
+        imaging_plane_group=int(ophys_behavior_metadata_plane.imaging_plane_group) if not is_single_plane else None,
     )
 
 
-def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> ImagingConfig:
-    """Generates imaging configuration for a single plane of a visual behavior behavior-ophys acquisition.
 
-    See Visual Behavior Technical White Paper
-    SECTION E: IN VIVO 2-PHOTON CALCIUM IMAGING. HARDWARE & INSTRUMENTATION
-    which often references methods from de Vries et al., 2020
+def create_imaging_config(microscope_name: str, imaging_plane: ImagingPlane, dimensions: list[int], planes: list[Plane]) -> ImagingConfig:
+    """Generates an imaging configuration for a visual behavior behavior-ophys acquisition.
 
-    Args:
-        microscope_name: The name of the microscope used for imaging.
-        imaging_plane_info: A dictionary containing imaging plane metadata:
-            imaging_plane: The imaging plane object.
-            imaging_plane_dimensions: The dimensions of the imaging plane.
-            imaging_plane_targeted_structure: The targeted brain structure of the imaging plane.
-            imaging_plane_depth: The depth of the imaging plane.
+    Works for both single-plane and multi-plane acquisitions.
 
-    Returns:
-        An ImagingConfig object representing the imaging configuration for the plane.
     """
-    imaging_plane: ImagingPlane = imaging_plane_info["imaging_plane"]
-    imaging_plane_dimensions: list[int] = imaging_plane_info["imaging_plane_dimensions"]
-    imaging_plane_targeted_structure: CCFv3 = imaging_plane_info["imaging_plane_targeted_structure"]
-    imaging_plane_depth: int = imaging_plane_info["imaging_plane_depth"]
     
     imaging_config = ImagingConfig(
         device_name=microscope_name,
@@ -165,7 +236,6 @@ def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> Imagin
             ),
         ],
         images=[
-            # TODO For multi-plane imaging, we should have all the planes here
             PlanarImage(
                 channel_name="Green channel",  # should match one of the defined channels above
                 image_to_acquisition_transform=[
@@ -176,20 +246,9 @@ def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> Imagin
                     # probably want to represent this.
                 ],
                 dimensions=Scale(
-                    scale=imaging_plane_dimensions
+                    scale=dimensions
                 ),
-                planes=[
-                    # TODO For multi-plane imaging, we should use the coupled plane class and pass the index
-                    # Make 0, 1 from group 1. 2, 3 from group 2, etc.
-                    # For multi-plane imaging, there are up to 8 planes
-                    Plane(
-                        depth=imaging_plane_depth,
-                        depth_unit=SizeUnit.UM,
-                        power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
-                        power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
-                        targeted_structure=imaging_plane_targeted_structure,
-                    ),
-                ],
+                planes=planes,
             ),
         ],
         sampling_strategy=SamplingStrategy(
@@ -201,21 +260,129 @@ def get_imaging_config(microscope_name: str, imaging_plane_info: dict) -> Imagin
     return imaging_config
 
 
-def get_all_imaging_configs(microscope_name: str, imaging_plane_info_all: list[dict]) -> list[ImagingConfig]:
-    """Generates imaging configurations for all planes of a visual behavior behavior-ophys acquisition.
+def get_single_plane_imaging_config(microscope_name: str, imaging_plane_info: dict) -> ImagingConfig:
+    """Generates an imaging configuration for a single-plane visual behavior behavior-ophys acquisition.
     
     Args:
         microscope_name: The name of the microscope used for imaging.
-        imaging_plane_info_all: A list of dictionaries containing imaging plane metadata for each plane.
+        imaging_plane_info: A dictionary containing imaging plane metadata for a single plane.
 
     Returns:
-        A list of ImagingConfig objects representing the imaging configurations for all planes.
+        An ImagingConfig object representing the imaging configuration for the plane.
     """
-    imaging_configs = list()
+    imaging_plane: ImagingPlane = imaging_plane_info["imaging_plane"]
+    imaging_plane_dimensions: list[int] = imaging_plane_info["imaging_plane_dimensions"]
+    imaging_plane_targeted_structure: CCFv3 = imaging_plane_info["imaging_plane_targeted_structure"]
+    imaging_plane_depth: int = imaging_plane_info["imaging_plane_depth"]
+
+    planes = [
+        Plane(
+            depth=imaging_plane_depth,
+            depth_unit=SizeUnit.UM,
+            power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
+            power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
+            targeted_structure=imaging_plane_targeted_structure,
+        ),
+    ]
+
+    return create_imaging_config(microscope_name, imaging_plane, imaging_plane_dimensions, planes)
+
+
+def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: list[dict]) -> ImagingConfig:
+    """Generates imaging configuration for a multi-plane (coupled planes) visual behavior behavior-ophys acquisition.
+
+    See Visual Behavior Technical White Paper
+    SECTION E: IN VIVO 2-PHOTON CALCIUM IMAGING. HARDWARE & INSTRUMENTATION
+    which often references methods from de Vries et al., 2020
+
+    Args:
+        microscope_name: The name of the microscope used for imaging.
+        imaging_plane_info: A list of dictionaries containing imaging plane metadata:
+            imaging_plane: The imaging plane object.
+            imaging_plane_dimensions: The dimensions of the imaging plane.
+            imaging_plane_targeted_structure: The targeted brain structure of the imaging plane.
+            imaging_plane_depth: The depth of the imaging plane.
+
+    Returns:
+        An ImagingConfig object representing the imaging configuration for the plane.
+    """
+
+    # Sanity check that all planes have the same basic parameters
+    first_imaging_plane_info = imaging_plane_info_all[0]
+    for imaging_plane_info in imaging_plane_info_all[1:]:
+        assert imaging_plane_info["device"].name == first_imaging_plane_info["device"].name
+        assert imaging_plane_info["imaging_plane"].imaging_rate == first_imaging_plane_info["imaging_plane"].imaging_rate
+        assert imaging_plane_info["imaging_plane"].indicator == first_imaging_plane_info["imaging_plane"].indicator
+        assert imaging_plane_info["imaging_plane"].excitation_lambda == first_imaging_plane_info["imaging_plane"].excitation_lambda
+        assert imaging_plane_info["imaging_plane"].optical_channel[0].emission_lambda == first_imaging_plane_info["imaging_plane"].optical_channel[0].emission_lambda
+        assert imaging_plane_info["imaging_plane_dimensions"] == first_imaging_plane_info["imaging_plane_dimensions"]
+
+    # Split planes into groups of coupled planes
+    # Visual behavior multi-plane ophys has 4 groups of coupled planes
+    grouped_imaging_planes: list[list[dict]] = [list() for _ in range(4)]
     for imaging_plane_info in imaging_plane_info_all:
-        imaging_config = get_imaging_config(microscope_name, imaging_plane_info)
-        imaging_configs.append(imaging_config)
-    return imaging_configs
+        # NOTE: order of planes within a group is arbitrary
+        imaging_plane_group = imaging_plane_info["imaging_plane_group"]
+        grouped_imaging_planes[imaging_plane_group].append(imaging_plane_info)
+    for imaging_plane_group in grouped_imaging_planes:
+        count = len(imaging_plane_group)
+        assert count <= 2, f"Expected at most 2 planes per imaging plane group, instead found {count} for group {imaging_plane_group}"
+
+    imaging_plane: ImagingPlane = first_imaging_plane_info["imaging_plane"]
+    imaging_plane_dimensions: list[int] = first_imaging_plane_info["imaging_plane_dimensions"]
+
+    planes = list()
+    for group_index, imaging_plane_group in enumerate(grouped_imaging_planes):
+        if len(imaging_plane_group) == 0:
+            continue  # skip empty groups
+        if len(imaging_plane_group) == 1:
+            # only one plane in this group, so just add it as a regular Plane
+            first_plane_index = group_index * 2
+            imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]
+            imaging_plane_targeted_structure = imaging_plane_group[0]["imaging_plane_targeted_structure"]
+            plane = CoupledPlane(
+                depth=imaging_plane_depth,
+                depth_unit=SizeUnit.UM,
+                power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
+                power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
+                targeted_structure=imaging_plane_targeted_structure,
+                plane_index=first_plane_index,
+                coupled_plane_index=-1,  # TODO what to put here if there is no coupled plane? @Saskia
+                power_ratio=1.0,  # TODO Add power ratio (required) based on number of planes and power sharing. @Saskia
+            )
+            planes.append(plane)
+        else:
+            first_plane_index = group_index * 2
+            second_plane_index = first_plane_index + 1
+            imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]
+            imaging_plane_targeted_structure = imaging_plane_group[0]["imaging_plane_targeted_structure"]
+            plane = CoupledPlane(
+                depth=imaging_plane_depth,
+                depth_unit=SizeUnit.UM,
+                power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
+                power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
+                targeted_structure=imaging_plane_targeted_structure,
+                plane_index=first_plane_index,
+                coupled_plane_index=second_plane_index,
+                power_ratio=1.0,  # TODO Add power ratio (required) based on number of planes and power sharing. @Saskia
+            )
+            planes.append(plane)
+
+            imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]
+            imaging_plane_targeted_structure = imaging_plane_group[0]["imaging_plane_targeted_structure"]
+            plane = CoupledPlane(
+                depth=imaging_plane_depth,
+                depth_unit=SizeUnit.UM,
+                power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
+                power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
+                targeted_structure=imaging_plane_targeted_structure,
+                plane_index=second_plane_index,  # NOTE this is swapped compared to the first plane above
+                coupled_plane_index=first_plane_index,
+                power_ratio=1.0,  # TODO Add power ratio (required) based on number of planes and power sharing. @Saskia
+            )
+            planes.append(plane)
+
+    return create_imaging_config(microscope_name, imaging_plane, imaging_plane_dimensions, planes)
 
 
 def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_paths: list[str]) -> Acquisition:
@@ -245,119 +412,35 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
     assert len(nwbfile.devices) == 1
     device = next(iter(nwbfile.devices.values()))
 
+    # TODO the microscope name will need to match the device name defined in the instrument file
+    microscope_name = device.name  # such as CAM2P.3 or MESO.1
+
     if is_single_plane:
         # single-plane ophys sessions use the Scientifica rig
         assert re.match("CAM2P\.\d", device.name)
         assert device.description == "Allen Brain Observatory - Scientifica 2P Rig"
         assert device.manufacturer == "Scientifica"
+        imaging_plane_info = process_nwb_imaging_plane(plane_nwb_file_paths[0], subject_id_int, is_single_plane)
+        imaging_config = get_single_plane_imaging_config(device.name, imaging_plane_info)
     else:
         # multi-plane ophys sessions use the Mesoscope rig
         assert device.name == "MESO.1"
         assert device.description == "Allen Brain Observatory - Mesoscope 2P Rig"
         assert device.manufacturer is None
 
-
-    # cross-check with custom metadata object in each NWB file
-    imaging_plane_info_all = list()
-    for file_path in plane_nwb_file_paths:
-        nwbfile_plane = read_nwb(file_path)
-        ophys_experiment_id_plane = int(nwbfile_plane.identifier)  # e.g., 788490510, which corresponds to behavior_session_id 788017709, ophys_session_id 787661032, ophys_container_id 782536745
-        session_info_plane = ophys_experiment_table.query("mouse_id == @subject_id_int and ophys_experiment_id == @ophys_experiment_id_plane")
-        assert len(session_info_plane) == 1, (
-            "Expected exactly one matching ophys experiment table entry "
-            f"for mouse_id=={subject_id_int} and ophys_experiment_id=={ophys_experiment_id_plane}, "
-            f"instead found {len(session_info_plane)}"
-        )
-
-        imaging_plane_info = process_nwb_imaging_plane(nwbfile_plane, is_single_plane)
-        imaging_plane_info_all.append(imaging_plane_info)
-
-        imaging_plane_dimensions = imaging_plane_info["imaging_plane_dimensions"]
-        imaging_plane_targeted_structure_str = imaging_plane_info["imaging_plane_targeted_structure_str"]
-        imaging_plane_depth = imaging_plane_info["imaging_plane_depth"]
-
-        # Check that the plane-specific metadata in each NWB file matches the expected values
-        # from elsewhere in the NWB file and from ophys_experiment_table.csv
-        # TODO: Store all of these values in the Acquisition JSON? or elsewhere??
-        ophys_behavior_metadata_plane = nwbfile_plane.lab_meta_data["metadata"]  # neurodata_type: OphysBehaviorMetadata
-        # Example values from a single-plane NWB file:
-        # behavior_session_uuid	"bdc41492-1797-4c91-81ba-18fc0a25d238"
-        # equipment_name	"CAM2P.5"
-        # field_of_view_height	512
-        # field_of_view_width	447
-        # imaging_depth	375
-        # imaging_plane_group	-1
-        # imaging_plane_group_count	0
-        # ophys_container_id	782536745
-        # ophys_experiment_id	788490510
-        # ophys_session_id	787661032
-        # project_code	"VisualBehavior"
-        # session_type	"OPHYS_6_images_B"
-        # stimulus_frame_rate	60
-        # targeted_imaging_depth	375
-
-        # TODO For visual coding, a container is all the data collected from the same FoV. 
-        # Current schema - no concept of a "session" but useful to maintain this information for continuity
-        # Put in notes in data description field. Same for container id
-        # There is "tags" field in the data description. Use that for container id. 
-
-        # For Visual Behavior
-        # Put experiment ID in the data stream notes for now
-
-        assert ophys_behavior_metadata_plane.equipment_name == device.name
-
-        if is_single_plane:
-            assert re.match("CAM2P\.\d", session_info_plane["equipment_name"].values[0])
-        else:
-            assert session_info_plane["equipment_name"].values[0] == "MESO.1"
-        assert session_info_plane["equipment_name"].values[0] == device.name
-
-        assert [
-            ophys_behavior_metadata_plane.field_of_view_width, 
-            ophys_behavior_metadata_plane.field_of_view_height
-        ] == imaging_plane_dimensions
-
-        assert ophys_behavior_metadata_plane.imaging_depth == imaging_plane_depth
-        assert imaging_plane_depth == session_info_plane["imaging_depth"].values[0]
-
-        if is_single_plane:
-            assert ophys_behavior_metadata_plane.imaging_plane_group == -1
-            assert ophys_behavior_metadata_plane.imaging_plane_group_count == 0
-            assert np.isnan(session_info_plane["imaging_plane_group"].values[0])
-        else:
-            assert ophys_behavior_metadata_plane.imaging_plane_group >= 0  # TODO Use this to figure out the coupled planes
-            assert ophys_behavior_metadata_plane.imaging_plane_group_count == 4
-            assert session_info_plane["imaging_plane_group"].values[0] == ophys_behavior_metadata_plane.imaging_plane_group
-    
-        assert ophys_behavior_metadata_plane.ophys_container_id == session_info_plane["ophys_container_id"].values[0]
-        assert ophys_behavior_metadata_plane.ophys_experiment_id == session_info_plane["ophys_experiment_id"].values[0]
-        assert ophys_behavior_metadata_plane.ophys_session_id == session_info_plane["ophys_session_id"].values[0]
-        if is_single_plane:
-            assert ophys_behavior_metadata_plane.project_code in ("VisualBehavior", "VisualBehaviorTask1B")
-        else:
-            assert ophys_behavior_metadata_plane.project_code in ("VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d")
-        assert ophys_behavior_metadata_plane.project_code == session_info_plane["project_code"].values[0]
-        assert ophys_behavior_metadata_plane.session_type == session_info_plane["session_type"].values[0]
-
-        assert ophys_behavior_metadata_plane.stimulus_frame_rate == 60
-
-        assert ophys_behavior_metadata_plane.targeted_imaging_depth == session_info_plane["targeted_imaging_depth"].values[0]
-
-        # also cross-check other values from the NWB file with the session info
-        assert imaging_plane_targeted_structure_str == session_info_plane["targeted_structure"].values[0]
-
-
-    # TODO the microscope name will need to match the device name defined in the instrument file
-    microscope_name = device.name  # such as CAM2P.3 or MESO.1
-
-    all_imaging_configs = get_all_imaging_configs(microscope_name, imaging_plane_info_all)
+        # cross-check with custom metadata object in each NWB file
+        imaging_plane_info_all = list()
+        for file_path in plane_nwb_file_paths:
+            imaging_plane_info = process_nwb_imaging_plane(file_path, subject_id_int, is_single_plane)
+            imaging_plane_info_all.append(imaging_plane_info)
+        imaging_config = get_multiplane_imaging_config(device.name, imaging_plane_info_all)
 
     acquisition = Acquisition(
         subject_id=get_subject_id(nwbfile, session_info=session_info),
         specimen_id=None,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        experimenters=None,
+        # experimenters=None,
         protocol_id=None,
         ethics_review_id=None,  # TODO @Saskia
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
@@ -392,7 +475,7 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
                     # The lickspout retracts for safe load and unload of the mouse.
                 ],
                 configurations=[
-                    *all_imaging_configs,
+                    imaging_config,
                     DetectorConfig(
                         device_name="BehaviorCamera",
                         exposure_time=33,
@@ -415,7 +498,7 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
         stimulus_epochs=[
             # TODO consult StimulusEpoch objects from acquisition_visual_behavior_ophys_behavior.py
         ], 
-        manipulations=None,
+        # manipulations=None,
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,
@@ -433,15 +516,18 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
 if __name__ == "__main__":
     # example file for initial debugging
     # TODO - replace with more general ingestion/generation script
+    subject_id = "403491"
+    nwbfile_session_id = "20181129T093257"  # example behavior+ophys file for VisualBehavior project (single plane)
+    
     subject_id = "457841"
     nwbfile_session_id = "20190920T095938"  # example behavior+ophys file for VisualBehaviorMultiscope project (7 imaging planes)
 
     subject_id = "499478"
-    nwbfile_session_id = "20200218T091535"  # example behavior+ophys file for VisualBehaviorMultiscope4areasx2d project (8 imaging planes)
+    nwbfile_session_id = "20200218T091535"  # example behavior+ophys file for VisualBehaviorMultiscope4areasx2d project (7 imaging planes)
 
     # each nwb file represents one plane of a multi plane ophys session
-    file_paths = glob.glob(f"C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-{nwbfile_session_id}_obj-*_image+ophys.nwb")
-    print(f"Found {len(file_paths)} NWB files for subject {subject_id}, session {nwbfile_session_id}")
+    file_paths = glob.glob(f"C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-{nwbfile_session_id}*_image+ophys.nwb")
+    print(f"Found {len(file_paths)} NWB file(s) for subject {subject_id}, session {nwbfile_session_id}")
     assert len(file_paths) >= 1, "Expected at least one NWB file for the specified subject and session"
 
     acquisition = generate_acquisition_json(subject_id, nwbfile_session_id, file_paths)
