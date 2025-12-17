@@ -51,17 +51,42 @@ for session_id in ephys_session_ids:
         for f in probe_filenames:
             with NWBHDF5IO(f, 'r') as probe_io:
                 probe_nwbfile = probe_io.read()
-                
-                # add ecephys data to main nwbfile
-                # TODO - need to update electrodes to reference new columns
-                lfp_data = probe_nwbfile.acquisition[f'probe_{probe_nwbfile.identifier}_lfp']
-                lfp_data.reset_parent()
-                nwbfile.add_acquisition(lfp_data)
 
-                # add processing modules to main nwbfile
-                # TODO - need to update names so that not all the same name within the file
+                # First, get the electrode indices from the probe file and add to main electrodes table
+                probe_electrode_ids = probe_nwbfile.electrodes.id[:]
+
+                # # Build mapping from old to new electrode indices
+                # electrode_mapping = {}
+                # for old_idx, electrode_id in enumerate(probe_electrode_ids):
+                #     # Copy each electrode from probe to main nwbfile
+                #     electrode_row = {col: probe_nwbfile.electrodes[col][old_idx]
+                #                    for col in probe_nwbfile.electrodes.colnames}
+                #     nwbfile.add_electrode(**electrode_row)
+                #     # Map old index to new index in the combined table
+                #     new_idx = len(nwbfile.electrodes) - 1
+                #     electrode_mapping[old_idx] = new_idx
+
+                # # Get LFP data and update electrode references
+                # lfp_data = probe_nwbfile.acquisition[f'probe_{probe_nwbfile.identifier}_lfp']
+
+                # # Create new electrode table region with updated indices
+                # old_electrodes = lfp_data.electrical_series['LFP'].electrodes
+                # new_electrode_indices = [electrode_mapping[idx] for idx in old_electrodes.data]
+                # new_electrodes_region = nwbfile.create_electrode_table_region(
+                #     region=new_electrode_indices,
+                #     description=old_electrodes.description,
+                #     name='electrodes'
+                # )
+
+                # # Update the electrical series with new electrode references
+                # lfp_data.electrical_series['LFP'].electrodes = new_electrodes_region
+                # lfp_data.reset_parent()
+                # nwbfile.add_acquisition(lfp_data)
+
+                # Add processing module with probe-specific name
                 csd = probe_nwbfile.processing['current_source_density']
                 csd.reset_parent()
+                csd.name = f'probe_{probe_nwbfile.identifier}_current_source_density'
                 nwbfile.add_processing_module(csd)
 
         # export to zarr
