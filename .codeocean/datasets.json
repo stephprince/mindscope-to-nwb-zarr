@@ -1,0 +1,17 @@
+{
+	"version": 1,
+	"attached_datasets": [
+		{
+			"id": "a63a5366-59e9-4ace-9b1d-d3d0b72a264a",
+			"mount": "allen-brain-observatory"
+		},
+		{
+			"id": "cab43d4e-e1dd-437b-9c37-544f8911c4d9",
+			"mount": "visual-behavior-ophys"
+		},
+		{
+			"id": "d6805a10-89fc-4b22-a9b3-99ce5a44756b",
+			"mount": "visual-behavior-neuropixels"
+		}
+	]
+}

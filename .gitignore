@@ -231,3 +231,4 @@ _version.py
 !.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/*.code-snippets
+.vscode
