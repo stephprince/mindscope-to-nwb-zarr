@@ -1,10 +1,11 @@
 import quilt3 as q3
 
-from pynwb import NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 from pathlib import Path
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
+from pynwb import NWBHDF5IO, load_namespaces
 from pynwb.validation import validate
+from pynwb.ecephys import ElectricalSeries, LFP
 
 from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorNeuropixelsProjectCache
 
@@ -44,7 +45,7 @@ for session_id in ephys_session_ids:
         nwbfile.set_modified()
 
         # use modified ndx-aibs-ecephys extension to read and write files
-        extension_spec = "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"
+        extension_spec = "code/ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"
         load_namespaces(extension_spec)
 
         # pull additional data from each of the probe files and add to the main nwbfile
@@ -52,42 +53,65 @@ for session_id in ephys_session_ids:
             with NWBHDF5IO(f, 'r') as probe_io:
                 probe_nwbfile = probe_io.read()
 
-                # First, get the electrode indices from the probe file and add to main electrodes table
+                # Build mapping from probe indices to main file indices based on electrode IDs
                 probe_electrode_ids = probe_nwbfile.electrodes.id[:]
+                main_electrode_ids = nwbfile.electrodes.id[:]
 
-                # # Build mapping from old to new electrode indices
-                # electrode_mapping = {}
-                # for old_idx, electrode_id in enumerate(probe_electrode_ids):
-                #     # Copy each electrode from probe to main nwbfile
-                #     electrode_row = {col: probe_nwbfile.electrodes[col][old_idx]
-                #                    for col in probe_nwbfile.electrodes.colnames}
-                #     nwbfile.add_electrode(**electrode_row)
-                #     # Map old index to new index in the combined table
-                #     new_idx = len(nwbfile.electrodes) - 1
-                #     electrode_mapping[old_idx] = new_idx
+                electrode_mapping = {}
+                for old_idx, electrode_id in enumerate(probe_electrode_ids):
+                    matching_indices = [i for i, main_id in enumerate(main_electrode_ids) if main_id == electrode_id]
+                    assert len(matching_indices) == 1, f"Expected exactly one matching electrode for ID {electrode_id}, found {len(matching_indices)}"
+                    electrode_mapping[old_idx] = matching_indices[0]
 
-                # # Get LFP data and update electrode references
-                # lfp_data = probe_nwbfile.acquisition[f'probe_{probe_nwbfile.identifier}_lfp']
+                lfp_container = probe_nwbfile.acquisition[f'probe_{probe_nwbfile.identifier}_lfp']
+                old_electrical_series = lfp_container[f'probe_{probe_nwbfile.identifier}_lfp_data']
 
-                # # Create new electrode table region with updated indices
-                # old_electrodes = lfp_data.electrical_series['LFP'].electrodes
-                # new_electrode_indices = [electrode_mapping[idx] for idx in old_electrodes.data]
-                # new_electrodes_region = nwbfile.create_electrode_table_region(
-                #     region=new_electrode_indices,
-                #     description=old_electrodes.description,
-                #     name='electrodes'
-                # )
+                # Create new electrode table region with updated indices
+                old_electrodes = old_electrical_series.electrodes
+                new_electrode_indices = [electrode_mapping[idx] for idx in old_electrodes.data]
+                new_electrodes_region = nwbfile.create_electrode_table_region(
+                    region=new_electrode_indices,
+                    description=old_electrodes.description,
+                )
 
-                # # Update the electrical series with new electrode references
-                # lfp_data.electrical_series['LFP'].electrodes = new_electrodes_region
-                # lfp_data.reset_parent()
-                # nwbfile.add_acquisition(lfp_data)
+                # Create new ElectricalSeries with updated electrode references
+                # Read data into memory to avoid HDF5 reference issues during Zarr export
+                new_electrical_series = ElectricalSeries(
+                    name=old_electrical_series.name,
+                    data=old_electrical_series.data[:],
+                    electrodes=new_electrodes_region,
+                    timestamps=old_electrical_series.timestamps[:] if hasattr(old_electrical_series.timestamps, '__getitem__') else old_electrical_series.timestamps,
+                    resolution=old_electrical_series.resolution,
+                    conversion=old_electrical_series.conversion,
+                    comments=old_electrical_series.comments,
+                    description=old_electrical_series.description,
+                )
 
-                # Add processing module with probe-specific name
-                csd = probe_nwbfile.processing['current_source_density']
-                csd.reset_parent()
-                csd.name = f'probe_{probe_nwbfile.identifier}_current_source_density'
-                nwbfile.add_processing_module(csd)
+                # Create new LFP container with the updated electrical series
+                new_lfp = LFP(name=lfp_container.name, electrical_series=new_electrical_series)
+                nwbfile.add_acquisition(new_lfp)
+
+                # Add processing module with general current source density name
+                if 'current_source_density' not in nwbfile.processing.keys():
+                    old_csd_processing_module = probe_nwbfile.processing['current_source_density']
+                    old_csd_processing_module.reset_parent()
+                    old_csd = old_csd_processing_module['ecephys_csd']
+
+                    # remove old csd from processing module and add the now empty module
+                    old_csd_processing_module.data_interfaces.pop('ecephys_csd')
+                    nwbfile.add_processing_module(old_csd_processing_module)
+                else:
+                    old_csd = probe_nwbfile.processing['current_source_density']['ecephys_csd']
+
+                # Create new EcephysCSD object with new name and add to processing module
+                EcephysCSD = read_io.manager.type_map.get_dt_container_cls('EcephysCSD', 'ndx-aibs-ecephys')
+                new_csd = EcephysCSD(name=f'probe_{probe_nwbfile.identifier}_current_source_density',
+                                     time_series=old_csd.time_series,
+                                     virtual_electrode_x_positions=old_csd.virtual_electrode_x_positions,
+                                     virtual_electrode_y_positions=old_csd.virtual_electrode_y_positions,
+                                     virtual_electrode_x_positions__unit=old_csd.virtual_electrode_x_positions__unit,
+                                     virtual_electrode_y_positions__unit=old_csd.virtual_electrode_y_positions__unit)
+                nwbfile.processing['current_source_density'].add(new_csd)
 
         # export to zarr
         with NWBZarrIO(zarr_filename, mode='w') as export_io:

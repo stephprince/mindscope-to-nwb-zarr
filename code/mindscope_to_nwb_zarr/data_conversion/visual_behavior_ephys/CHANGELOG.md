@@ -4,7 +4,7 @@
 
 ### TODO 
 
-* Combine probe file LFP + CSD data into single NWB file
+* Combine probe file LFP + CSD data into single NWB file # TODO - decide about where to put LFP data
     * add note about how different LFP objects may come from different probes
 * Move LFP data into processing / LFP module (if it underwent processing? Otherwise leave in acquisition)
 * Change the stimulus_template ImageSeries to a set of Image objects in an Images container, and change the IndexSeries to link to this Images container (will solve CriticalError and nan values)
