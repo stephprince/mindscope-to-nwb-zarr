@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 import shutil
 import pandas as pd
@@ -6,11 +7,26 @@ from pynwb import NWBHDF5IO
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
 
+print("STARTING CODE OCEAN CAPSULE RUN")
+
 # Define Code Ocean folder paths
 code_folder = Path(__file__).parent
 data_folder = Path("../data/")
 scratch_folder = Path("../scratch/")
 results_folder = Path("../results/")
+
+
+def list_files(startpath):
+    for root, dirs, files in os.walk(startpath):
+        level = root.replace(startpath, '').count(os.sep)
+        indent = ' ' * 4 * (level)
+        print('{}{}/'.format(indent, os.path.basename(root)))
+        subindent = ' ' * 4 * (level + 1)
+        for f in files:
+            print('{}{}'.format(subindent, f))
+print("DATA FOLDER STRUCTURE:")
+list_files(data_folder)
+
 
 DATA_ALL_FOLDER = data_folder / "all"
 assert DATA_ALL_FOLDER.exists(), \
