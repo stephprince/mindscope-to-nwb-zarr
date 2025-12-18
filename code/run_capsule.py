@@ -12,6 +12,10 @@ data_folder = Path("../data/")
 scratch_folder = Path("../scratch/")
 results_folder = Path("../results/")
 
+DATA_ALL_FOLDER = data_folder / "all"
+assert DATA_ALL_FOLDER.exists(), \
+    f"Data all folder does not exist: {DATA_ALL_FOLDER}"
+
 # Define dataset paths
 VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_sessions"
 VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_ophys_experiments"
