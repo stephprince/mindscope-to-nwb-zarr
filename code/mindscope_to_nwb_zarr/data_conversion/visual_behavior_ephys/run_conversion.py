@@ -1,14 +1,89 @@
 import quilt3 as q3
+import numpy as np
 
-from hdmf_zarr.nwb import NWBZarrIO
 from pathlib import Path
+
+from pynwb import NWBFile, NWBHDF5IO, validate, load_namespaces
+from pynwb.ecephys import LFP
+from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
-from pynwb import NWBHDF5IO, load_namespaces
-from pynwb.validation import validate
-from pynwb.ecephys import ElectricalSeries, LFP
 
 from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorNeuropixelsProjectCache
 
+
+def inspect_zarr_file(zarr_filename):
+    with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
+        nwbfile = zarr_io.read()
+
+        # inspect nwb file with io object
+        # NOTE - this does not run pynwb validation, will run that separately
+        messages = list(inspect_nwbfile_object(nwbfile))
+
+        # format and print messages nicely
+        if messages:
+            formatted_messages = format_messages(
+                messages=messages,
+                levels=["importance", "file_path"],
+                reverse=[True, False]
+            )
+            save_report(report_file_path=f"data/{Path(zarr_filename).stem}_report.txt", 
+                        formatted_messages=formatted_messages,
+                        overwrite=True)
+
+        # validate file with IO object
+        # TODO - waiting to fix hdmf-zarr related validation issues before including
+        validation_errors = validate(io=zarr_io)
+        print(validation_errors)
+
+def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NWBFile:
+    """ Combine LFP and CSD data from a probe NWB file into the main NWB file."""
+
+    # Build mapping from probe indices to main file indices based on electrode IDs
+    probe_electrode_ids = probe_nwbfile.electrodes.id[:]
+    main_electrode_ids = base_nwbfile.electrodes.id[:]
+
+    electrode_mapping = {}
+    for old_idx, electrode_id in enumerate(probe_electrode_ids):
+        matching_indices = [i for i, main_id in enumerate(main_electrode_ids) if main_id == electrode_id]
+        assert len(matching_indices) == 1, f"Expected exactly one matching electrode for ID {electrode_id}, found {len(matching_indices)}"
+        electrode_mapping[old_idx] = matching_indices[0]
+
+    acquisition_name = f'probe_{probe_nwbfile.identifier}_lfp'
+    lfp_container = probe_nwbfile.acquisition[acquisition_name]
+    old_electrical_series = lfp_container[f'{acquisition_name}_data']
+    old_electrical_series.reset_parent()
+
+    # Create new electrode table region with updated indices
+    old_electrodes = old_electrical_series.electrodes
+    new_electrode_indices = [electrode_mapping[idx] for idx in old_electrodes.data]
+    new_electrodes_region = base_nwbfile.create_electrode_table_region(
+        region=new_electrode_indices,
+        description=old_electrodes.description,
+    )
+
+    # Create new LFP container with the updated electrical series
+    # WARNING: this is a workaround to modify an attribute that should not be able to be reset, validation should always be performed afterwards
+    new_lfp = LFP(name=lfp_container.name, electrical_series=old_electrical_series)
+    new_lfp[f'{acquisition_name}_data']._remove_child(new_lfp[f'{acquisition_name}_data'].electrodes)
+    new_lfp[f'{acquisition_name}_data'].fields['electrodes'] = new_electrodes_region
+    new_lfp[f'{acquisition_name}_data'].fields['electrodes'].parent = new_lfp[f'{acquisition_name}_data']
+    
+    # Modify CSD container to have unique name
+    # WARNING: this is a workaround to modify a name but is not recommended, validation should always be performed afterwards
+    csd = probe_nwbfile.processing['current_source_density']['ecephys_csd']
+    csd.reset_parent()
+    csd._AbstractContainer__name = f'probe_{probe_nwbfile.identifier}_ecephys_csd'
+
+    # Add ecephys processing module with lfp data
+    if 'ecephys' not in nwbfile.processing.keys():
+        base_nwbfile.create_processing_module(name='ecephys',
+                                            description=("Processed ecephys data from individual probes. Includes LFP and "
+                                                        f"{probe_nwbfile.processing['current_source_density'].description}."))
+    
+    base_nwbfile.processing['ecephys'].add(new_lfp)
+    base_nwbfile.processing['ecephys'].add(csd)
+    
+    return base_nwbfile
 
 # get all session ids
 output_dir =  Path(".cache/visual_behavior_neuropixels_cache_dir")
@@ -52,77 +127,36 @@ for session_id in ephys_session_ids:
         io_objects = [NWBHDF5IO(f, 'r') for f in probe_filenames]
         for probe_io in io_objects:
             probe_nwbfile = probe_io.read()
+            nwbfile = combine_probe_file_info(nwbfile, probe_nwbfile)
 
-            # Build mapping from probe indices to main file indices based on electrode IDs
-            probe_electrode_ids = probe_nwbfile.electrodes.id[:]
-            main_electrode_ids = nwbfile.electrodes.id[:]
+        # add missing experiment description field (from technical white paper)
+        nwbfile.experiment_description = ("The Visual Behavior Neuropixels project utilized the "
+                                          "Allen Brain Observatory platform for in vivo Neuropixels "
+                                          "recordings to collect a large-scale, highly standardized "
+                                          "dataset consisting of recordings of neural activity "
+                                          "in mice performing a visually guided task. The Visual "
+                                          "Behavior dataset is built upon a change detection "
+                                          "behavioral task. Briefly, in this go/no-go task, mice "
+                                          "are presented with a continuous series of briefly "
+                                          "presented stimuli and they earn water rewards by correctly "
+                                          "reporting when the identity of the image changes. "
+                                          "This dataset includes recordings using Neuropixels 1.0 "
+                                          "probes. We inserted up to 6 probes simultaneously in "
+                                          "each mouse for up to two consecutive recording days.")
 
-            electrode_mapping = {}
-            for old_idx, electrode_id in enumerate(probe_electrode_ids):
-                matching_indices = [i for i, main_id in enumerate(main_electrode_ids) if main_id == electrode_id]
-                assert len(matching_indices) == 1, f"Expected exactly one matching electrode for ID {electrode_id}, found {len(matching_indices)}"
-                electrode_mapping[old_idx] = matching_indices[0]
-
-            acquisition_name = f'probe_{probe_nwbfile.identifier}_lfp'
-            lfp_container = probe_nwbfile.acquisition[acquisition_name]
-            old_electrical_series = lfp_container[f'{acquisition_name}_data']
-            old_electrical_series.reset_parent()
-
-            # Create new electrode table region with updated indices
-            old_electrodes = old_electrical_series.electrodes
-            new_electrode_indices = [electrode_mapping[idx] for idx in old_electrodes.data]
-            new_electrodes_region = nwbfile.create_electrode_table_region(
-                region=new_electrode_indices,
-                description=old_electrodes.description,
-            )
-
-            # Create new LFP container with the updated electrical series
-            # WARNING: this is a workaround to modify an attribute that should not be able to be reset, validation should always be performed afterwards
-            new_lfp = LFP(name=lfp_container.name, electrical_series=old_electrical_series)
-            new_lfp[f'{acquisition_name}_data']._remove_child(new_lfp[f'{acquisition_name}_data'].electrodes)
-            new_lfp[f'{acquisition_name}_data'].fields['electrodes'] = new_electrodes_region
-            new_lfp[f'{acquisition_name}_data'].fields['electrodes'].parent = new_lfp[f'{acquisition_name}_data']
-            
-            nwbfile.add_acquisition(new_lfp)
-
-            # Add processing module with general current source density name
-            if 'current_source_density' not in nwbfile.processing.keys():                
-                nwbfile.create_processing_module(name='current_source_density', 
-                                                description=probe_nwbfile.processing['current_source_density'].description)
-            csd = probe_nwbfile.processing['current_source_density']['ecephys_csd']
-            csd.reset_parent()
-
-            # WARNING: this is a workaround to modify a name, but pynwb does not currently have an API method for this
-            csd._AbstractContainer__name = f'probe_{probe_nwbfile.identifier}_ecephys_csd'
-            nwbfile.processing['current_source_density'].add(csd)
+        # change stimulus_template to Image objects in Images container
+        
 
         # export to zarr
         with NWBZarrIO(zarr_filename, mode='w') as export_io:
             export_io.export(src_io=read_io, nwbfile=nwbfile, write_args=dict(link_data=False))
 
+        # close IO objects for probe files
+        for probe_io in io_objects:
+            probe_io.close()
+
     # validate the file to make sure it was exported correctly
-    with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
-        nwbfile = zarr_io.read()
-
-        # inspect nwb file with io object
-        # NOTE - this does not run pynwb validation, will run that separately
-        messages = list(inspect_nwbfile_object(nwbfile))
-
-        # format and print messages nicely
-        if messages:
-            formatted_messages = format_messages(
-                messages=messages,
-                levels=["importance", "file_path"],
-                reverse=[True, False]
-            )
-            save_report(report_file_path=f"data/{Path(zarr_filename).stem}_report.txt", 
-                        formatted_messages=formatted_messages,
-                        overwrite=True)
-
-        # validate file with IO object
-        # TODO - waiting to fix hdmf-zarr related validation issues before including
-        validate(io=zarr_io)  
-
+    inspect_zarr_file(zarr_filename)
 
 
 # download behavior only session files

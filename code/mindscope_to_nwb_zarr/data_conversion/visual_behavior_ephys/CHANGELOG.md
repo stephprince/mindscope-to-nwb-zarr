@@ -1,16 +1,16 @@
 ## Visual Behavior - Neuropixels
 
 ### Implemented
+* Combined probe files containing LFP + CSD data into single NWB file
+* Moved LFP data into processing module (best practice for storing downsampled and lowpass filtered data)
+* add missing experiment description
+
 
 ### TODO 
 
-* Combine probe file LFP + CSD data into single NWB file # TODO - decide about where to put LFP data
-    * add note about how different LFP objects may come from different probes
-* Move LFP data into processing / LFP module (if it underwent processing? Otherwise leave in acquisition)
+
 * Change the stimulus_template ImageSeries to a set of Image objects in an Images container, and change the IndexSeries to link to this Images container (will solve CriticalError and nan values)
 * move optotagging intervals table to top level nwbfile.intervals
-* remove unused 'imp' column from electrodes table
-* add missing experiment description
 * rename processing modules 
    * stimulus -> behavior (?)
    * running -> behavior
