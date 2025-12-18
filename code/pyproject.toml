@@ -2,7 +2,7 @@
 name = "mindscope-to-nwb-zarr"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
+readme = "../README.md"
 requires-python = ">=3.11"
 dependencies = [
     "aind-data-schema>=2.1.0",
@@ -22,8 +22,11 @@ source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
 # this file is created/updated when the package is installed and used in
-# src/mindscope_to_nwb_zarr/__init__.py to set `mindscope_to_nwb_zarr.__version__`
-version-file = "src/mindscope_to_nwb_zarr/_version.py"
+# mindscope_to_nwb_zarr/__init__.py to set `mindscope_to_nwb_zarr.__version__`
+version-file = "mindscope_to_nwb_zarr/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mindscope_to_nwb_zarr"]
 
 [tool.uv.sources]
 allensdk = { git = "https://github.com/rly/AllenSDK.git", rev = "a1d68976874097bdcb9b3321eda539538b24bb8b" }
