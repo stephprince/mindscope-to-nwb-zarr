@@ -112,6 +112,8 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     return base_nwbfile
 
 def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
+    """Add missing descriptions to NWB file based on the technical white paper."""
+
     if nwbfile.experiment_description is None:
         nwbfile.experiment_description = ("The Visual Behavior Neuropixels project utilized the "
                                         "Allen Brain Observatory platform for in vivo Neuropixels "
@@ -126,9 +128,69 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
                                         "This dataset includes recordings using Neuropixels 1.0 "
                                         "probes. We inserted up to 6 probes simultaneously in "
                                         "each mouse for up to two consecutive recording days.")
-        
-    
-        
+
+    # Add units table description
+    if hasattr(nwbfile, 'units') and nwbfile.units is not None:
+        nwbfile.units.fields['description'] = ("Units identified from spike sorting using Kilosort2. "
+                                     "Note that unlike the data from the Visual Coding Neuropixels pipeline, "
+                                     "for which potential noise units were filtered from the released "
+                                     "dataset, we have elected to return all units for the Visual Behavior "
+                                     "Neuropixels dataset.")
+
+        # Add descriptions for unit metrics columns from technical white papers and documentation
+        # See https://allensdk.readthedocs.io/en/latest/_static/examples/nb/visual_behavior_neuropixels_quality_metrics.html
+        # See https://brainmapportal-live-4cc80a57cd6e400d854-f7fdcae.divio-media.net/filer_public/80/75/8075a100-ca64-429a-b39a-569121b612b2/neuropixels_visual_coding_-_white_paper_v10.pdf
+        unit_column_descriptions = {
+            'amplitude': 'Difference (in microvolts) between the peak and trough of the waveform on a single channel.',
+            'spread': 'Spatial extent (in microns) of channels where the waveform amplitude exceeds 12% of the peak amplitude.',
+            'waveform_duration': 'Difference (in ms) of the time of the waveform peak and trough on the channel with maximum amplitude.',
+            'snr': 'Signal-to-noise ratio. Ratio between the waveform amplitude and 2x the standard deviation of the residual waveforms.',            
+            'firing_rate': 'Overall firing rate N/T, where N = number of spikes in the complete session and T = total time of the recording session in seconds.',
+            'presence_ratio': 'Fraction of 100 equal-sized time blocks that include 1 or more spikes from the unit. Units with low presence ratio likely drifted out of the recording, or could not be tracked by Kilosort2 for the duration of the experiment.',
+            'max_drift': 'Maximum range of the median peak channel within 51 s intervals throughout the session. Used to identify sessions with high probe motion.',
+            'silhouette_score': 'Standard metric of cluster quality computed by pairwise comparison between the PCs of the cluster and PCs of all other units with overlapping channels. Minimum silhouette score across all pairs (between -1 and 1, with 1 indicating perfect isolation).',
+            'isi_violations': 'Relative firing rate of contaminating spikes based on refractory period violations (<1.5 ms). Indicates whether unit contains spikes from multiple neurons.',
+            'amplitude_cutoff': 'Approximation of the unit false negative rate based on the spike amplitude distribution. Values closer to 0.5 indicate >50% of spikes may be missing.',
+            'isolation_distance': 'Take the center of the cluster in PC space and compute the Mahalanobis distance squared required to find the same number of “other” spikes as the total number of spikes for the unit. The better the cluster quality, the higher the isolation distance.',
+            'l_ratio': 'Sum of (1 - chi^2 CDF) for "other" spikes within the isolation distance sphere, divided by total "other" spikes. Lower values indicate better isolation.',
+            'd_prime': 'Separability of the unit from all other units based on linear discriminant analysis in PC space.',
+            'nn_miss_rate': 'Fraction of spikes from other units that have their nearest neighbors belonging to this unit.',
+            'nn_hit_rate': 'Fraction of the four nearest spikes in PC space that belong to this unit.',
+            'PT_ratio': 'Ratio of peak amplitude to trough amplitude for the 1D waveform (waveform on peak channel).',
+            'recovery_slope': 'Slope of the recovery of 1D waveform (waveform on peak channel) to baseline after repolarization (coming down from peak).',
+            'repolarization_slope': 'Maximum slope of the 1D waveform (waveform on peak channel) to baseline after trough.',
+            'velocity_below': 'Slope of spike propagation velocity traveling in ventral direction from soma (note to avoid infinite values, this is actually the inverse of velocity: ms/mm).',
+            'velocity_above': 'Slope of spike propagation velocity traveling in dorsal direction from soma (note to avoid infinite values, this is actually the inverse of velocity: ms/mm).',
+            'quality': 'Label assigned based on waveform shape. Either "good" for physiological waveforms or "noise" for artifactual waveforms.',
+            'peak_channel_id': 'Channel ID with the maximum amplitude waveform for this unit.',
+        }
+
+        for col_name in nwbfile.units.colnames:
+            if (nwbfile.units[col_name].description is None or \
+                nwbfile.units[col_name].description == "no description" and \
+                col_name in unit_column_descriptions):
+                nwbfile.units[col_name].fields['description'] = unit_column_descriptions[col_name]
+
+    # Add descriptions for optogenetic stimulation table
+    if 'optotagging' in nwbfile.processing.keys():
+        nwbfile.processing['optotagging'].fields['description'] = ("Processing module containing optotagging protocol information.")
+        nwbfile.processing['optotagging']['optogenetic_stimulation'].fields['description'] = ("Optogenetic stimulation periods from optotagging protocol during which the "
+                                                                   "cortical surface was stimulated with blue light.")
+
+        optostim_column_descriptions = {
+            'duration': 'Duration of the optogenetic light stimulus in seconds.',
+            'stimulus_name': 'Type of optogenetic stimulus (e.g., pulse, ramp).',
+            'level': 'Light level used for this stimulation.',
+            'condition': 'Optogenetic stimulus condition.',
+        }
+
+        for col_name, description in optostim_column_descriptions.items():
+            if col_name in nwbfile.processing['optotagging']['optogenetic_stimulation'].colnames:
+                nwbfile.processing['optotagging']['optogenetic_stimulation'][col_name].fields['description'] = description
+
+    # TODO - Add descriptions for stimulus presentations table columns
+    # TODO - Add descriptions for processing modules             
+
     return nwbfile
 
 def inspect_zarr_file(zarr_filename):
@@ -154,7 +216,6 @@ def inspect_zarr_file(zarr_filename):
         # TODO - waiting to fix hdmf-zarr related validation issues before including
         validation_errors = validate(io=zarr_io)
         print(validation_errors)
-
 
 def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_filename: Path, probe_filenames: list[Path]) -> None:
     """ Convert a Visual Behavior Ephys NWB HDF5 file and associated probe files to NWB Zarr format."""
