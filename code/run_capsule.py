@@ -25,7 +25,7 @@ def list_files(startpath):
         for f in files:
             print('{}{}'.format(subindent, f))
 print("DATA FOLDER STRUCTURE:")
-list_files(data_folder)
+list_files(str(data_folder))
 
 
 DATA_ALL_FOLDER = data_folder / "all"
