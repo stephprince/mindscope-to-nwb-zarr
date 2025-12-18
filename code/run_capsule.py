@@ -7,6 +7,7 @@ from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
 
 # Define Code Ocean folder paths
+code_folder = Path(__file__).parent
 data_folder = Path("../data/")
 scratch_folder = Path("../scratch/")
 results_folder = Path("../results/")
@@ -15,7 +16,7 @@ results_folder = Path("../results/")
 VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_sessions"
 VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_ophys_experiments"
 
-VISBEH_OPHYS_METADATA_TABLES_DIR = data_folder / "cached_metadata" / "visual-behavior-ophys" / "project_metadata"
+VISBEH_OPHYS_METADATA_TABLES_DIR = code_folder / "cached_metadata" / "visual-behavior-ophys" / "project_metadata"
 assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
     f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
 
