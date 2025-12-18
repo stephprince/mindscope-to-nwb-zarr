@@ -15,7 +15,7 @@ results_folder = Path("../results/")
 VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_sessions"
 VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_ophys_experiments"
 
-VISBEH_OPHYS_METADATA_TABLES_DIR = data_folder / "visual-behavior-ophys" / "project_metadata"
+VISBEH_OPHYS_METADATA_TABLES_DIR = data_folder / "cached_metadata" / "visual-behavior-ophys" / "project_metadata"
 assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
     f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
 
