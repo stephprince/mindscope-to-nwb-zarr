@@ -9,14 +9,6 @@
 	],
 	"parameters": [
 		{
-			"id": "le0cRdnVW5On7PfE",
-			"name": "input_nwb_dir",
-			"param_name": "input_nwb_dir",
-			"type": "text",
-			"value_type": "string",
-			"required": true
-		},
-		{
 			"id": "bOpuXxVVBa3NORL2",
 			"name": "dataset",
 			"param_name": "dataset",
