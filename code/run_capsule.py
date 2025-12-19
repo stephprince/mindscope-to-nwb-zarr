@@ -1,7 +1,9 @@
 import argparse
 from pathlib import Path
 import shutil
+import warnings
 import pandas as pd
+from tqdm import tqdm
 from pynwb import NWBHDF5IO
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
@@ -52,9 +54,7 @@ def iterate_behavior_sessions():
                 'behavior_session_id': behavior_session_id,
                 'ophys_experiment_id': None,
                 'session_type': session_type,
-                'expected_filename': nwb_filename,
-                'nwb_path': nwb_path if nwb_path.exists() else None,
-                'data_dir': data_dir,
+                'nwb_path': nwb_path,
             }
         else:
             # Has ophys session - parse the list of ophys_experiment_ids
@@ -65,14 +65,14 @@ def iterate_behavior_sessions():
             # Parse by stripping brackets and splitting on commas
             ids_str = ophys_experiment_id.strip('[]').strip()
             if not ids_str:
-                print(f"WARNING: behavior_session_id {behavior_session_id} has empty "
-                      f"ophys_experiment_id list, skipping")
+                warnings.warn(f"behavior_session_id {behavior_session_id} has empty "
+                              f"ophys_experiment_id list, skipping")
                 continue
             ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
 
             if len(ophys_exp_ids) > 1:
-                print(f"WARNING: behavior_session_id {behavior_session_id} has "
-                      f"{len(ophys_exp_ids)} ophys_experiment_ids: {ophys_exp_ids}")
+                warnings.warn(f"behavior_session_id {behavior_session_id} has "
+                              f"{len(ophys_exp_ids)} ophys_experiment_ids: {ophys_exp_ids}")
 
             for ophys_exp_id in ophys_exp_ids:
                 nwb_filename = f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
@@ -82,9 +82,7 @@ def iterate_behavior_sessions():
                     'behavior_session_id': behavior_session_id,
                     'ophys_experiment_id': ophys_exp_id,
                     'session_type': session_type,
-                    'expected_filename': nwb_filename,
-                    'nwb_path': nwb_path if nwb_path.exists() else None,
-                    'data_dir': data_dir,
+                    'nwb_path': nwb_path,
                 }
 
 
@@ -94,7 +92,6 @@ def convert_visual_behavior_2p_nwb_hdf5_to_zarr(hdf5_path: Path, zarr_path: Path
         zarr_path.touch()  # TODO remove test
         # with NWBZarrIO(str(zarr_path), mode='w') as export_io:
         #     export_io.export(src_io=read_io, write_args=dict(link_data=False))
-    print(f"Converted {hdf5_path} to Zarr format at {zarr_path}")
 
 
 # Code Ocean workflow:
@@ -118,49 +115,41 @@ def run():
     missing_nwb_errors = []
     missing_nwb_file_path = results_folder / "missing_nwb_files.txt"
 
+    # Collect all sessions first to get total count for progress bar
+    sessions = list(iterate_behavior_sessions())
+
     # Iterate through behavior sessions from CSV
-    for session_info in iterate_behavior_sessions():
+    for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
         behavior_session_id = session_info['behavior_session_id']
         ophys_experiment_id = session_info['ophys_experiment_id']
         session_type = session_info['session_type']
-        expected_filename = session_info['expected_filename']
-        input_nwb_path = session_info['nwb_path']
-        data_dir = session_info['data_dir']
+        nwb_path = session_info['nwb_path']
 
-        if ophys_experiment_id is not None:
-            print(f"\n--- Processing ophys_experiment {ophys_experiment_id} "
-                  f"(behavior_session {behavior_session_id}) ---")
-        else:
-            print(f"\n--- Processing behavior_session {behavior_session_id} ---")
-        print(f"Type: {session_type}, Expected file: {expected_filename}")
-
-        if input_nwb_path is None:
+        if not nwb_path.exists():
             error_msg = (f"behavior_session_id: {behavior_session_id}, "
                          f"ophys_experiment_id: {ophys_experiment_id}, "
                          f"session_type: {session_type}, "
-                         f"expected_filename: {expected_filename}, "
-                         f"search_dir: {data_dir}")
+                         f"nwb_path: {nwb_path}")
             missing_nwb_errors.append(error_msg)
-            print(f"WARNING: NWB file not found: {expected_filename}")
             continue
 
-        print(f"INPUT NWB: {input_nwb_path}")
-
-        # Output Zarr file path is just the input NWB file name with .zarr suffix in results folder
-        result_zarr_path = results_folder / input_nwb_path.name.replace(".nwb", ".nwb.zarr")
-        print(f"RESULT ZARR: {result_zarr_path}")
+        # Output Zarr file path mirrors the input path structure under results folder
+        # e.g., ../data/visual-behavior-ophys/behavior_sessions/file.nwb
+        #    -> ../results/visual-behavior-ophys/behavior_sessions/file.nwb.zarr
+        relative_path = nwb_path.relative_to(data_folder)
+        result_zarr_path = results_folder / relative_path.parent / (relative_path.name + ".zarr")
+        result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Convert based on dataset type
         if dataset.lower() == "visual behavior 2p":
             convert_visual_behavior_2p_nwb_hdf5_to_zarr(
-                hdf5_path=input_nwb_path,
+                hdf5_path=nwb_path,
                 zarr_path=result_zarr_path
             )
         else:
             raise ValueError(f"Dataset not recognized: {dataset}")
 
         inspector_report_path = results_folder / f"{result_zarr_path.stem}_report.txt"
-        print(f"INSPECTOR REPORT PATH: {inspector_report_path}")
 
         # Inspect output Zarr for validation errors
         # with NWBZarrIO(result_zarr_path, mode='r') as zarr_io:
