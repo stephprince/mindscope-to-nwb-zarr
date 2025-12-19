@@ -136,7 +136,7 @@ def run():
     print(f"Cleared results folder: {list(results_folder.iterdir())}")
 
     # Convert based on dataset type
-    if dataset == "Visual Behavior 2P":
+    if dataset.lower() == "visual behavior 2p":
         pass  # TODO     
     else:
         raise ValueError(f"Dataset not recognized: {dataset}")
