@@ -24,77 +24,68 @@ assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
     f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
 
 
-def format_session_datetime(date_str: str) -> str:
-    """Convert date_of_acquisition to NWB filename format.
-
-    Input: '2019-05-17 14:46:33.550000+00:00'
-    Output: '20190517T144633'
-    """
-    # Parse the date string - handle timezone and microseconds
-    # Remove timezone info and microseconds for parsing
-    date_str = date_str.split('+')[0].split('.')[0]
-    # Format: YYYYMMDDTHHMMSS
-    parts = date_str.replace('-', '').replace(':', '').replace(' ', 'T')
-    return parts
-
-
-def find_nwb_file(data_dir: Path, subject_id: str, session_datetime: str) -> Path | None:
-    """Find NWB file matching subject ID and session datetime.
-
-    NWB files follow patterns:
-
-    Visual Behavior 2P:
-    - Behavior: sub-{subject_id}_ses-{datetime}_image.nwb
-    - Behavior-ophys: sub-{subject_id}_ses-{datetime}_image+ophys.nwb
-                   or sub-{subject_id}_ses-{datetime}_obj-{xxx}_image+ophys.nwb
-    """
-    if not data_dir.exists():
-        return None
-
-    # Pattern to match: sub-{subject}_ses-{datetime}[_obj-xxx]_{suffix}.nwb
-    pattern = f"sub-{subject_id}_ses-{session_datetime}"
-
-    for nwb_file in data_dir.glob("*.nwb"):
-        if nwb_file.name.startswith(pattern):
-            return nwb_file
-
-    return None
-
-
 def iterate_behavior_sessions():
-    """Iterate through behavior_session_table.csv and yield NWB file paths."""
+    """Iterate through behavior_session_table.csv and yield NWB file paths.
+
+    NWB files follow naming patterns:
+    - Behavior only: behavior_session_{behavior_session_id}.nwb
+    - Behavior-ophys: behavior_ophys_experiment_{ophys_experiment_id}.nwb
+
+    For behavior-ophys sessions, ophys_experiment_id can be a list of multiple IDs,
+    so this function yields one entry per ophys_experiment_id.
+    """
     csv_path = VISBEH_OPHYS_METADATA_TABLES_DIR / "behavior_session_table.csv"
     df = pd.read_csv(csv_path)
 
     for idx, row in df.iterrows():
-        subject_id = str(int(row['mouse_id']))
-        date_of_acquisition = row['date_of_acquisition']
-        ophys_session_id = row['ophys_session_id']
+        behavior_session_id = row['behavior_session_id']
+        ophys_experiment_id = row['ophys_experiment_id']
 
-        # Format the session datetime for filename matching
-        session_datetime = format_session_datetime(date_of_acquisition)
-
-        # Determine which data directory to search
-        if pd.isna(ophys_session_id):
-            # No ophys session - look in behavior-only folder
+        if pd.isna(ophys_experiment_id):
+            # No ophys session - behavior only
             data_dir = VISBEH_OPHYS_BEHAVIOR_DATA_DIR
             session_type = "behavior"
+            nwb_filename = f"behavior_session_{behavior_session_id}.nwb"
+            nwb_path = data_dir / nwb_filename
+
+            yield {
+                'behavior_session_id': behavior_session_id,
+                'ophys_experiment_id': None,
+                'session_type': session_type,
+                'expected_filename': nwb_filename,
+                'nwb_path': nwb_path if nwb_path.exists() else None,
+                'data_dir': data_dir,
+            }
         else:
-            # Has ophys session - look in behavior+ophys folder
+            # Has ophys session - parse the list of ophys_experiment_ids
             data_dir = VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR
             session_type = "behavior_ophys"
 
-        # Find the corresponding NWB file
-        nwb_path = find_nwb_file(data_dir, subject_id, session_datetime)
+            # ophys_experiment_id is stored as a string like "[123, 456, 789]"
+            # Parse by stripping brackets and splitting on commas
+            ids_str = ophys_experiment_id.strip('[]').strip()
+            if not ids_str:
+                print(f"WARNING: behavior_session_id {behavior_session_id} has empty "
+                      f"ophys_experiment_id list, skipping")
+                continue
+            ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
 
-        yield {
-            'behavior_session_id': row['behavior_session_id'],
-            'subject_id': subject_id,
-            'session_datetime': session_datetime,
-            'session_type': session_type,
-            'nwb_path': nwb_path,
-            'data_dir': data_dir,
-        }
+            if len(ophys_exp_ids) > 1:
+                print(f"WARNING: behavior_session_id {behavior_session_id} has "
+                      f"{len(ophys_exp_ids)} ophys_experiment_ids: {ophys_exp_ids}")
+
+            for ophys_exp_id in ophys_exp_ids:
+                nwb_filename = f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
+                nwb_path = data_dir / nwb_filename
+
+                yield {
+                    'behavior_session_id': behavior_session_id,
+                    'ophys_experiment_id': ophys_exp_id,
+                    'session_type': session_type,
+                    'expected_filename': nwb_filename,
+                    'nwb_path': nwb_path if nwb_path.exists() else None,
+                    'data_dir': data_dir,
+                }
 
 
 def convert_visual_behavior_2p_nwb_hdf5_to_zarr(hdf5_path: Path, zarr_path: Path):
@@ -130,25 +121,27 @@ def run():
     # Iterate through behavior sessions from CSV
     for session_info in iterate_behavior_sessions():
         behavior_session_id = session_info['behavior_session_id']
-        subject_id = session_info['subject_id']
-        session_datetime = session_info['session_datetime']
+        ophys_experiment_id = session_info['ophys_experiment_id']
         session_type = session_info['session_type']
+        expected_filename = session_info['expected_filename']
         input_nwb_path = session_info['nwb_path']
         data_dir = session_info['data_dir']
 
-        print(f"\n--- Processing session {behavior_session_id} ---")
-        print(f"Subject: {subject_id}, DateTime: {session_datetime}, Type: {session_type}")
+        if ophys_experiment_id is not None:
+            print(f"\n--- Processing ophys_experiment {ophys_experiment_id} "
+                  f"(behavior_session {behavior_session_id}) ---")
+        else:
+            print(f"\n--- Processing behavior_session {behavior_session_id} ---")
+        print(f"Type: {session_type}, Expected file: {expected_filename}")
 
         if input_nwb_path is None:
             error_msg = (f"behavior_session_id: {behavior_session_id}, "
-                         f"subject_id: {subject_id}, "
-                         f"session_datetime: {session_datetime}, "
+                         f"ophys_experiment_id: {ophys_experiment_id}, "
                          f"session_type: {session_type}, "
-                         f"expected_pattern: sub-{subject_id}_ses-{session_datetime}_*.nwb, "
+                         f"expected_filename: {expected_filename}, "
                          f"search_dir: {data_dir}")
             missing_nwb_errors.append(error_msg)
-            print(f"WARNING: NWB file not found for session {behavior_session_id} "
-                  f"(sub-{subject_id}_ses-{session_datetime})")
+            print(f"WARNING: NWB file not found: {expected_filename}")
             continue
 
         print(f"INPUT NWB: {input_nwb_path}")
