@@ -28,7 +28,6 @@ assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
 def convert_visual_behavior_2p_nwb_hdf5_to_zarr(hdf5_path: Path, zarr_path: Path):
     """Convert Visual Behavior 2P NWB file to Zarr format."""
     with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
-        zarr_path.touch()
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
             export_io.export(src_io=read_io, write_args=dict(link_data=False))
     print(f"Converted {hdf5_path} to Zarr format at {zarr_path}")
