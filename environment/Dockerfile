@@ -1,4 +1,4 @@
-# hash:sha256:709e108d02d70c108e51cc577b161bee450d959daab8af80be7ac77c1e1c2285
+# hash:sha256:0882ff2c3ec41b2875a06bc9a422c80e9691463ccf4a03bf57d54f7356fe1b13
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:24.5.0-0-python3.12.4-ubuntu22.04
 
@@ -8,7 +8,7 @@ COPY git-askpass /
 
 RUN pip3 install -U --no-cache-dir \
     aind-data-schema==2.3.0 \
-    hdmf==4.1.2 \
+    hdmf==4.2.0 \
     hdmf-zarr==0.12.0 \
     nwbinspector==0.6.5 \
     pynwb==3.1.3
