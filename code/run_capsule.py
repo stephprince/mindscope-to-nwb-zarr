@@ -99,17 +99,17 @@ def iterate_behavior_sessions():
 
 def convert_visual_behavior_2p_behavior_or_single_plane_nwb_hdf5_to_zarr(hdf5_path: Path, zarr_path: Path):
     """Convert Visual Behavior 2P NWB file for behavior or single-plane ophys to Zarr format."""
-    with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
-        zarr_path.touch()  # TODO remove test
+    zarr_path.touch()  # TODO remove test
+    # with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
         # with NWBZarrIO(str(zarr_path), mode='w') as export_io:
         #     export_io.export(src_io=read_io, write_args=dict(link_data=False))
 
 
 def convert_visual_behavior_2p_combine_multiplane_nwb_hdf5_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
     """Convert Visual Behavior 2P NWB file for multiplane ophys to Zarr format."""
-    for hdf5_path in hdf5_paths:
-        with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
-            pass
+    # for hdf5_path in hdf5_paths:
+    #     with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
+    #         pass
     zarr_path.touch()  # TODO remove test
     # with NWBZarrIO(str(zarr_path), mode='w') as export_io:
     #     export_io.export(src_io=read_io, write_args=dict(link_data=False))
