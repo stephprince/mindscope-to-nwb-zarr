@@ -8,7 +8,7 @@ from pynwb import NWBHDF5IO
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
 
-from .scripts.export_visbeh_ophys_to_zarr import (
+from scripts.export_visbeh_ophys_to_zarr import (
     convert_behavior_or_single_plane_nwb_to_zarr,
     combine_multiplane_nwb_to_zarr,
 )
