@@ -26,7 +26,7 @@ def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Pat
             export_io.export(src_io=read_io, write_args=dict(link_data=False))
 
 
-def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_filename: Path):
+def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
     """Combine multiple single-plane NWB HDF5 files into one multi-plane Zarr file.
 
     Each input NWB file contains one ImagingPlane, one ophys ProcessingModule,
@@ -134,7 +134,7 @@ def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_filename: Path):
             nwbfile.add_lab_meta_data(metadata_object)
 
         # Export the combined NWB file to Zarr (link_data=False copies all data)
-        with NWBZarrIO(str(zarr_filename), mode='w') as export_io:
+        with NWBZarrIO(str(zarr_path), mode='w') as export_io:
             export_io.export(src_io=first_io, write_args=dict(link_data=False))
 
         # Close all additional IOs after export is complete
