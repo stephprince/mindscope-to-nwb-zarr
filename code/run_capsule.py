@@ -8,6 +8,10 @@ from pynwb import NWBHDF5IO
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
 
+from .scripts.export_visbeh_ophys_to_zarr import (
+    convert_behavior_or_single_plane_nwb_to_zarr,
+    combine_multiplane_nwb_to_zarr,
+)
 
 print("STARTING CODE OCEAN CAPSULE RUN")
 
@@ -97,24 +101,6 @@ def iterate_behavior_sessions():
                 }
 
 
-def convert_visual_behavior_2p_behavior_or_single_plane_nwb_hdf5_to_zarr(hdf5_path: Path, zarr_path: Path):
-    """Convert Visual Behavior 2P NWB file for behavior or single-plane ophys to Zarr format."""
-    zarr_path.touch()  # TODO remove test
-    # with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
-        # with NWBZarrIO(str(zarr_path), mode='w') as export_io:
-        #     export_io.export(src_io=read_io, write_args=dict(link_data=False))
-
-
-def convert_visual_behavior_2p_combine_multiplane_nwb_hdf5_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
-    """Convert Visual Behavior 2P NWB file for multiplane ophys to Zarr format."""
-    # for hdf5_path in hdf5_paths:
-    #     with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
-    #         pass
-    zarr_path.touch()  # TODO remove test
-    # with NWBZarrIO(str(zarr_path), mode='w') as export_io:
-    #     export_io.export(src_io=read_io, write_args=dict(link_data=False))
-
-
 # Code Ocean workflow:
 # Iterate through behavior_session_table.csv and process each NWB file
 # Example usage:
@@ -147,6 +133,7 @@ def run():
 
     # Collect all sessions first to get total count for progress bar
     sessions = list(iterate_behavior_sessions())
+    sessions = sessions[:10]  # TODO remove limit
 
     # Iterate through sessions
     for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
@@ -175,8 +162,7 @@ def run():
             relative_path = nwb_path.relative_to(data_folder)
             result_zarr_path = results_folder / relative_path.parent / (relative_path.name + ".zarr")
             result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
-
-            convert_visual_behavior_2p_behavior_or_single_plane_nwb_hdf5_to_zarr(
+            convert_behavior_or_single_plane_nwb_to_zarr(
                 hdf5_path=nwb_path,
                 zarr_path=result_zarr_path
             )
@@ -186,7 +172,7 @@ def run():
             # the behavior_session_id to form the output filename
             result_zarr_path = results_folder / "visual-behavior-ophys" / "behavior_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
             result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
-            convert_visual_behavior_2p_combine_multiplane_nwb_hdf5_to_zarr(
+            combine_multiplane_nwb_to_zarr(
                 hdf5_paths=nwb_paths,
                 zarr_path=result_zarr_path
             )
