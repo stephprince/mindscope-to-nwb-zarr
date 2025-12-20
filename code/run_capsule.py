@@ -136,7 +136,7 @@ def run():
 
     # Collect all sessions first to get total count for progress bar
     sessions = list(iterate_behavior_sessions())
-    sessions = sessions[70:80]  # TODO remove limit
+    sessions = sessions[75:77]  # TODO remove limit
 
     # Iterate through sessions
     for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
@@ -180,28 +180,28 @@ def run():
                 zarr_path=result_zarr_path
             )
 
-        # inspector_report_path = results_folder / f"{result_zarr_path.stem}_report.txt"
+        inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
 
         # Inspect output Zarr for validation errors
-        # with NWBZarrIO(result_zarr_path, mode='r') as zarr_io:
-        #     nwbfile = zarr_io.read()
+        with NWBZarrIO(result_zarr_path, mode='r') as zarr_io:
+            nwbfile = zarr_io.read()
 
-        #     # Inspect nwb file with io object
-        #     # NOTE - this does not run pynwb validation, will run that separately
-        #     messages = list(inspect_nwbfile_object(nwbfile))
+            # Inspect nwb file with io object
+            # NOTE - this does not run pynwb validation, will run that separately
+            messages = list(inspect_nwbfile_object(nwbfile))
 
-        #     # Format and print messages nicely
-        #     if messages:
-        #         formatted_messages = format_messages(
-        #             messages=messages,
-        #             levels=["importance", "file_path"],
-        #             reverse=[True, False]
-        #         )
-        #         save_report(
-        #             report_file_path=inspector_report_path,
-        #             formatted_messages=formatted_messages,
-        #             overwrite=True,
-        #         )
+            # Format and print messages nicely
+            if messages:
+                formatted_messages = format_messages(
+                    messages=messages,
+                    levels=["importance", "file_path"],
+                    reverse=[True, False]
+                )
+                save_report(
+                    report_file_path=inspector_report_path,
+                    formatted_messages=formatted_messages,
+                    overwrite=True,
+                )
 
             # Validate file with IO object
             # TODO - waiting to fix hdmf-zarr related validation issues before including

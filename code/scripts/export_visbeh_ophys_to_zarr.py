@@ -4,21 +4,6 @@ from pynwb import NWBHDF5IO
 from hdmf_zarr.nwb import NWBZarrIO
 
 
-# # Single-plane NWB files from a multi-plane ophys session (one file per imaging plane)
-# file_paths = [
-#     "data/sub-457841_ses-20190920T095938_obj-1almo5m_image+ophys.nwb",
-#     "data/sub-457841_ses-20190920T095938_obj-1gz4qr1_image+ophys.nwb",
-#     "data/sub-457841_ses-20190920T095938_obj-1wzpvaq_image+ophys.nwb",
-#     "data/sub-457841_ses-20190920T095938_obj-8gw2cr_image+ophys.nwb",
-#     "data/sub-457841_ses-20190920T095938_obj-15smnjp_image+ophys.nwb",
-#     "data/sub-457841_ses-20190920T095938_obj-fvfzhd_image+ophys.nwb",
-#     "data/sub-457841_ses-20190920T095938_obj-ohjygt_image+ophys.nwb",
-# ]
-
-# # Output path for the combined multi-plane Zarr file
-# zarr_filename = "data/sub-457841_ses-20190920T095938_combined_image+ophys.nwb.zarr"
-
-
 def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Path):
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
     with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
