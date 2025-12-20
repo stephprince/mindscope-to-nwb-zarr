@@ -133,7 +133,7 @@ def run():
 
     # Collect all sessions first to get total count for progress bar
     sessions = list(iterate_behavior_sessions())
-    sessions = sessions[:10]  # TODO remove limit
+    sessions = sessions[70:80]  # TODO remove limit
 
     # Iterate through sessions
     for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
