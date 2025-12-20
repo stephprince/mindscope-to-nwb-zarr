@@ -5,7 +5,7 @@ from pathlib import Path
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report
 
 
-# Multi-plane session NWB files to combine
+# Single-plane NWB files from a multi-plane ophys session (one file per imaging plane)
 file_paths = [
     "data/sub-457841_ses-20190920T095938_obj-1almo5m_image+ophys.nwb",
     "data/sub-457841_ses-20190920T095938_obj-1gz4qr1_image+ophys.nwb",
@@ -16,15 +16,21 @@ file_paths = [
     "data/sub-457841_ses-20190920T095938_obj-ohjygt_image+ophys.nwb",
 ]
 
+# Output path for the combined multi-plane Zarr file
 zarr_filename = "data/sub-457841_ses-20190920T095938_combined_image+ophys.nwb.zarr"
 
 
 def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
     """Combine multiple single-plane NWB files into one multi-plane Zarr file.
 
-    Each NWB file contains one ImagingPlane and one ophys ProcessingModule.
-    This function renames them to imaging_plane_1, imaging_plane_2, etc. and
-    ophys_plane_1, ophys_plane_2, etc., then combines them into a single NWB file.
+    Each input NWB file contains one ImagingPlane, one ophys ProcessingModule,
+    and one metadata LabMetaData object. This function:
+    - Renames imaging planes to imaging_plane_1, imaging_plane_2, etc.
+    - Renames ophys processing modules to ophys_plane_1, ophys_plane_2, etc.
+    - Renames metadata objects to metadata_plane_1, metadata_plane_2, etc.
+    - Re-links all imaging planes to a single shared device
+    - Updates PlaneSegmentation references to point to the correct imaging planes
+    - Exports the combined file to Zarr format
     """
     # Read the first NWB file - this will be our base file
     with NWBHDF5IO(file_paths[0], 'r') as first_io:
@@ -41,7 +47,7 @@ def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
             f"Expected 1 imaging plane in first file {file_paths[0]}, found {len(nwbfile.imaging_planes)}: {list(nwbfile.imaging_planes.keys())}"
         first_imaging_plane = list(nwbfile.imaging_planes.values())[0]
 
-        # Rename using the private attribute
+        # Rename using the private attribute (NWB containers don't support renaming directly)
         first_imaging_plane._AbstractContainer__name = "imaging_plane_1"
         first_imaging_plane.set_modified()
 
@@ -63,10 +69,10 @@ def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
         metadata_object._AbstractContainer__name = "metadata_plane_1"
         metadata_object.set_modified()
 
-        # Keep all additional IOs open until export is done
+        # Keep all additional IOs open until export is done (required for data access during export)
         additional_ios = []
 
-        # Now read each additional NWB file and add its imaging plane and ophys module
+        # Process each additional NWB file: extract, rename, re-link, and add components
         for i, file_path in enumerate(file_paths[1:], start=2):
             # Make sure to use the same manager as the first IO so that extensions are mapped correctly
             additional_io = NWBHDF5IO(file_path, 'r', manager=first_io.manager)
@@ -77,7 +83,7 @@ def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
             assert len(additional_nwbfile.devices) == 1, \
                 f"Expected 1 device in {file_path}, found {len(additional_nwbfile.devices)}: {list(additional_nwbfile.devices.keys())}"
 
-            # Get and rename the imaging plane
+            # Extract, rename, and re-link the imaging plane to the base device
             if additional_nwbfile.imaging_planes:
                 plane_name = list(additional_nwbfile.imaging_planes.keys())[0]
                 imaging_plane = additional_nwbfile.imaging_planes[plane_name]
@@ -91,12 +97,12 @@ def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
             assert "ophys" in additional_nwbfile.processing, \
                 f"Expected 'ophys' processing module in {file_path}"
 
-            # Get and rename the ophys processing module
+            # Extract and rename the ophys processing module
             ophys_module = additional_nwbfile.processing["ophys"]
             ophys_module.reset_parent()  # Detach from original NWB file
             ophys_module._AbstractContainer__name = f"ophys_plane_{i}"
 
-            # Update the PlaneSegmentation's imaging_plane reference to the newly copied imaging plane
+            # Update PlaneSegmentation to reference the newly added imaging plane (not the original)
             if "image_segmentation" in ophys_module.data_interfaces:
                 image_seg = ophys_module.data_interfaces["image_segmentation"]
                 if "cell_specimen_table" in image_seg.plane_segmentations:
@@ -112,8 +118,8 @@ def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
 
             assert "metadata" in additional_nwbfile.lab_meta_data, \
                 f"Expected 'metadata' in lab_meta_data of {file_path}"
-            
-            # Get and rename the metadata entry
+
+            # Extract and rename the metadata object
             metadata_object = additional_nwbfile.lab_meta_data["metadata"]
             metadata_object.reset_parent()  # Detach from original NWB file
             metadata_object._AbstractContainer__name = f"metadata_plane_{i}"
@@ -121,11 +127,11 @@ def combine_multiplane_nwb_to_zarr(file_paths: list[str], zarr_filename: str):
             # Add to the base NWB file
             nwbfile.add_lab_meta_data(metadata_object)
 
-        # Export the combined NWB file to Zarr
+        # Export the combined NWB file to Zarr (link_data=False copies all data)
         with NWBZarrIO(zarr_filename, mode='w') as export_io:
             export_io.export(src_io=first_io, write_args=dict(link_data=False))
 
-        # Close all additional IOs
+        # Close all additional IOs after export is complete
         for additional_io in additional_ios:
             additional_io.close()
 
