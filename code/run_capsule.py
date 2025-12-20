@@ -37,16 +37,19 @@ def iterate_behavior_sessions():
     - Behavior only: behavior_session_{behavior_session_id}.nwb
     - Behavior-ophys: behavior_ophys_experiment_{ophys_experiment_id}.nwb
 
-    For multi-plane behavior-ophys sessions (multiple ophys_experiment_ids),
+    For multi-plane behavior-ophys sessions (Multiscope projects),
     yields a single session_info dict with nwb_path as a list of paths.
     For single-plane sessions, nwb_path is a single Path object.
     """
+    MULTIPLANE_PROJECT_CODES = {"VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d"}
+
     csv_path = VISBEH_OPHYS_METADATA_TABLES_DIR / "behavior_session_table.csv"
     df = pd.read_csv(csv_path)
 
     for idx, row in df.iterrows():
         behavior_session_id = row['behavior_session_id']
         ophys_experiment_id = row['ophys_experiment_id']
+        project_code = row['project_code']
 
         if pd.isna(ophys_experiment_id):
             # No ophys session - behavior only
@@ -75,7 +78,7 @@ def iterate_behavior_sessions():
                 continue
             ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
 
-            if len(ophys_exp_ids) > 1:
+            if project_code in MULTIPLANE_PROJECT_CODES:
                 # Multi-plane session: store all NWB paths in a list
                 nwb_paths = [
                     data_dir / f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
@@ -170,7 +173,7 @@ def run():
         else:  # Multi-plane sessions
             # Output Zarr combines all experiments (imaging planes) for a session into one NWB Zarr file, so use
             # the behavior_session_id to form the output filename
-            result_zarr_path = results_folder / "visual-behavior-ophys" / "behavior_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
+            result_zarr_path = results_folder / "visual-behavior-ophys" / "behavior_ophys_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
             result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
             combine_multiplane_nwb_to_zarr(
                 hdf5_paths=nwb_paths,
