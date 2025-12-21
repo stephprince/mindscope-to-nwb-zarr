@@ -19,7 +19,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     inspect_zarr_file,
 )
 
-from scripts.export_visbeh_ophys_to_zarr import (
+from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion import (
     convert_behavior_or_single_plane_nwb_to_zarr,
     combine_multiplane_nwb_to_zarr,
 )
