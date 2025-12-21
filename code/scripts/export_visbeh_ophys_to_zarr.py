@@ -1,12 +1,31 @@
 from pathlib import Path
+import warnings
 
-from pynwb import NWBHDF5IO, NWBFile, load_namespaces, get_class
+from pynwb import NWBHDF5IO, NWBFile
 from hdmf_zarr.nwb import NWBZarrIO
+
+
+def _open_nwbhdf5(path: Path, mode: str = 'r', manager=None) -> NWBHDF5IO:
+    """Open an NWB HDF5 file, suppressing cached namespace warnings."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=(
+                r"Ignoring the following cached namespace[\s\S]*"
+                r"ndx-aibs-ecephys[\s\S]*"
+                r"ndx-aibs-stimulus-template[\s\S]*"
+                r"ndx-ellipse-eye-tracking"
+            ),
+            category=UserWarning
+        )
+        if manager is not None:
+            return NWBHDF5IO(str(path), mode, manager=manager)
+        return NWBHDF5IO(str(path), mode)
 
 
 def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Path):
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
-    with NWBHDF5IO(str(hdf5_path), 'r') as read_io:
+    with _open_nwbhdf5(hdf5_path, 'r') as read_io:
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
             export_io.export(src_io=read_io, write_args=dict(link_data=False))
 
@@ -21,11 +40,10 @@ def combine_multiplane_info(plane_nwbfiles: list[NWBFile], hdf5_paths: list[Path
 
     # Rename the imaging plane from the first file
     # ImagingPlanes are stored in base_nwbfile.imaging_planes dict
-    assert len(base_nwbfile.imaging_planes) == 1, \
-        (
-            f"Expected 1 imaging plane in first file {hdf5_paths[0]}, "
-            f"found {len(base_nwbfile.imaging_planes)}: {list(base_nwbfile.imaging_planes.keys())}"
-        )
+    assert len(base_nwbfile.imaging_planes) == 1, (
+        f"Expected 1 imaging plane in first file {hdf5_paths[0]}, "
+        f"found {len(base_nwbfile.imaging_planes)}: {list(base_nwbfile.imaging_planes.keys())}"
+    )
     first_imaging_plane = list(base_nwbfile.imaging_planes.values())[0]
 
     # Rename using the private attribute (NWB containers don't support renaming directly)
@@ -113,10 +131,9 @@ def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
     - Updates PlaneSegmentation references to point to the correct imaging planes
     - Exports the combined file to Zarr format
     """
-
-    base_io = NWBHDF5IO(str(hdf5_paths[0]), 'r')
+    base_io = _open_nwbhdf5(hdf5_paths[0], 'r')
     base_nwbfile = base_io.read()
-    plane_ios = [base_io] + [NWBHDF5IO(str(p), 'r', manager=base_io.manager) for p in hdf5_paths[1:]]
+    plane_ios = [base_io] + [_open_nwbhdf5(p, 'r', manager=base_io.manager) for p in hdf5_paths[1:]]
     plane_nwbfiles = [base_nwbfile] + [io.read() for io in plane_ios[1:]]
 
     combined_nwbfile = combine_multiplane_info(plane_nwbfiles, hdf5_paths)
