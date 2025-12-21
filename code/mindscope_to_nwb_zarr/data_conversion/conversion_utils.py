@@ -1,18 +1,32 @@
+from pathlib import Path
+import traceback
+from typing import Iterable, Optional
 import warnings
 
-from pathlib import Path
-from pynwb import NWBFile, validate
+from hdmf_zarr.nwb import NWBZarrIO
+from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
+from pynwb import NWBFile, validate, get_class
 from pynwb.ecephys import LFP
 from pynwb.image import Images, GrayscaleImage
-from hdmf_zarr.nwb import NWBZarrIO
-from nwbinspector import inspect_nwbfile_object, format_messages, save_report
+
+WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
 
 
 def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
-    """Convert stimulus_template from ImageSeries to Images container with IndexSeries references."""
+    """Convert stimulus_template from ImageSeries to Images container with IndexSeries references.
+    
+    In the original HDF5 versions of the data, stimulus template images, e.g., four 
+    gratings or eight natural images, were stored in an NWB ImageSeries object where
+    the timestamps are NaN. In the /stimulus/presentation group, a separate IndexSeries
+    object represents the times at which each image in the ImageSeries is displayed.
+    This approach of linking an IndexSeries to an ImageSeries with NaN timestamps is
+    deprecated. This function reorganizes the stimulus templates by changing the 
+    ImageSeries to an ordered set of Image objects in an Images container, and 
+    changing the IndexSeries to link to this Images container.
+    """
 
-    # Find the stimulus template (typically in stimulus.templates)
-    if len(nwbfile.stimulus_template) < 1:
+    # Find the stimulus templates
+    if not nwbfile.stimulus_template:
         warnings.warn("NWBFile has no stimulus_template field populated. Skipping conversion.")
         return nwbfile
 
@@ -20,40 +34,58 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     new_stimulus_templates = []
     for k in original_stimulus_keys:
         stimulus_template = nwbfile.stimulus_template[k]
+        assert stimulus_template.__class__.__name__ == "StimulusTemplate", \
+            f"Expected stimulus template '{k}' to be of type StimulusTemplate"
+
         image_data = stimulus_template.data[:]  # Shape should be (num_images, height, width)
         image_data_unwarped = stimulus_template.unwarped[:]
 
-        # adapt description
+        # Adapt description TODO: Adapt for different stimulus types
         description = 'Natural scene images' if 'Natural_Images' in stimulus_template.name else stimulus_template.description
 
-        # create images objects
-        all_images = []
+        # Create new image objects
         all_images_unwarped = []
+        all_images = []
         for i in range(image_data.shape[0]):
-            all_images.append(GrayscaleImage(
-                                name=stimulus_template.control_description[i],
-                                data=image_data[i],
-                                description=f"Natural scene image {stimulus_template.control[i]}",
-                            ))
-            all_images_unwarped.append(GrayscaleImage(
-                                name=stimulus_template.control_description[i],
-                                data=image_data_unwarped[i],
-                                description=f"Natural scene image unwarped {stimulus_template.control[i]}",
-                            ))
+            unwarped_image = GrayscaleImage(
+                name=stimulus_template.control_description[i],
+                data=image_data_unwarped[i],
+                description=f"Natural scene image unwarped {stimulus_template.control[i]}",
+            )
+            warped_image = WarpedStimulusTemplateImage(
+                name=stimulus_template.control_description[i],
+                data=image_data[i],
+                description=f"Natural scene image {stimulus_template.control[i]}",
+                unwarped_image=unwarped_image,
+            )
+            all_images_unwarped.append(unwarped_image)
+            all_images.append(warped_image)
 
-        new_stimulus_templates.append(Images(name=stimulus_template.name,
-                                  description=description,
-                                  images=all_images))
-        new_stimulus_templates.append(Images(name=f'{stimulus_template.name}_unwarped',
-                                           description=f'{description} unwarped',
-                                           images=all_images_unwarped))
+        # Create and add Images containers
+        all_images_container = Images(
+            name=stimulus_template.name,
+            description=description,
+            images=all_images,
+        )
+        all_unwarped_images_container = Images(
+            name=f'{stimulus_template.name}_unwarped',
+            description=f'{description} unwarped',
+            images=all_images_unwarped,
+        )
 
-    # remove old stimulus templates and add new ones
+        new_stimulus_templates.append(all_images_container)
+        new_stimulus_templates.append(all_unwarped_images_container)
+
+    # Remove old stimulus templates and add new ones
     for k in original_stimulus_keys:
         nwbfile.stimulus_template.pop(k)
 
     for new_template in new_stimulus_templates:
         nwbfile.add_stimulus_template(new_template)
+
+    # TODO: Update the IndexSeries to link to the new Images container
+    # TODO: Add "image" column to stimulus presentation table to reference the displayed images
+    # TODO: Add "initial_image" and "change_image" columns to trials table to reference images shown during trials
 
     return nwbfile
 
@@ -67,7 +99,8 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     electrode_mapping = {}
     for old_idx, electrode_id in enumerate(probe_electrode_ids):
         matching_indices = [i for i, main_id in enumerate(main_electrode_ids) if main_id == electrode_id]
-        assert len(matching_indices) == 1, f"Expected exactly one matching electrode for ID {electrode_id}, found {len(matching_indices)}"
+        assert len(matching_indices) == 1, \
+            f"Expected exactly one matching electrode for ID {electrode_id}, found {len(matching_indices)}"
         electrode_mapping[old_idx] = matching_indices[0]
 
     acquisition_name = f'probe_{probe_nwbfile.identifier}_lfp'
@@ -84,23 +117,29 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     )
 
     # Create new LFP container with the updated electrical series
-    # WARNING: this is a workaround to modify an attribute that should not be able to be reset, validation should always be performed afterwards
+    # WARNING: this is a workaround to modify an attribute that should not be able to be reset, 
+    # validation should always be performed afterwards
     new_lfp = LFP(name=lfp_container.name, electrical_series=old_electrical_series)
-    new_lfp[f'{acquisition_name}_data']._remove_child(new_lfp[f'{acquisition_name}_data'].electrodes)
-    new_lfp[f'{acquisition_name}_data'].fields['electrodes'] = new_electrodes_region
-    new_lfp[f'{acquisition_name}_data'].fields['electrodes'].parent = new_lfp[f'{acquisition_name}_data']
+    old_electrical_series._remove_child(old_electrical_series.electrodes)  # TODO is there a better way to do this?
+    old_electrical_series.fields['electrodes'] = new_electrodes_region
+    old_electrical_series.fields['electrodes'].parent = old_electrical_series
     
     # Modify CSD container to have unique name
-    # WARNING: this is a workaround to modify a name but is not recommended, validation should always be performed afterwards
+    # WARNING: this is a workaround to modify a name but is not recommended, 
+    # validation should always be performed afterwards
     csd = probe_nwbfile.processing['current_source_density']['ecephys_csd']
     csd.reset_parent()
     csd._AbstractContainer__name = f'probe_{probe_nwbfile.identifier}_ecephys_csd'
 
     # Add ecephys processing module with lfp data
     if 'ecephys' not in base_nwbfile.processing.keys():
-        base_nwbfile.create_processing_module(name='ecephys',
-                                            description=("Processed ecephys data from individual probes. Includes LFP and "
-                                                        f"{probe_nwbfile.processing['current_source_density'].description}."))
+        base_nwbfile.create_processing_module(
+            name='ecephys',
+            description=(
+                "Processed ecephys data from individual probes. Includes LFP and "
+                f"{probe_nwbfile.processing['current_source_density'].description}."
+            )
+        )
     
     base_nwbfile.processing['ecephys'].add(new_lfp)
     base_nwbfile.processing['ecephys'].add(csd)
@@ -189,26 +228,66 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
 
     return nwbfile
 
-def inspect_zarr_file(zarr_filename):
-    with NWBZarrIO(zarr_filename, mode='r') as zarr_io:
-        nwbfile = zarr_io.read()
 
-        # inspect nwb file with io object
-        # NOTE - this does not run pynwb validation, will run that separately
-        messages = list(inspect_nwbfile_object(nwbfile))
+def inspect_zarr_file(zarr_filename: Path, inspector_report_path: Path) -> None:
+    """Inspect a Zarr NWB file using nwbinspector and save the report to a text file.
+    """
+    # PyNWB validation does not yet support Zarr paths, but we can use NWBZarrIO to get an IO object
+    # and validate that.
+    messages = list(_inspect_zarr_file_helper(zarr_filename=zarr_filename))
+    
+    # Format and print messages to text file
+    if messages:
+        formatted_messages = format_messages(messages=messages, levels=["file_path", "importance"])
+        save_report(
+            report_file_path=inspector_report_path,
+            formatted_messages=formatted_messages,
+            overwrite=True,
+        )
 
-        # format and print messages nicely
-        if messages:
-            formatted_messages = format_messages(
-                messages=messages,
-                levels=["importance", "file_path"],
-                reverse=[True, False]
+
+def _inspect_zarr_file_helper(zarr_filename: Path) -> Iterable[Optional[InspectorMessage]]:
+    """Helper function to inspect a Zarr NWB file and yield InspectorMessages."""
+    config = load_config("dandi")
+    io = None
+    try:
+        io = NWBZarrIO(zarr_filename, mode='r')
+        in_memory_nwbfile = io.read()
+
+        validation_result = validate(io=io)
+        if isinstance(validation_result, tuple):
+            validation_errors = validation_result[0]
+        else:
+            validation_errors = validation_result
+
+        for validation_error in validation_errors:
+            yield InspectorMessage(
+                message=validation_error.reason,
+                importance=Importance.PYNWB_VALIDATION,
+                check_function_name=validation_error.name,
+                location=validation_error.location,
+                file_path=zarr_filename,
             )
-            save_report(report_file_path=f"data/{Path(zarr_filename).stem}_report.txt", 
-                        formatted_messages=formatted_messages,
-                        overwrite=True)
 
-        # validate file with IO object
-        # TODO - waiting to fix hdmf-zarr related validation issues before including
-        validation_errors = validate(io=zarr_io)
-        print(validation_errors)
+        for inspector_message in inspect_nwbfile_object(
+            nwbfile_object=in_memory_nwbfile,
+            config=config,
+        ):
+            inspector_message.file_path = zarr_filename
+            yield inspector_message
+
+    except Exception as exception:
+        exception_name = f"{type(exception).__module__}.{type(exception).__name__}"
+        yield InspectorMessage(
+            message=traceback.format_exc(),
+            importance=Importance.ERROR,
+            check_function_name=(
+                f"During io.read(), an error occurred: {exception_name}. "
+                f"This indicates that PyNWB was unable to read the file. "
+                f"See the traceback message for more details."
+            ),
+            file_path=zarr_filename,
+        )
+    finally:
+        if io is not None:
+            io.close()  # close the io object in case of exceptions or when inspection is complete

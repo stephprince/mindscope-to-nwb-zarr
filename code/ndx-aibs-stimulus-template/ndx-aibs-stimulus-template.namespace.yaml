@@ -1,0 +1,25 @@
+namespaces:
+- author: 
+  - Saskia de Vries
+  - Ryan Ly
+  - Stephanie Prince
+  contact: 
+  - saskiad@alleninstitute.org
+  - rly@lbl.gov
+  - smprince@lbl.gov
+  doc: 
+    Stimulus images. Version 0.2.0 removes the old StimulusTemplate
+    neurodata type that extended ImageSeries and instead defines
+    a new WarpedStimulusTemplateImage type that extends GrayscaleImage. 
+    This change  
+    allows individual stimulus template images to be stored in an 
+    Images object and linked to from an IndexSeries
+    representing stimulus presentation times in the NWB file.
+    Individual template images can also be referred to in rows
+    of a TimeIntervals table.
+    # TODO: Add more
+  name: ndx-aibs-stimulus-template
+  schema:
+  - namespace: core
+  - source: ndx-aibs-stimulus-template.extensions.yaml
+  version: 0.2.0

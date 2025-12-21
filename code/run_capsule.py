@@ -4,9 +4,20 @@ import shutil
 import warnings
 import pandas as pd
 from tqdm import tqdm
-from pynwb import NWBHDF5IO
-from hdmf_zarr.nwb import NWBZarrIO
-from nwbinspector import inspect_nwbfile_object, format_messages, save_report
+from pynwb import load_namespaces
+
+# Load extension namespaces before importing local modules that use them
+# These extensions will be used instead of the older extension cached in the NWB file
+# TODO confirm that loading extra namespaces that are not used does not pollute the NWB file (it probably does)
+# The Visual Behavior 2p dataset started with ndx-aibs-ecephys, but what about the others?
+# Load the updated extensions into the global type map
+load_namespaces("ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml")
+load_namespaces("ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml")
+load_namespaces("ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml")
+
+from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
+    inspect_zarr_file,
+)
 
 from scripts.export_visbeh_ophys_to_zarr import (
     convert_behavior_or_single_plane_nwb_to_zarr,
@@ -19,7 +30,7 @@ print("STARTING CODE OCEAN CAPSULE RUN")
 code_folder = Path(__file__).parent
 data_folder = Path("../data/")
 scratch_folder = Path("../scratch/")
-results_folder = Path("../results/")
+results_folder = Path("C:/Users/Ryan/results/")  # TODO update me for Code Ocean
 
 # Define dataset paths
 VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_sessions"
@@ -107,7 +118,7 @@ def iterate_behavior_sessions():
 # Code Ocean workflow:
 # Iterate through behavior_session_table.csv and process each NWB file
 # Example usage:
-# python code/run_capsule.py --dataset "Visual Behavior 2P"
+# cd code && python run_capsule.py --dataset "Visual Behavior 2P"
 
 def run():
     # Parse command line arguments
@@ -136,7 +147,7 @@ def run():
 
     # Collect all sessions first to get total count for progress bar
     sessions = list(iterate_behavior_sessions())
-    sessions = sessions[75:77]  # TODO remove limit
+    sessions = sessions[74:76]  # TODO remove limit
 
     # Iterate through sessions
     for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
@@ -180,32 +191,9 @@ def run():
                 zarr_path=result_zarr_path
             )
 
+        # Inspect the resulting Zarr file
         inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-
-        # Inspect output Zarr for validation errors
-        with NWBZarrIO(result_zarr_path, mode='r') as zarr_io:
-            nwbfile = zarr_io.read()
-
-            # Inspect nwb file with io object
-            # NOTE - this does not run pynwb validation, will run that separately
-            messages = list(inspect_nwbfile_object(nwbfile))
-
-            # Format and print messages nicely
-            if messages:
-                formatted_messages = format_messages(
-                    messages=messages,
-                    levels=["importance", "file_path"],
-                    reverse=[True, False]
-                )
-                save_report(
-                    report_file_path=inspector_report_path,
-                    formatted_messages=formatted_messages,
-                    overwrite=True,
-                )
-
-            # Validate file with IO object
-            # TODO - waiting to fix hdmf-zarr related validation issues before including
-            # validate(io=zarr_io)
+        inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
 
     # Write missing NWB file errors to results folder
     if missing_nwb_errors:

@@ -336,6 +336,7 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
         if len(imaging_plane_group) == 0:
             continue  # skip empty groups
         if len(imaging_plane_group) == 1:
+            # TODO create dummy coupled plane - could infer from other days. Indicate in the closest Notes that plane X failed QC and is therefore not in the data.
             # only one plane in this group, so just add it as a regular Plane
             first_plane_index = group_index * 2
             imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]

@@ -1,0 +1,19 @@
+namespaces:
+- author:
+  - Saskia de Vries
+  - Ryan Ly
+  - Stephanie Prince
+  - Ben Dichter
+  contact:
+  - saskiad@alleninstitute.org
+  - rly@lbl.gov
+  - smprince@lbl.gov
+  - bdichter@lbl.gov
+  doc: Store the elliptical eye tracking output of DeepLabCut. 
+    Version 0.2.0 changes the EllipseEyeTracking type to extend NWBDataInterface
+    instead of EyeTracking to be compatible with NWB Schema 2.9.0 and later.
+  name: ndx-ellipse-eye-tracking
+  schema:
+  - namespace: core
+  - source: ndx-ellipse-eye-tracking.extensions.yaml
+  version: 0.2.0
