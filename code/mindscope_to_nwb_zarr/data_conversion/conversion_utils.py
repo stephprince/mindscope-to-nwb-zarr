@@ -95,6 +95,9 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         # replace references in stimulus presentation IndexSeries
         nwbfile.stimulus[k].fields['indexed_timeseries'] = None
         nwbfile.stimulus[k].fields['indexed_images'] = new_stimulus_templates[k]
+        if nwbfile.stimulus[k].description is None or nwbfile.stimulus[k].description == "no description":
+             nwbfile.stimulus[k].fields['description'] = f"Timestamps and indices of the {k} stimulus template presentations."
+            # TODO - is this an ok description or should it be included?
 
     # TODO: Add "image" column to stimulus presentation table to reference the displayed images
     # TODO: Add "initial_image" and "change_image" columns to trials table to reference images shown during trials
@@ -236,9 +239,66 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
         for col_name, description in optostim_column_descriptions.items():
             if col_name in nwbfile.processing['optotagging']['optogenetic_stimulation'].colnames:
                 nwbfile.processing['optotagging']['optogenetic_stimulation'][col_name].fields['description'] = description
+    
+    # Add descriptions for trials table columns
+    if hasattr(nwbfile, 'trials') and nwbfile.trials is not None:
+        # explanation based on technical white paper and https://allensdk.readthedocs.io/en/latest/_static/examples/nb/aligning_behavioral_data_to_task_events_with_the_stimulus_and_trials_tables.html
+        trials_column_descriptions = {
+            'initial_image_name': 'Name of the image shown before the change (or sham change) for this trial.',
+            'change_image_name': 'Indicates which image was scheduled to be the change image for this trial.',
+            'is_change': 'Boolean indicating whether an image change occurred during this trial (True for go and catch trials, False for aborted trials).',
+            'change_time': 'Experiment time when the task-control computer commanded an image change.',
+            'go': 'Boolean indicating whether trial was a go trial. To qualify as a go trial, an image change must occur and the trial cannot be autorewarded.',
+            'catch': 'Boolean indicating whether this trial was a "catch" trial. To qualify as a catch trial, a "sham" change must occur during which the image identity does not change.',
+            'response_time': 'Indicates the time when the first lick was registered by the task control software for trials that were not aborted (go or catch).',
+            'response_latency': 'Latency in seconds of the first lick after the change time (inf if no lick occurred).',
+            'reward_time': 'Indicates when the reward command was triggered for hit trials.',
+            'reward_volume': 'Volume of water dispensed as a reward for this trial.',
+            'hit': 'Boolean indicating whether trial was a hit.',
+            'false_alarm': 'Boolean indicating whether trial was a false alarm.',
+            'miss': 'Boolean indicating whether trial was a miss.',
+            'correct_reject': 'Boolean indicating whether trial was a correct reject.',
+            'aborted': 'Boolean indicating whether trial was aborted.',
+            'auto_rewarded': 'Boolean indicating autorewarded trial. During autorewarded trials, the reward is automatically triggered after the change regardless of whether the mouse licked within the response window. ',
+            'change_frame': 'Stimulus frame index when the change (on go trials) or sham change (on catch trials) occurred.',
+            'trial_length': 'Duration of the trial in seconds.',
+        }
 
-    # TODO - Add descriptions for stimulus presentations table columns
-    # TODO - Add descriptions for processing modules             
+        for col_name, description in trials_column_descriptions.items():
+            if (col_name in nwbfile.trials.colnames and
+                (nwbfile.trials[col_name].description is None or
+                 nwbfile.trials[col_name].description == "no description")):
+                nwbfile.trials[col_name].fields['description'] = description
+
+
+    # Add descriptions for stimulus presentations table (stored in intervals)
+    if hasattr(nwbfile, 'intervals') and nwbfile.intervals is not None:
+        # Check for grating_presentations or other stimulus presentation intervals
+        for interval_name in nwbfile.intervals.keys():
+            if 'presentation' in interval_name: # TODO - check if there are other cases of this
+                stimulus_table = nwbfile.intervals[interval_name]
+
+                # explanation based on technical white paper and https://allensdk.readthedocs.io/en/latest/_static/examples/nb/aligning_behavioral_data_to_task_events_with_the_stimulus_and_trials_tables.html
+                # Descriptions based on Allen SDK documentation
+                stimulus_column_descriptions = {
+                    'active': 'Boolean indicating when the change detection task (with lick spout available) was run.',
+                    'is_sham_change': 'Boolean indicating whether this stimulus presentation was a sham change (catch trial).',
+                    'is_image_novel': 'Indicates whether this image has been shown to the mouse in previous training sessions. If True, then this image is novel to the mouse.',
+                    'image_set': 'Name of the image set (stimulus block) used for this presentation. Examples include natural images, gratings, gabors, or full-field flashes.',
+                    'flashes_since_change': 'Number of image flashes of the same image that have occurred since the last stimulus change.',
+                    'omitted': 'Boolean indicating whether this image presentation was omitted (replaced with gray screen).',
+                    'is_change': 'Boolean indicating whether the image identity changed for this stimulus presentation. When both this and "active" are True, the mouse is rewarded for licking within the response window.',
+                    'end_frame': 'Stimulus frame index when this stimulus presentation ended.',
+                    'start_frame': 'Stimulus frame index when this stimulus presentation started.',
+                    'duration': 'Duration of this stimulus in seconds.',
+                    'image_name': 'Name of the image presented during this stimulus flash.',
+                }
+
+                for col_name, description in stimulus_column_descriptions.items():
+                    if col_name in stimulus_table.colnames:
+                        if (stimulus_table[col_name].description is None or
+                            stimulus_table[col_name].description.lower() == "no description"):
+                            stimulus_table[col_name].fields['description'] = description
 
     return nwbfile
 
