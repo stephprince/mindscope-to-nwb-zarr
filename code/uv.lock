@@ -31,6 +31,21 @@ wheels = [
 ]
 
 [[package]]
+name = "aind-metadata-service-client"
+version = "2.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+    { name = "typing-extensions" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/ca/691b5dcc76e74c13fde906921451e9123a52c458ecf53536baee08a50b81/aind_metadata_service_client-2.6.0.tar.gz", hash = "sha256:6a95a885b72eeb2aa57b5762ad11e1247ba629934b51eae2e7a2d3537ed2cbaa", size = 31813, upload-time = "2025-12-10T17:41:16.35Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/af/62/d865ba5e60fe85f22e98f710145d9ee420faa0ad9c23aebdea86b6aefc76/aind_metadata_service_client-2.6.0-py3-none-any.whl", hash = "sha256:a53e972d8feaad2d3561049c1034e3ee7e912d1f61feb5a118ee7b5fb4149b07", size = 37190, upload-time = "2025-12-10T17:41:15.442Z" },
+]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -332,6 +347,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aind-data-schema" },
+    { name = "aind-metadata-service-client" },
     { name = "hdmf" },
     { name = "hdmf-zarr" },
     { name = "nwbinspector" },
@@ -342,6 +358,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aind-data-schema", specifier = "==2.3.0" },
+    { name = "aind-metadata-service-client" },
     { name = "hdmf", specifier = "==4.2.0" },
     { name = "hdmf-zarr", specifier = "==0.12.0" },
     { name = "nwbinspector", specifier = "==0.6.5" },
