@@ -1,10 +1,15 @@
 import quilt3 as q3
+import pandas as pd
 
 from pathlib import Path
 from pynwb import NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 
-from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorNeuropixelsProjectCache
+# load modified extensions before impoting local modules that use them
+root_dir = Path(__file__).parent.parent.parent.parent
+load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
@@ -13,17 +18,16 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     inspect_zarr_file,
 )
 
-def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_filename: Path, probe_filenames: list[Path]) -> None:
+def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_filename: Path, probe_filenames: list[Path] = None) -> None:
     """ Convert a Visual Behavior Ephys NWB HDF5 file and associated probe files to NWB Zarr format."""
+
+    if probe_filenames is None:
+        probe_filenames = []
 
     with NWBHDF5IO(hdf5_base_filename, 'r') as read_io:
         nwbfile = read_io.read()
         nwbfile.subject.strain = "unknown"  # TODO set appropriate strain value
         nwbfile.set_modified()
-
-        # use modified ndx-aibs-ecephys extension to read and write files
-        extension_spec = "code/ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"
-        load_namespaces(extension_spec)
 
         # pull additional data from each of the probe files and add to the main nwbfile
         io_objects = [NWBHDF5IO(f, 'r') for f in probe_filenames]
@@ -46,45 +50,69 @@ def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_fi
             probe_io.close()
     
     # inspect and validate the resulting zarr file
-    inspect_zarr_file(zarr_filename)
+    inspect_zarr_file(zarr_filename, 
+                      inspector_report_path=zarr_filename.with_suffix('.inspector_report.txt'))
 
 
 if __name__ == "__main__":
     # TODO - this section should be replacable within codeocean with extraction directly from attached data assets
+
     # get all session ids
     output_dir =  Path(".cache/visual_behavior_neuropixels_cache_dir")
-    cache = VisualBehaviorNeuropixelsProjectCache.from_s3_cache(cache_dir=output_dir)
-
-    ephys_session_table = cache.get_ecephys_session_table()
-    ephys_session_ids = ephys_session_table.index.to_list()
-
-    behavior_session_table = cache.get_behavior_session_table()
-    behavior_session_ids = behavior_session_table.index.to_list()
-
-    # download ephys session files
     b = q3.Bucket("s3://visual-behavior-neuropixels-data")
-    for session_id in ephys_session_ids:
-        # get all relevant filenames for that session
-        s3_bucket_path = f"visual-behavior-neuropixels/behavior_ecephys_sessions/{session_id}/"
-        dir_contents = b.ls(s3_bucket_path)[1]
-        hdf5_files = [f['Key'] for f in dir_contents if f['IsLatest'] == True]
-        
-        # fetch file from s3 bucket
-        local_path = Path(f"data/behavior_ecephys_sessions/{session_id}/")
-        local_path.mkdir(parents=True, exist_ok=True)
-        for f in hdf5_files:
-            if not (local_path / Path(f).name).exists():
-                b.fetch(f, local_path / Path(f).name)
+    behavior_session_path = f"visual-behavior-neuropixels/project_metadata/behavior_sessions.csv"
+    ephys_session_path = f"visual-behavior-neuropixels/project_metadata/ecephys_sessions.csv"
 
-        # convert session hdf5_base_filename
-        hdf5_base_filename = local_path / f"ecephys_session_{session_id}.nwb"
-        zarr_filename = f"./ecephys_session_{session_id}.nwb.zarr"
-        probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
+    convert_ephys_sessions = False
+    convert_behavior_sessions = True
 
-        convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename, zarr_filename, probe_filenames)
-        
+    if convert_ephys_sessions:
+        session_dir = Path(f"data/behavior_ecephys_sessions")
+        b.fetch(ephys_session_path, session_dir / "ecephys_sessions.csv")
+        ephys_session_table = pd.read_csv(session_dir / "ecephys_sessions.csv")
+        ephys_session_ids = ephys_session_table['ecephys_session_id'].astype(str).to_list()
 
-    # download behavior only session files
-    # for session_id in behavior_session_ids:
-    #     s3_bucket_path = f"visual-behavior-neuropixels/behavior_only_sessions/{session_id}/behavior_session_{session_id}.nwb"
-    #     b.fetch(s3_bucket_path, f"./behavior_session_{session_id}.nwb")
+        # download ephys session files
+        for session_id in ephys_session_ids:
+            # get all relevant filenames for that session
+            s3_bucket_path = f"visual-behavior-neuropixels/behavior_ecephys_sessions/{session_id}/"
+            dir_contents = b.ls(s3_bucket_path)[1]
+            hdf5_files = [f['Key'] for f in dir_contents if f['IsLatest'] == True]
+            
+            # fetch file from s3 bucket
+            local_path = Path(session_dir / session_id)
+            local_path.mkdir(parents=True, exist_ok=True)
+            for f in hdf5_files:
+                if not (local_path / Path(f).name).exists():
+                    b.fetch(f, local_path / Path(f).name)
+
+            # convert session hdf5_base_filename
+            hdf5_base_filename = local_path / f"ecephys_session_{session_id}.nwb"
+            zarr_filename = f"./ecephys_session_{session_id}.nwb.zarr"
+            probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
+
+            convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename, zarr_filename, probe_filenames)
+
+    if convert_behavior_sessions:
+        session_dir = Path(f"data/behavior_only_sessions")
+        b.fetch(behavior_session_path, session_dir / "behavior_sessions.csv")
+        behavior_session_table = pd.read_csv(session_dir / "behavior_sessions.csv")
+        behavior_session_ids = behavior_session_table['behavior_session_id'].sort_values().to_list()
+
+        # download behavior only session files
+        for session_id in behavior_session_ids:
+            s3_bucket_path = f"visual-behavior-neuropixels/behavior_only_sessions/{session_id}/"
+            dir_contents = b.ls(s3_bucket_path)[1]
+            hdf5_files = [f['Key'] for f in dir_contents if f['IsLatest'] == True]
+            assert len(hdf5_files) == 1, f"Expected only one file for behavior only session {session_id}, found {len(hdf5_files)} files."
+            base_filename = hdf5_files[0]
+            
+            # fetch file from s3 bucket
+            local_path = Path(f"data/behavior_only_sessions/{session_id}/")
+            local_path.mkdir(parents=True, exist_ok=True)
+            if not (local_path / Path(base_filename).name).exists():
+                b.fetch(base_filename, local_path / Path(base_filename).name)
+
+            # convert session hdf5_base_filename
+            zarr_filename = f"./behavior_session_{session_id}.nwb.zarr"
+            convert_visual_behavior_ephys_file_to_zarr(local_path / Path(base_filename).name, Path(zarr_filename))
