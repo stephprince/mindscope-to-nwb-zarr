@@ -9,7 +9,7 @@ from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
 from pynwb import NWBFile, validate, get_class
 from pynwb.ecephys import LFP
-from pynwb.image import Images, GrayscaleImage
+from pynwb.image import Images, GrayscaleImage, IndexSeries
 
 try:
     WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
@@ -17,16 +17,17 @@ except KeyError:
     raise(KeyError, "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
                     "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'")
 
+
 def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     """Convert stimulus_template from ImageSeries to Images container with IndexSeries references.
-    
-    In the original HDF5 versions of the data, stimulus template images, e.g., four 
+
+    In the original HDF5 versions of the data, stimulus template images, e.g., four
     gratings or eight natural images, were stored in an NWB ImageSeries object where
     the timestamps are NaN. In the /stimulus/presentation group, a separate IndexSeries
     object represents the times at which each image in the ImageSeries is displayed.
     This approach of linking an IndexSeries to an ImageSeries with NaN timestamps is
-    deprecated. This function reorganizes the stimulus templates by changing the 
-    ImageSeries to an ordered set of Image objects in an Images container, and 
+    deprecated. This function reorganizes the stimulus templates by changing the
+    ImageSeries to an ordered set of Image objects in an Images container, and
     changing the IndexSeries to link to this Images container.
     """
 
@@ -38,10 +39,33 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     original_stimulus_keys = list(nwbfile.stimulus_template.keys())
     new_stimulus_templates = {}
     for k in original_stimulus_keys:
+        print(f"\nConverting stimulus template {k} to Images container")
+
         stimulus_template = nwbfile.stimulus_template[k]
         assert stimulus_template.__class__.__name__ == "StimulusTemplate", \
             f"Expected stimulus template '{k}' to be of type StimulusTemplate"
 
+        # Validate data shapes match
+        data_shape = stimulus_template.data.shape
+        unwarped_shape = stimulus_template.unwarped.shape
+        num_control_descriptions = len(stimulus_template.control_description)
+        if data_shape != unwarped_shape:
+            raise ValueError(
+                f"Stimulus template '{k}' data shape mismatch: "
+                f"data.shape={data_shape}, unwarped.shape={unwarped_shape}"
+            )
+        if num_control_descriptions != data_shape[0]:
+            raise ValueError(
+                f"Stimulus template '{k}' has {data_shape[0]} images but "
+                f"{num_control_descriptions} control descriptions"
+            )
+        
+        # Validate we have 3D data (num_images, height, width for GrayscaleImage)
+        if len(data_shape) != 3:
+            raise ValueError(
+                f"Stimulus template '{k}' data should be 3D (num_images, height, width), "
+                f"but got shape {data_shape}"
+        )
         image_data = stimulus_template.data[:]  # Shape should be (num_images, height, width)
         image_data_unwarped = stimulus_template.unwarped[:]
 
@@ -90,16 +114,32 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
 
     # Add new stimulus templates and update IndexSeries references
     for k in original_stimulus_keys:
+        # Validate that matching IndexSeries exists
+        if k not in nwbfile.stimulus:
+            raise ValueError(
+                f"No matching IndexSeries found in stimulus presentations for template '{k}'. "
+                f"Available stimulus presentations: {list(nwbfile.stimulus.keys())}"
+            )
+
         # add unwarped images first so BuildManager can find them when building warped images
         nwbfile.add_stimulus_template(new_stimulus_templates[k + "_unwarped"])
         nwbfile.add_stimulus_template(new_stimulus_templates[k])
 
         # replace references in stimulus presentation IndexSeries
-        nwbfile.stimulus[k].fields['indexed_timeseries'] = None
-        nwbfile.stimulus[k].fields['indexed_images'] = new_stimulus_templates[k]
-        if nwbfile.stimulus[k].description is None or nwbfile.stimulus[k].description == "no description":
-             nwbfile.stimulus[k].fields['description'] = f"Timestamps and indices of the {k} stimulus template presentations."
-            # TODO - is this an ok description or should it be included?
+        index_series = nwbfile.stimulus[k]
+        assert isinstance(index_series, IndexSeries), \
+            f"Expected stimulus presentation '{k}' to be of type IndexSeries"
+        
+        if hasattr(index_series, 'indexed_timeseries'):
+            index_series.fields['indexed_timeseries'] = None
+            index_series.fields['indexed_images'] = new_stimulus_templates[k]
+            if index_series.description is None or index_series.description == "no description":
+                index_series.fields['description'] = f"Timestamps and indices of the {k} stimulus template presentations."
+                # TODO - is this an ok description or should it be included?
+        else:
+            raise ValueError(
+                f"IndexSeries '{k}' missing 'indexed_timeseries' field"
+            )
 
     # TODO: Add "image" column to stimulus presentation table to reference the displayed images
     # TODO: Add "initial_image" and "change_image" columns to trials table to reference images shown during trials
@@ -110,6 +150,16 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
 
 def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NWBFile:
     """ Combine LFP and CSD data from a probe NWB file into the main NWB file."""
+
+    # Validate base nwbfile metadata matches probe nwbfile metadata
+    assert base_nwbfile.session_start_time == probe_nwbfile.session_start_time, \
+        f"Session start times do not match: base='{base_nwbfile.session_start_time}', probe='{probe_nwbfile.session_start_time}'"
+    assert base_nwbfile.timestamps_reference_time == probe_nwbfile.timestamps_reference_time, \
+        f"Timestamps reference times do not match: base='{base_nwbfile.timestamps_reference_time}', probe='{probe_nwbfile.timestamps_reference_time}'"
+    assert set(probe_nwbfile.devices.keys()).issubset(set(base_nwbfile.devices.keys())), \
+        f"Probe file references devices not in base file: {set(probe_nwbfile.devices.keys()) - set(base_nwbfile.devices.keys())}"
+    assert base_nwbfile.subject.subject_id == probe_nwbfile.subject.subject_id, \
+        f"Subject IDs do not match: base='{base_nwbfile.subject.subject_id}', probe='{probe_nwbfile.subject.subject_id}'"
 
     # Build mapping from probe indices to main file indices based on electrode IDs
     probe_electrode_ids = probe_nwbfile.electrodes.id[:]

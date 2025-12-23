@@ -27,10 +27,16 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_file
     added in separately.
     """
 
+    # Log probe files found
+    print(f"\nConverting {hdf5_base_filename.name}")
+    print(f"  Found {len(probe_filenames)} probe files:")
+    for pf in probe_filenames:
+        print(f"    - {pf.name}")
+
     if probe_filenames is None:
         probe_filenames = []
 
-    with NWBHDF5IO(hdf5_base_filename, 'r') as read_io:
+    with NWBHDF5IO(hdf5_base_filename, 'r') as read_io:    
         nwbfile = read_io.read()
         nwbfile.subject.strain = "unknown"  # TODO set appropriate strain value
         nwbfile.set_modified()
@@ -81,6 +87,10 @@ if __name__ == "__main__":
 
     # download ephys session files
     for session_id in session_ids:
+        print(f"\n{'='*60}")
+        print(f"Processing ephys session {session_id}")
+        print(f"{'='*60}")
+        
         # get all relevant filenames for that session
         s3_bucket_path = f"visual-coding-neuropixels/ecephys-cache/session_{session_id}/"
         dir_contents = b.ls(s3_bucket_path)[1]

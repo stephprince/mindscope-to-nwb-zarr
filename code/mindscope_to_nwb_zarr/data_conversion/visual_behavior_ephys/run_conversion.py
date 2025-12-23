@@ -24,6 +24,12 @@ def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_fi
     if probe_filenames is None:
         probe_filenames = []
 
+    # Log probe files found
+    print(f"\nConverting {hdf5_base_filename.name}")
+    print(f"  Found {len(probe_filenames)} probe files:")
+    for pf in probe_filenames:
+        print(f"    - {pf.name}")
+
     with NWBHDF5IO(hdf5_base_filename, 'r') as read_io:
         nwbfile = read_io.read()
         nwbfile.subject.strain = "unknown"  # TODO set appropriate strain value
@@ -75,6 +81,10 @@ if __name__ == "__main__":
 
         # download ephys session files
         for session_id in ephys_session_ids:
+            print(f"\n{'='*60}")
+            print(f"Processing ephys session {session_id}")
+            print(f"{'='*60}")
+
             # get all relevant filenames for that session
             s3_bucket_path = f"visual-behavior-neuropixels/behavior_ecephys_sessions/{session_id}/"
             dir_contents = b.ls(s3_bucket_path)[1]
@@ -87,11 +97,17 @@ if __name__ == "__main__":
                 if not (local_path / Path(f).name).exists():
                     b.fetch(f, local_path / Path(f).name)
 
-            # convert session hdf5_base_filename
+            # validate base session file exists
             hdf5_base_filename = local_path / f"ecephys_session_{session_id}.nwb"
-            zarr_filename = Path(f"./ecephys_session_{session_id}.nwb.zarr")
-            probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
+            if not hdf5_base_filename.exists():
+                raise FileNotFoundError(
+                    f"Base session file not found: {hdf5_base_filename.name}. "
+                    f"Available files: {[f.name for f in local_path.glob('*.nwb')]}"
+                )
 
+            # identify and validate probe files
+            probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
+            zarr_filename = Path(f"./ecephys_session_{session_id}.nwb.zarr")
             convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename, zarr_filename, probe_filenames)
 
     if convert_behavior_sessions:
@@ -102,18 +118,28 @@ if __name__ == "__main__":
 
         # download behavior only session files
         for session_id in behavior_session_ids:
+            print(f"\n{'='*60}")
+            print(f"Processing behavior session {session_id}")
+            print(f"{'='*60}")
+
             s3_bucket_path = f"visual-behavior-neuropixels/behavior_only_sessions/{session_id}/"
             dir_contents = b.ls(s3_bucket_path)[1]
             hdf5_files = [f['Key'] for f in dir_contents if f['IsLatest'] == True]
-            assert len(hdf5_files) == 1, f"Expected only one file for behavior only session {session_id}, found {len(hdf5_files)} files."
-            base_filename = hdf5_files[0]
             
+            # validate exactly one file for behavior-only sessions
+            if len(hdf5_files) != 1:
+                raise ValueError(
+                    f"Expected exactly one file for behavior-only session {session_id}, "
+                    f"found {len(hdf5_files)} files: {[Path(f).name for f in hdf5_files]}"
+                )
+            base_filename = hdf5_files[0]
+
             # fetch file from s3 bucket
             local_path = Path(f"data/behavior_only_sessions/{session_id}/")
             local_path.mkdir(parents=True, exist_ok=True)
             if not (local_path / Path(base_filename).name).exists():
                 b.fetch(base_filename, local_path / Path(base_filename).name)
 
-            # convert session hdf5_base_filename
+            # convert session (no probe files for behavior-only)
             zarr_filename = Path(f"./behavior_session_{session_id}.nwb.zarr")
             convert_visual_behavior_ephys_file_to_zarr(local_path / Path(base_filename).name, zarr_filename)
