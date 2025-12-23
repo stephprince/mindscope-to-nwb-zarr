@@ -3,8 +3,10 @@
 ### Implemented
 * Combined probe files containing LFP + CSD data into single NWB file
 * Moved LFP data into processing module (best practice for storing downsampled and lowpass filtered data)
-* Change the stimulus_template ImageSeries to a set of Image objects in an Images container
-* add missing experiment description
+* Change the StimulusTemplate ImageSeries type in stimulus_template to a WarpedStimulusTemplateImage type that is a set of Image objects in an Images container
+   * added unwarped images as a separate Images container
+   * updated IndexSeries references to the StimulusTemplate ImageSeries type to reference the new WarpedStimulusTemplateImage object
+* add missing experiment description if needed
 * add description to several objects in the file
    * units table
    * add description to optogenetic_stimulation time intervals
