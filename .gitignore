@@ -6,7 +6,8 @@ metadata/metadata.yml
 
 # Project data
 data/*
-.DS_Store
+resources/*
+*.nwb.zarr
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
