@@ -14,19 +14,19 @@ import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
 
 
-def _fix_procedures_validation_issues(subject_procedures: dict) -> dict:
+def _fix_procedures_validation_issues(subject_procedures: list) -> list:
     """
     Fix known validation issues in procedures data from the API
 
     Parameters
     ----------
-    raw_data : dict
-        The raw procedures data from the API
+    subject_procedures : list
+        The subject_procedures list from the API response
 
     Returns
     -------
-    dict
-        The fixed procedures data
+    list
+        The fixed subject_procedures list
     """
     # Fix issues in subject_procedures
     for i, procedure in enumerate(subject_procedures):
