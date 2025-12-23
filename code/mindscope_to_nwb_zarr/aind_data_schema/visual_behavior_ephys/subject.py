@@ -17,7 +17,7 @@ from aind_metadata_service_client.rest import ApiException
 import json
 
 
-def fetch_subject_from_api(nwbfile: NWBFile, session_info: pd.DataFrame, api_host: Optional[str] = None) -> Optional[Subject]:
+def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.DataFrame, api_host: Optional[str] = None) -> Optional[Subject]:
     """
     Fetch subject metadata from AIND metadata service API
 

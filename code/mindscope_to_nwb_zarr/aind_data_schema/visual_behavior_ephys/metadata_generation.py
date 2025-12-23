@@ -8,7 +8,8 @@ from pynwb import read_nwb
 
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.data_description import generate_data_description
-from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import fetch_subject_from_api
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import fetch_subject_from_aind_metadata_service
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.procedures import fetch_procedures_from_aind_metadata_service
 
 
 def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
@@ -67,9 +68,9 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)
-    subject = fetch_subject_from_api(nwbfile, session_info)
+    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
-    #procedures = generate_procedures(nwbfile, session_info) # TODO - add procedures generation
+    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
     #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
     metadata_models = [data_description, subject, acquisition]
 
