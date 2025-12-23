@@ -17,14 +17,16 @@ from aind_metadata_service_client.rest import ApiException
 import json
 
 
-def fetch_subject_from_api(nwbfile: NWBFile, session_info: pd.DataFrame, api_host: Optional[str] = None, ) -> Optional[Subject]:
+def fetch_subject_from_api(nwbfile: NWBFile, session_info: pd.DataFrame, api_host: Optional[str] = None) -> Optional[Subject]:
     """
     Fetch subject metadata from AIND metadata service API
 
     Parameters
     ----------
-    subject_id : str
-        The subject ID to query
+    nwbfile : NWBFile
+        The NWB file containing subject information for validation
+    session_info : pd.DataFrame
+        DataFrame containing session information to extract subject ID
     api_host : str, optional
         The API host URL. Defaults to "http://aind-metadata-service"
 
@@ -37,7 +39,10 @@ def fetch_subject_from_api(nwbfile: NWBFile, session_info: pd.DataFrame, api_hos
     -----
     The API endpoint used is GET /api/v2/subject/{subject_id}
 
-    If the API call fails, returns None and logs a warning.
+    This function validates that the API response matches the NWB file metadata
+    (species, sex, date of birth, genotype).
+
+    If the API call fails or validation fails, returns None and logs a warning.
     """
     api_host = api_host if api_host else "http://aind-metadata-service"
     subject_id = get_subject_id(nwbfile, session_info)
@@ -48,12 +53,15 @@ def fetch_subject_from_api(nwbfile: NWBFile, session_info: pd.DataFrame, api_hos
         api_instance = aind_metadata_service_client.DefaultApi(api_client)
 
         # there are known validation issues with old subject data, try to get the content here but accept the raw response if needed
+        raw_data = None
         try:
             subject_response = api_instance.get_subject(subject_id=subject_id)
-            return subject_response
+            # Extract raw data for validation (convert to dict if needed)
+            raw_data = subject_response.model_dump() if hasattr(subject_response, 'model_dump') else subject_response
+            subject = subject_response
         except ApiException as e:
             # If validation fails, try to get the raw response
-            print(f"Warning: API request failed for subject {subject_id}: attempting to parse raw response")
+            print(f"Warning: Validation error for subject {subject_id}, attempting to parse raw response")
 
             # Get raw response without preload content validation
             response = api_instance.get_subject_without_preload_content(subject_id=subject_id)
@@ -68,22 +76,22 @@ def fetch_subject_from_api(nwbfile: NWBFile, session_info: pd.DataFrame, api_hos
 
             # Create Subject from the fixed data
             subject = Subject(**raw_data)
-            
-            # Compare to nwbfile if available
-            if nwbfile is not None:
-                subject_sex_dict = {"F": "Female", "M": "Male"}
 
-                assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
-                    f"Species mismatch between NWB file ({nwbfile.subject.species}) and metadata service ({raw_data['subject_details']['species']})"
+        # Validate API response against NWB file
+        if nwbfile is not None and raw_data is not None:
+            subject_sex_dict = {"F": "Female", "M": "Male"}
 
-                assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
-                    f"Sex mismatch between NWB file ({nwbfile.subject.sex}) and metadata service ({raw_data['subject_details']['sex']})"
-                
-                assert get_subject_date_of_birth(nwbfile).strftime("%Y-%m-%d") == raw_data['subject_details']['date_of_birth'], \
-                    f"Date of birth mismatch between NWB file ({get_subject_date_of_birth(nwbfile)}) and metadata service ({raw_data['subject_details']['date_of_birth']})" 
-                
-                assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
-                    f"Genotype mismatch between NWB file ({nwbfile.subject.genotype}) and metadata service ({raw_data['subject_details']['genotype']})"
+            assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
+                f"Species mismatch between NWB file ({nwbfile.subject.species}) and metadata service ({raw_data['subject_details']['species']['name']})"
 
-            return subject
+            assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
+                f"Sex mismatch between NWB file ({nwbfile.subject.sex}) and metadata service ({raw_data['subject_details']['sex']})"
+
+            assert get_subject_date_of_birth(nwbfile).strftime("%Y-%m-%d") == raw_data['subject_details']['date_of_birth'], \
+                f"Date of birth mismatch between NWB file ({get_subject_date_of_birth(nwbfile)}) and metadata service ({raw_data['subject_details']['date_of_birth']})"
+
+            assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
+                f"Genotype mismatch between NWB file ({nwbfile.subject.genotype}) and metadata service ({raw_data['subject_details']['genotype']})"
+
+        return subject
 
