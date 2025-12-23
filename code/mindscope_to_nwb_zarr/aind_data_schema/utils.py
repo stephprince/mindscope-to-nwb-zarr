@@ -106,8 +106,6 @@ def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
 
         if structure is not None:
             all_structures.append(structure)
-        elif location_upper.startswith('VIS'):
-            all_structures.append(CCFv3.VIS) # use generic VIS if particular one is not found
         else:
             pass
 
@@ -140,10 +138,9 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
             all_structures = get_brain_locations(nwbfile, device)
             targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')] # get targeted visual area
             if len(targeted_structure) > 1:
-                # TODO - determine how to map 12 visual areas in coding dataset to CCFv3
-                # for debugging purposes mapping to a general VIS structure and change to an assertion once we've decided
+                # NOTE: visual coding dataset has 12 functionally defined visual areas that are not included in the CCFv3
+                # these regions will be ignored and the target structure should still fall under one of the 6 VIS areas
                 # VISal, VISam, VISl, VISpl, VISp, VISrl, VISpm
-                # (need to be mapped: VISm, VISli, VISlla, VISm, VISmma, VISmmp)
                 warnings.warn(f"More than one visual area found: {targeted_structure}")
 
             all_targeted_structures.append(targeted_structure[0])
@@ -228,7 +225,7 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
     VisualStimulation
         Visual stimulation object with extracted parameters
     """
-    # TODO - determine if there are any other parameters to include
+    # TODO - determine if there are any other parameters to include or better units
     possible_parameters_and_units = {"orientation": "degrees",
                                      "spatial_frequency": "cycles/degree",
                                      "temporal_frequency": "Hz",
@@ -252,7 +249,7 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
                                      "fieldPos": None,
                                      "fieldShape": None,
                                      "fieldSize": None,
-                                     } # TODO - determine if any of these have better units
+                                     }
     parameters = {}
     for param_key, param_unit in possible_parameters_and_units.items():
         if param_key in intervals_table.columns:
