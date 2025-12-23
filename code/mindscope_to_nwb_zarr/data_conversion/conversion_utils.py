@@ -275,7 +275,7 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
     if hasattr(nwbfile, 'intervals') and nwbfile.intervals is not None:
         # Check for grating_presentations or other stimulus presentation intervals
         for interval_name in nwbfile.intervals.keys():
-            if 'presentation' in interval_name: # TODO - check if there are other cases of this
+            if 'presentations' in interval_name: # TODO - check if there are other cases of this
                 stimulus_table = nwbfile.intervals[interval_name]
 
                 # explanation based on technical white paper and https://allensdk.readthedocs.io/en/latest/_static/examples/nb/aligning_behavioral_data_to_task_events_with_the_stimulus_and_trials_tables.html
