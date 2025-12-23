@@ -9,8 +9,11 @@ from pynwb import NWBFile, validate, get_class
 from pynwb.ecephys import LFP
 from pynwb.image import Images, GrayscaleImage
 
-WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
-
+try:
+    WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
+except KeyError:
+    raise(KeyError, "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
+                    "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'")
 
 def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     """Convert stimulus_template from ImageSeries to Images container with IndexSeries references.
@@ -31,7 +34,7 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         return nwbfile
 
     original_stimulus_keys = list(nwbfile.stimulus_template.keys())
-    new_stimulus_templates = []
+    new_stimulus_templates = {}
     for k in original_stimulus_keys:
         stimulus_template = nwbfile.stimulus_template[k]
         assert stimulus_template.__class__.__name__ == "StimulusTemplate", \
@@ -40,8 +43,11 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         image_data = stimulus_template.data[:]  # Shape should be (num_images, height, width)
         image_data_unwarped = stimulus_template.unwarped[:]
 
-        # Adapt description TODO: Adapt for different stimulus types
-        description = 'Natural scene images' if 'Natural_Images' in stimulus_template.name else stimulus_template.description
+        # Adapt description TODO: Adapt for different stimulus types if non-visual?
+        if stimulus_template.description is not None and stimulus_template.description != "no description":
+            description = stimulus_template.description
+        else:
+            description =  "Visual stimuli images shown to the animal."
 
         # Create new image objects
         all_images_unwarped = []
@@ -49,14 +55,14 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         for i in range(image_data.shape[0]):
             unwarped_image = GrayscaleImage(
                 name=stimulus_template.control_description[i],
-                data=image_data_unwarped[i],
+                data=image_data_unwarped[i].astype('float32'),
                 description=f"Natural scene image unwarped {stimulus_template.control[i]}",
             )
             warped_image = WarpedStimulusTemplateImage(
                 name=stimulus_template.control_description[i],
-                data=image_data[i],
+                data=image_data[i].astype('float32'),
                 description=f"Natural scene image {stimulus_template.control[i]}",
-                unwarped_image=unwarped_image,
+                unwarped=unwarped_image,
             )
             all_images_unwarped.append(unwarped_image)
             all_images.append(warped_image)
@@ -73,19 +79,27 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
             images=all_images_unwarped,
         )
 
-        new_stimulus_templates.append(all_images_container)
-        new_stimulus_templates.append(all_unwarped_images_container)
+        new_stimulus_templates[k] = all_images_container
+        new_stimulus_templates[k + "_unwarped"] = all_unwarped_images_container
 
-    # Remove old stimulus templates and add new ones
+    # Remove old stimulus templates
     for k in original_stimulus_keys:
         nwbfile.stimulus_template.pop(k)
 
-    for new_template in new_stimulus_templates:
-        nwbfile.add_stimulus_template(new_template)
+    # Add new stimulus templates and update IndexSeries references
+    for k in original_stimulus_keys:
+        # add unwarped images first so BuildManager can find them when building warped images
+        nwbfile.add_stimulus_template(new_stimulus_templates[k + "_unwarped"])
+        nwbfile.add_stimulus_template(new_stimulus_templates[k])
 
-    # TODO: Update the IndexSeries to link to the new Images container
+        # replace references in stimulus presentation IndexSeries
+        nwbfile.stimulus[k].fields['indexed_timeseries'] = None
+        nwbfile.stimulus[k].fields['indexed_images'] = new_stimulus_templates[k]
+
     # TODO: Add "image" column to stimulus presentation table to reference the displayed images
     # TODO: Add "initial_image" and "change_image" columns to trials table to reference images shown during trials
+    # NOTE: There are existing columns in the stimulus presentation and trials table for this information,
+    # is there a specific reason to update them to reference the new Images container vs. the name / indices?
 
     return nwbfile
 
