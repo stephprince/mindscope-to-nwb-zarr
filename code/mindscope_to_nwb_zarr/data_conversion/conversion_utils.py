@@ -3,6 +3,8 @@ import traceback
 from typing import Iterable, Optional
 import warnings
 
+import numpy as np
+from hdmf.common.table import VectorIndex
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
 from pynwb import NWBFile, validate, get_class
@@ -299,6 +301,69 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
                         if (stimulus_table[col_name].description is None or
                             stimulus_table[col_name].description.lower() == "no description"):
                             stimulus_table[col_name].fields['description'] = description
+
+    return nwbfile
+
+
+def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:
+    """Fix VectorIndex dtypes to use minimal unsigned integer types as per NWB spec.
+
+    VectorIndex objects should use uint8, uint16, uint32, or uint64 depending on the
+    maximum value. This function goes through known tables and converts their VectorIndex
+    columns to use the minimal appropriate unsigned integer dtype.
+
+    Args:
+        nwbfile: The NWBFile object to fix
+
+    Returns:
+        The modified NWBFile object with corrected VectorIndex dtypes
+    """
+    def get_minimal_uint_dtype(max_value: int) -> np.dtype:
+        """Determine the minimal unsigned integer dtype needed for a maximum value."""
+        # TODO - use reasonable default for all or get minimal?
+        if max_value <= np.iinfo(np.uint8).max:
+            return np.dtype('uint8')
+        elif max_value <= np.iinfo(np.uint16).max:
+            return np.dtype('uint16')
+        elif max_value <= np.iinfo(np.uint32).max:
+            return np.dtype('uint32')
+        else:
+            return np.dtype('uint64')
+
+    def fix_table_indices(table):
+        """Fix VectorIndex columns in a DynamicTable."""
+        if table is None:
+            return
+
+        for col_name in table.colnames:
+            col = table[col_name]
+            if isinstance(col, VectorIndex):
+                data = col.data
+                if data is not None and len(data) > 0:
+                    max_val = np.max(data)
+                    target_dtype = get_minimal_uint_dtype(max_val)
+                    if data.dtype != target_dtype:
+                        # WARNING: This is a workaround to modify a protected attribute,
+                        # validation should always be performed afterwards
+                        # TODO - is there a better way to perform this dtype fix?
+                        col._Data__data = data[:].astype(target_dtype)
+
+    # Fix units table
+    if hasattr(nwbfile, 'units') and nwbfile.units is not None:
+        fix_table_indices(nwbfile.units)
+
+    # Fix intervals tables
+    if hasattr(nwbfile, 'intervals') and nwbfile.intervals is not None:
+        for interval_table in nwbfile.intervals.values():
+            fix_table_indices(interval_table)
+
+    # Fix processing modules tables (e.g., optotagging)
+    if hasattr(nwbfile, 'processing'):
+        for module in nwbfile.processing.values():
+            for data_interface in module.data_interfaces.values():
+                # Check if it's a TimeIntervals table or similar
+                if hasattr(data_interface, 'colnames'):
+                    fix_table_indices(data_interface)
 
     return nwbfile
 

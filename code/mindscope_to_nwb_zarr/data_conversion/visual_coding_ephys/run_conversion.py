@@ -13,14 +13,19 @@ load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
-    convert_stimulus_template_to_images,
     add_missing_descriptions,
+    fix_vector_index_dtypes,
     inspect_zarr_file,
 )
 
 
 def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_filename: Path, probe_filenames: list[Path] = None) -> None:
-    """ Convert a Visual Coding Ephys NWB HDF5 file and associated probe files to NWB Zarr format."""
+    """ Convert a Visual Coding Ephys NWB HDF5 file and associated probe files to NWB Zarr format.
+    
+    The key difference between this and the Visual Behavior Ephys conversion is that the Visual Coding
+    dataset does not have stimulus template data included in the NWB files. This data needs to be
+    added in separately.
+    """
 
     if probe_filenames is None:
         probe_filenames = []
@@ -46,6 +51,9 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_file
             # add missing experiment description field (from technical white paper)
             nwbfile = add_missing_descriptions(nwbfile)
 
+            # fix VectorIndex dtypes to use minimal unsigned integer types
+            nwbfile = fix_vector_index_dtypes(nwbfile)
+
             # export to zarr
             with NWBZarrIO(zarr_filename, mode='w') as export_io:
                 export_io.export(src_io=read_io, nwbfile=nwbfile, write_args=dict(link_data=False))
@@ -69,7 +77,7 @@ if __name__ == "__main__":
     session_dir = Path("data/visual_coding_sessions")
     b.fetch(session_metadata_path, session_dir / "sessions.csv")
     session_table = pd.read_csv(session_dir / "sessions.csv")
-    session_ids = session_table['session_id'].astype(str).to_list()
+    session_ids = session_table['id'].astype(str).to_list()
 
     # download ephys session files
     for session_id in session_ids:
