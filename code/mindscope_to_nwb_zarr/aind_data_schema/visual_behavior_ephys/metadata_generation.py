@@ -8,7 +8,7 @@ from pynwb import read_nwb
 
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.data_description import generate_data_description
-from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import generate_subject
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import fetch_subject_from_api
 
 
 def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
@@ -67,7 +67,7 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)
-    subject = generate_subject(nwbfile, session_info)
+    subject = fetch_subject_from_api(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
     #procedures = generate_procedures(nwbfile, session_info) # TODO - add procedures generation
     #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
@@ -90,8 +90,8 @@ if __name__ == "__main__":
     # Define sessions to process
     # TODO - create list of all session ids and corresponding nwb file paths
     sessions = [
-        (1014008383, repo_root / "data/behavior_session_1014008383.nwb"),
-        (1043752325, repo_root / "data/sub-506940_ses-20200817T222149.nwb"),
+        (1014008383, repo_root / "data/visual_behavior_neuropixels/behavior_session_1014008383.nwb"),
+        (1043752325, repo_root / "data/visual_behavior_neuropixels/ecephys_session_1043752325.nwb"),
     ]
 
     # Process each session
