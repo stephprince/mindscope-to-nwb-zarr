@@ -140,7 +140,7 @@ def run():
     # Parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--results_dir", type=str, default="C:/Users/Ryan/results/") # TODO - update to code ocean
+    parser.add_argument("--results_dir", type=str, default="../results/")
     
     args = parser.parse_args()
     dataset = args.dataset
