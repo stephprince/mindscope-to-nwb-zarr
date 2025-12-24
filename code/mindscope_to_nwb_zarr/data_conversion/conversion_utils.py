@@ -368,18 +368,6 @@ def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:
     Returns:
         The modified NWBFile object with corrected VectorIndex dtypes
     """
-    def get_minimal_uint_dtype(max_value: int) -> np.dtype:
-        """Determine the minimal unsigned integer dtype needed for a maximum value."""
-        # TODO - use reasonable default for all or get minimal?
-        if max_value <= np.iinfo(np.uint8).max:
-            return np.dtype('uint8')
-        elif max_value <= np.iinfo(np.uint16).max:
-            return np.dtype('uint16')
-        elif max_value <= np.iinfo(np.uint32).max:
-            return np.dtype('uint32')
-        else:
-            return np.dtype('uint64')
-
     def fix_table_indices(table):
         """Fix VectorIndex columns in a DynamicTable."""
         if table is None:
@@ -390,8 +378,7 @@ def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:
             if isinstance(col, VectorIndex):
                 data = col.data
                 if data is not None and len(data) > 0:
-                    max_val = np.max(data)
-                    target_dtype = get_minimal_uint_dtype(max_val)
+                    target_dtype = np.dtype('uint64')
                     if data.dtype != target_dtype:
                         # WARNING: This is a workaround to modify a protected attribute,
                         # validation should always be performed afterwards
