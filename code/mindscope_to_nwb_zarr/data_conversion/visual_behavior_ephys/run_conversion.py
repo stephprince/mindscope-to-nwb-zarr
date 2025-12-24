@@ -1,4 +1,3 @@
-import quilt3 as q3
 import pandas as pd
 
 from pathlib import Path
@@ -114,6 +113,7 @@ if __name__ == "__main__":
     # TODO - this section should be replacable within codeocean with extraction directly from attached data assets
 
     # get all session ids
+    import quilt3 as q3
     output_dir =  Path(".cache/visual_behavior_neuropixels_cache_dir")
     b = q3.Bucket("s3://visual-behavior-neuropixels-data")
     behavior_session_path = f"visual-behavior-neuropixels/project_metadata/behavior_sessions.csv"

@@ -61,7 +61,7 @@ mouse_ids['visual_coding_ephys'] = external_specimen_ids
 output_dir =  Path(".cache/visual_coding_ophys_cache_dir")
 visual_coding_ophys_cache = BrainObservatoryCache(manifest_file=str(Path(output_dir) / 'visual_coding_ophys_manifest.json'))
 sessions_df = pd.DataFrame(visual_coding_ophys_cache.get_ophys_experiments(include_failed=True))
-sessions_df = sessions_df.query('id <= 717913184') # no session ids greater than this on quilt3 bucket / DANDI
+sessions_df = sessions_df.query('id <= 717913184') # no session ids greater than this on AWS bucket / DANDI
 
 donor_name_ids = sessions_df['donor_name'].unique().astype(int).tolist()
 mouse_ids['visual_coding_ophys'] = donor_name_ids
