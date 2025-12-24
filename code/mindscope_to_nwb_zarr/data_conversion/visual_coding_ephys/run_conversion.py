@@ -69,9 +69,43 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_file
                 probe_io.close()
     
     # inspect and validate the resulting zarr file
-    inspect_zarr_file(zarr_filename, 
+    inspect_zarr_file(zarr_filename,
                       inspector_report_path=zarr_filename.with_suffix('.inspector_report.txt'))
-    
+
+
+def iterate_visual_coding_ephys_sessions(data_dir: Path):
+    """Iterate through visual coding ephys metadata and yield NWB file paths.
+
+    NWB files follow naming patterns:
+    - Base session: session_{session_id}.nwb
+    - Probe files: probe_{probe_id}_lfp.nwb (one per probe)
+
+    Yields session_info dict with nwb_path as the base file
+    and probe_paths as a list of probe files.
+    """
+    csv_path = data_dir / "sessions.csv"
+    df = pd.read_csv(csv_path)
+
+    for _, row in df.iterrows():
+        session_id = row['id']
+        session_dir = data_dir / f"session_{session_id}"
+
+        # Base NWB file
+        base_nwb_path = session_dir / f"session_{session_id}.nwb"
+
+        # Find all probe files for this session
+        probe_paths = []
+        if session_dir.exists():
+            probe_paths = sorted(session_dir.glob("probe_*_lfp.nwb"))
+
+        yield {
+            'session_id': session_id,
+            'session_type': 'ephys',
+            'nwb_path': base_nwb_path,
+            'probe_paths': probe_paths,
+        }
+
+
 if __name__ == "__main__":
     # TODO - this section should be replacable within codeocean with extraction directly from attached data assets
 

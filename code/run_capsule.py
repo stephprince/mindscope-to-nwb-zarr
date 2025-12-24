@@ -29,6 +29,11 @@ from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion 
     iterate_visual_behavior_ephys_sessions
 )
 
+from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys.run_conversion import (
+    convert_visual_coding_ephys_file_to_zarr,
+    iterate_visual_coding_ephys_sessions,
+)
+
 print("STARTING CODE OCEAN CAPSULE RUN")
 
 # Define Code Ocean folder paths
@@ -45,6 +50,8 @@ assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
     f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
 
 VISBEH_EPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-neuropixels"
+
+VISCODING_EPHYS_DATA_DIR = data_folder / "allen-brain-observatory" / "visual-coding-neuropixels" / "ecephys-cache"
 
 
 def iterate_behavior_sessions():
@@ -224,8 +231,41 @@ def run():
             # inspect resulting file
             inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
             inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
-        else:
-            warnings.warn(f"Unsupported dataset type: {dataset}, skipping session {session_id}")
+
+    elif dataset.lower() == "visual coding ephys":
+        sessions = list(iterate_visual_coding_ephys_sessions(data_dir=VISCODING_EPHYS_DATA_DIR))
+
+        for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
+            session_id = session_info['session_id']
+            nwb_path = session_info['nwb_path']
+            probe_paths = session_info.get('probe_paths', [])
+
+            # Check for missing NWB files (base file + probe files)
+            all_paths = [nwb_path] + probe_paths
+            missing_paths = [p for p in all_paths if not p.exists()]
+            if missing_paths:
+                for missing_path in missing_paths:
+                    error_msg = (f"session_id: {session_id}, "
+                                 f"nwb_path: {missing_path}")
+                    missing_nwb_errors.append(error_msg)
+                continue
+
+            # Output Zarr file path
+            result_zarr_path = results_dir / "visual-coding-neuropixels" / f"session_{session_id}.nwb.zarr"
+            result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
+
+            convert_visual_coding_ephys_file_to_zarr(
+                hdf5_base_filename=nwb_path,
+                zarr_filename=result_zarr_path,
+                probe_filenames=probe_paths
+            )
+
+            # inspect resulting file
+            inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+            inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+
+    else:
+        raise ValueError(f"Unsupported dataset type: {dataset}")
 
     # Write missing NWB file errors to results folder
     if missing_nwb_errors:
