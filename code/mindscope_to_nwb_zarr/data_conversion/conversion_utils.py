@@ -114,32 +114,32 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
 
     # Add new stimulus templates and update IndexSeries references
     for k in original_stimulus_keys:
-        # Validate that matching IndexSeries exists
-        if k not in nwbfile.stimulus:
-            raise ValueError(
-                f"No matching IndexSeries found in stimulus presentations for template '{k}'. "
-                f"Available stimulus presentations: {list(nwbfile.stimulus.keys())}"
-            )
-
         # add unwarped images first so BuildManager can find them when building warped images
         nwbfile.add_stimulus_template(new_stimulus_templates[k + "_unwarped"])
         nwbfile.add_stimulus_template(new_stimulus_templates[k])
 
-        # replace references in stimulus presentation IndexSeries
-        index_series = nwbfile.stimulus[k]
-        assert isinstance(index_series, IndexSeries), \
-            f"Expected stimulus presentation '{k}' to be of type IndexSeries"
-        
-        if hasattr(index_series, 'indexed_timeseries'):
-            index_series.fields['indexed_timeseries'] = None
-            index_series.fields['indexed_images'] = new_stimulus_templates[k]
-            if index_series.description is None or index_series.description == "no description":
-                index_series.fields['description'] = f"Timestamps and indices of the {k} stimulus template presentations."
-                # TODO - is this an ok description or should it be included?
-        else:
-            raise ValueError(
-                f"IndexSeries '{k}' missing 'indexed_timeseries' field"
+        # Validate that matching IndexSeries exists
+        if k not in nwbfile.stimulus:
+            warnings.warn(
+                f"No matching IndexSeries found in stimulus presentations for template '{k}'. "
+                f"Available stimulus presentations: {list(nwbfile.stimulus.keys())}"
             )
+        else:
+            # replace references in stimulus presentation IndexSeries
+            index_series = nwbfile.stimulus[k]
+            assert isinstance(index_series, IndexSeries), \
+                f"Expected stimulus presentation '{k}' to be of type IndexSeries"
+            
+            if hasattr(index_series, 'indexed_timeseries'):
+                index_series.fields['indexed_timeseries'] = None
+                index_series.fields['indexed_images'] = new_stimulus_templates[k]
+                if index_series.description is None or index_series.description == "no description":
+                    index_series.fields['description'] = f"Timestamps and indices of the {k} stimulus template presentations."
+                    # TODO - is this an ok description or should it be included?
+            else:
+                raise ValueError(
+                    f"IndexSeries '{k}' missing 'indexed_timeseries' field"
+                )
 
     # TODO: Add "image" column to stimulus presentation table to reference the displayed images
     # TODO: Add "initial_image" and "change_image" columns to trials table to reference images shown during trials
