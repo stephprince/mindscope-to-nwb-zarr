@@ -1,8 +1,8 @@
 """Generates an example JSON file for visual behavior ephys procedures"""
 
 import json
-import numpy as np
 import pandas as pd
+import warnings
 from pynwb import NWBFile
 from typing import Optional
 
@@ -33,8 +33,8 @@ def _fix_procedures_validation_issues(subject_procedures: list) -> list:
         # Fix Surgery procedures
         if procedure.get('object_type') == 'Surgery':
             if procedure.get('anaesthesia') is not None and 'duration' not in procedure['anaesthesia']:
-                subject_procedures[i]['anaesthesia']['duration'] = np.nan
-                print(f"  Fixed missing anaesthesia.duration, set to NaN")
+                subject_procedures[i]['anaesthesia']['duration'] = 0.0 # TODO - is there a better missing value?
+                print(f"  Fixed missing anaesthesia.duration, set to 0.0")
 
             # Fix procedures within Surgery
             for j, surgery_proc in enumerate(procedure['procedures']):
@@ -43,7 +43,7 @@ def _fix_procedures_validation_issues(subject_procedures: list) -> list:
                     position = surgery_proc['position']
                     if isinstance(position, str):
                         subject_procedures[i]['procedures'][j]['position'] = [position]
-                        print(f"  Fixed Craniotomy position from string '{position}' to list")
+                        print(f"  Fixed Craniotomy position from string '{position}' to list [{position}]")
 
     return subject_procedures
 
@@ -87,7 +87,7 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: 
             return procedures_response
         except ApiException as e:
             # If validation fails, try to get the raw response
-            print(f"Warning: Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
+            warnings.warn(f"Warning: Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
 
             # Get raw response without preload content validation
             response = api_instance.get_procedures_without_preload_content(subject_id=subject_id)

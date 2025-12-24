@@ -72,7 +72,7 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
     #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
-    metadata_models = [data_description, subject, acquisition]
+    metadata_models = [data_description, subject, acquisition, procedures]  # add instrument when available
 
     # Save the metadata files
     Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)
