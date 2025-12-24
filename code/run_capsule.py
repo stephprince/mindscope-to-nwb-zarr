@@ -42,6 +42,9 @@ data_folder = Path("../data/")
 scratch_folder = Path("../scratch/")
 
 # Define dataset paths
+VISCOD_OPHYS_DATA_DIR = data_folder / "allen-brain-observatory" / "visual-coding-2p" / "ophys_experiment_data"
+
+
 VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_sessions"
 VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_ophys_experiments"
 
@@ -234,6 +237,7 @@ def run():
 
     elif dataset.lower() == "visual coding ephys":
         sessions = list(iterate_visual_coding_ephys_sessions(data_dir=VISCODING_EPHYS_DATA_DIR))
+        sessions = sessions[:2]  # TODO remove limit
 
         for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
             session_id = session_info['session_id']
