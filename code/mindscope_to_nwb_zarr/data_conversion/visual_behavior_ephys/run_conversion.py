@@ -60,6 +60,55 @@ def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_fi
     inspect_zarr_file(zarr_filename, 
                       inspector_report_path=zarr_filename.with_suffix('.inspector_report.txt'))
 
+def iterate_visual_behavior_ephys_sessions(data_dir: Path):
+    """Iterate through visual behavior ephys metadata and yield NWB file paths.
+
+    NWB files follow naming patterns:
+    - Behavior only: behavior_session_{behavior_session_id}.nwb
+    - Behavior-ephys: ecephys_session_{ecephys_session_id}.nwb (base file)
+                      + probe_{probe_id}.nwb files (one per probe)
+
+    For ephys sessions, yields session_info dict with nwb_path as the base file
+    and probe_paths as a list of probe files.
+    """
+    # Check for ephys sessions metadata
+    ephys_csv_path = data_dir / "project_metadata" / "ecephys_sessions.csv"
+    behavior_csv_path = data_dir / "project_metadata" / "behavior_sessions.csv"
+
+    # Process ephys sessions if metadata exists
+    df = pd.read_csv(ephys_csv_path)
+    for _, row in df.iterrows():
+        ecephys_session_id = row['ecephys_session_id']
+        session_dir = data_dir / 'behavior_ecephys_sessions' / str(ecephys_session_id)
+
+        # Base NWB file
+        base_nwb_path = session_dir / f"ecephys_session_{ecephys_session_id}.nwb"
+
+        # Find all probe files for this session
+        probe_paths = []
+        if session_dir.exists():
+            probe_paths = sorted(session_dir.glob("probe_*.nwb"))
+
+        yield {
+            'session_id': ecephys_session_id,
+            'session_type': 'behavior_ephys',
+            'nwb_path': base_nwb_path,
+            'probe_paths': probe_paths,
+        }
+
+    # Process behavior-only sessions if metadata exists
+    df = pd.read_csv(behavior_csv_path)
+    for _, row in df.iterrows():
+        behavior_session_id = row['behavior_session_id']
+        session_dir = data_dir / 'behavior_only_sessions' / str(behavior_session_id)
+        nwb_path = session_dir / f"behavior_session_{behavior_session_id}.nwb"
+
+        yield {
+            'session_id': behavior_session_id,
+            'session_type': 'behavior',
+            'nwb_path': nwb_path,
+            'probe_paths': [],
+        }
 
 if __name__ == "__main__":
     # TODO - this section should be replacable within codeocean with extraction directly from attached data assets
