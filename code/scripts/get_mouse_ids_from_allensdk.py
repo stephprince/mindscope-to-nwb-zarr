@@ -53,9 +53,17 @@ full_session_table = build_and_execute(
     engine=visual_coding_ephys_cache.fetch_api.rma_engine.get_rma_tabular,
     session_ids=None,
 )
-# donor_ids = set([s['donor_id'] for s in full_session_table['specimen'].tolist()])  # These match subject IDs on DANDI but are not used
 external_specimen_ids = set([int(s['external_specimen_name']) for s in full_session_table['specimen'].tolist()])
 mouse_ids['visual_coding_ephys'] = external_specimen_ids
+
+# create mapping of old nwbfile subject identifiers to 6-digit mouse ids
+# donor id matches old subject IDs on dandi / s3 and external_speicimen_name matches 6-digit mouse ids
+subject_mapping = (pd.DataFrame(full_session_table['specimen'].tolist())[['donor_id', 'external_specimen_name']]
+                   .set_index('donor_id')
+                   .to_dict()['external_specimen_name'])
+
+with open(Path("data/visual_coding_ephys_subject_mapping.json"), 'w') as f:
+    json.dump(subject_mapping, f, indent=2)
 
 # Download Visual Coding - Optophysiology data to local cache
 output_dir =  Path(".cache/visual_coding_ophys_cache_dir")
