@@ -24,13 +24,17 @@ from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion 
     combine_multiplane_nwb_to_zarr,
 )
 
+from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion import (
+    convert_visual_behavior_ephys_file_to_zarr,
+    iterate_visual_behavior_ephys_sessions
+)
+
 print("STARTING CODE OCEAN CAPSULE RUN")
 
 # Define Code Ocean folder paths
 code_folder = Path(__file__).parent
 data_folder = Path("../data/")
 scratch_folder = Path("../scratch/")
-results_folder = Path("C:/Users/Ryan/results/")  # TODO update me for Code Ocean
 
 # Define dataset paths
 VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-ophys" / "behavior_sessions"
@@ -39,6 +43,8 @@ VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys" / "
 VISBEH_OPHYS_METADATA_TABLES_DIR = data_folder / "visual-behavior-ophys" / "project_metadata"
 assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
     f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
+
+VISBEH_EPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-neuropixels"
 
 
 def iterate_behavior_sessions():
@@ -124,76 +130,102 @@ def run():
     # Parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
+    parser.add_argument("--results_dir", type=str, default="C:/Users/Ryan/results/") # TODO - update to code ocean
+    
     args = parser.parse_args()
     dataset = args.dataset
+    results_dir = Path(args.results_dir)
 
     # Ensure results folder is empty
-    for item in results_folder.iterdir():
+    for item in results_dir.iterdir():
         if item.is_dir():
             shutil.rmtree(item)
         else:
             item.unlink()
-    print(f"Cleared results folder: {list(results_folder.iterdir())}")
-
-    # Convert based on dataset type
-    if dataset.lower() == "visual behavior 2p":
-        pass  # TODO     
-    else:
-        raise ValueError(f"Dataset not recognized: {dataset}")
+    print(f"Cleared results folder: {list(results_dir.iterdir())}")
 
     # Track sessions with missing NWB files
     missing_nwb_errors = []
-    missing_nwb_file_path = results_folder / "missing_nwb_files.txt"
+    missing_nwb_file_path = results_dir / "missing_nwb_files.txt"
 
-    # Collect all sessions first to get total count for progress bar
-    sessions = list(iterate_behavior_sessions())
-    sessions = sessions[74:76]  # TODO remove limit
+    # Convert NWB files based on dataset type
+    if dataset.lower() == "visual behavior 2p":
+        sessions = list(iterate_behavior_sessions())
+        sessions = sessions[74:76]  # TODO remove limit
 
-    # Iterate through sessions
-    for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
-        behavior_session_id = session_info['behavior_session_id']
-        ophys_experiment_id = session_info['ophys_experiment_id']
-        nwb_path = session_info['nwb_path']
+        for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
+            behavior_session_id = session_info['behavior_session_id']
+            ophys_experiment_id = session_info['ophys_experiment_id']
 
-        # Handle multi-plane sessions (nwb_path is a list) vs single-plane (nwb_path is a Path)
-        nwb_paths = nwb_path if isinstance(nwb_path, list) else [nwb_path]
+            # Handle multi-plane sessions (nwb_path is a list) vs single-plane (nwb_path is a Path)
+            nwb_paths = nwb_path if isinstance(nwb_path, list) else [nwb_path]
 
-        # Check for missing NWB files
-        missing_paths = [p for p in nwb_paths if not p.exists()]
-        if missing_paths:
-            for missing_path in missing_paths:
-                error_msg = (f"behavior_session_id: {behavior_session_id}, "
-                             f"ophys_experiment_id: {ophys_experiment_id}, "
-                             f"nwb_path: {missing_path}")
-                missing_nwb_errors.append(error_msg)
-            continue
+            # Check for missing NWB files
+            missing_paths = [p for p in nwb_paths if not p.exists()]
+            if missing_paths:
+                for missing_path in missing_paths:
+                    error_msg = (f"behavior_session_id: {behavior_session_id}, "
+                                 f"ophys_experiment_id: {ophys_experiment_id}, "
+                                 f"nwb_path: {missing_path}")
+                    missing_nwb_errors.append(error_msg)
+                continue
 
-        # Process behavior-only or single-plane sessions
-        if not isinstance(nwb_path, list):
-            # Output Zarr file path mirrors the input path structure under results folder
-            # e.g., ../data/visual-behavior-ophys/behavior_sessions/file.nwb
-            #    -> ../results/visual-behavior-ophys/behavior_sessions/file.nwb.zarr
-            relative_path = nwb_path.relative_to(data_folder)
-            result_zarr_path = results_folder / relative_path.parent / (relative_path.name + ".zarr")
+            # Process behavior-only or single-plane sessions
+            if not isinstance(nwb_path, list):
+                # Output Zarr file path mirrors the input path structure under results folder
+                # e.g., ../data/visual-behavior-ophys/behavior_sessions/file.nwb
+                #    -> ../results/visual-behavior-ophys/behavior_sessions/file.nwb.zarr
+                relative_path = nwb_path.relative_to(data_folder)
+                result_zarr_path = results_dir / relative_path.parent / (relative_path.name + ".zarr")
+                result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
+                convert_behavior_or_single_plane_nwb_to_zarr(
+                    hdf5_path=nwb_path,
+                    zarr_path=result_zarr_path
+                )
+
+            else:  # Multi-plane sessions
+                # Output Zarr combines all experiments (imaging planes) for a session into one NWB Zarr file, so use
+                # the behavior_session_id to form the output filename
+                result_zarr_path = results_dir / "visual-behavior-ophys" / "behavior_ophys_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
+                result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
+                combine_multiplane_nwb_to_zarr(
+                    hdf5_paths=nwb_paths,
+                    zarr_path=result_zarr_path
+                )
+
+            # inspect resulting file
+            inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+            inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+
+    elif dataset.lower() == "visual behavior ephys":
+        sessions = list(iterate_visual_behavior_ephys_sessions(data_dir=VISBEH_EPHYS_BEHAVIOR_DATA_DIR))
+
+        for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
+            session_type = session_info['session_type']
+            nwb_path = session_info['nwb_path']
+            session_id = session_info['session_id']
+
+            # Handle visual behavior ephys dataset
+            probe_paths = session_info.get('probe_paths', [])
+
+            # Output Zarr file path
+            if session_type == 'behavior_ephys':  # behavior ephys
+                result_zarr_path = results_dir / "visual-behavior-neuropixels" / "behavior_ecephys_sessions" / f"ecephys_session_{session_id}.nwb.zarr"
+            elif session_type == 'behavior':  # behavior only
+                result_zarr_path = results_dir / "visual-behavior-neuropixels" / "behavior_only_sessions" / f"behavior_session_{session_id}.nwb.zarr"
+
             result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
-            convert_behavior_or_single_plane_nwb_to_zarr(
-                hdf5_path=nwb_path,
-                zarr_path=result_zarr_path
+            convert_visual_behavior_ephys_file_to_zarr(
+                hdf5_base_filename=nwb_path,
+                zarr_filename=result_zarr_path,
+                probe_filenames=probe_paths
             )
 
-        else:  # Multi-plane sessions
-            # Output Zarr combines all experiments (imaging planes) for a session into one NWB Zarr file, so use
-            # the behavior_session_id to form the output filename
-            result_zarr_path = results_folder / "visual-behavior-ophys" / "behavior_ophys_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
-            result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
-            combine_multiplane_nwb_to_zarr(
-                hdf5_paths=nwb_paths,
-                zarr_path=result_zarr_path
-            )
-
-        # Inspect the resulting Zarr file
-        inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-        inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+            # inspect resulting file
+            inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+            inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+        else:
+            warnings.warn(f"Unsupported dataset type: {dataset}, skipping session {session_id}")
 
     # Write missing NWB file errors to results folder
     if missing_nwb_errors:
