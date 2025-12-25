@@ -1,8 +1,9 @@
 from pathlib import Path
 import warnings
 
-from pynwb import NWBHDF5IO, NWBFile
 from hdmf_zarr.nwb import NWBZarrIO
+import pandas as pd
+from pynwb import NWBHDF5IO, NWBFile
 
 
 def _open_nwbhdf5(path: Path, mode: str = 'r', manager=None) -> NWBHDF5IO:
@@ -23,11 +24,96 @@ def _open_nwbhdf5(path: Path, mode: str = 'r', manager=None) -> NWBHDF5IO:
         return NWBHDF5IO(str(path), mode)
 
 
+
+def iterate_visual_behavior_ophys_sessions(data_dir: Path):
+    """Iterate through behavior_session_table.csv and yield NWB file paths.
+
+    NWB files follow naming patterns:
+    - Behavior only: behavior_session_{behavior_session_id}.nwb
+    - Behavior-ophys: behavior_ophys_experiment_{ophys_experiment_id}.nwb
+
+    For multi-plane behavior-ophys sessions (Multiscope projects),
+    yields a single session_info dict with nwb_path as a list of paths.
+    For single-plane sessions, nwb_path is a single Path object.
+    """
+    MULTIPLANE_PROJECT_CODES = {"VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d"}
+
+    VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_dir / "behavior_sessions"
+    VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_dir / "behavior_ophys_experiments"
+
+    VISBEH_OPHYS_METADATA_TABLES_DIR = data_dir / "project_metadata"
+    assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
+        f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
+
+    csv_path = VISBEH_OPHYS_METADATA_TABLES_DIR / "behavior_session_table.csv"
+    df = pd.read_csv(csv_path)
+
+    for idx, row in df.iterrows():
+        behavior_session_id = row['behavior_session_id']
+        ophys_experiment_id = row['ophys_experiment_id']
+        project_code = row['project_code']
+
+        if pd.isna(ophys_experiment_id):
+            # No ophys session - behavior only
+            data_dir = VISBEH_OPHYS_BEHAVIOR_DATA_DIR
+            session_type = "behavior"
+            nwb_filename = f"behavior_session_{behavior_session_id}.nwb"
+            nwb_path = data_dir / nwb_filename
+
+            yield {
+                'behavior_session_id': behavior_session_id,
+                'ophys_experiment_id': None,
+                'session_type': session_type,
+                'nwb_path': nwb_path,
+            }
+        else:
+            # Has ophys session - parse the list of ophys_experiment_ids
+            data_dir = VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR
+            session_type = "behavior_ophys"
+
+            # ophys_experiment_id is stored as a string like "[123, 456, 789]"
+            # Parse by stripping brackets and splitting on commas
+            ids_str = ophys_experiment_id.strip('[]').strip()
+            if not ids_str:
+                warnings.warn(f"behavior_session_id {behavior_session_id} has empty "
+                              f"ophys_experiment_id list, skipping")
+                continue
+            ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
+
+            if project_code in MULTIPLANE_PROJECT_CODES:
+                # Multi-plane session: store all NWB paths in a list
+                nwb_paths = [
+                    data_dir / f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
+                    for ophys_exp_id in ophys_exp_ids
+                ]
+                yield {
+                    'behavior_session_id': behavior_session_id,
+                    'ophys_experiment_id': ophys_exp_ids,
+                    'session_type': session_type,
+                    'nwb_path': nwb_paths,
+                }
+            else:
+                # Single-plane session
+                ophys_exp_id = ophys_exp_ids[0]
+                nwb_filename = f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
+                nwb_path = data_dir / nwb_filename
+
+                yield {
+                    'behavior_session_id': behavior_session_id,
+                    'ophys_experiment_id': ophys_exp_id,
+                    'session_type': session_type,
+                    'nwb_path': nwb_path,
+                }
+
+
 def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Path):
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
     with _open_nwbhdf5(hdf5_path, 'r') as read_io:
+        read_nwbfile = read_io.read()
+        # Set session_id so that naming on DANDI is more similar to original NWB file
+        read_nwbfile.session_id = read_nwbfile.identifier
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
-            export_io.export(src_io=read_io, write_args=dict(link_data=False))
+            export_io.export(src_io=read_io, nwbfile=read_nwbfile, write_args=dict(link_data=False))
 
 
 def combine_multiplane_info(plane_nwbfiles: list[NWBFile], hdf5_paths: list[Path]) -> NWBFile:
@@ -137,6 +223,9 @@ def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
     plane_nwbfiles = [base_nwbfile] + [io.read() for io in plane_ios[1:]]
 
     combined_nwbfile = combine_multiplane_info(plane_nwbfiles, hdf5_paths)
+
+    # Set session_id so that naming on DANDI is more similar to original NWB files
+    combined_nwbfile.session_id = combined_nwbfile.identifier
 
     # Export the combined NWB file to Zarr (link_data=False copies all data)
     with NWBZarrIO(str(zarr_path), mode='w') as export_io:
