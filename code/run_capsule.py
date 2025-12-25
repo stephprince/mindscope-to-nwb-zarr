@@ -80,7 +80,7 @@ def convert_visual_behavior_2p(results_dir: Path) -> str:
         try:
             convert_func(
                 hdf5_base_filename=nwb_path,
-                zarr_filename=result_zarr_path
+                zarr_path=result_zarr_path
             )
         except Exception as e:
             error_msg = (f"session_type: {session_type}, "
@@ -217,14 +217,19 @@ def run():
         raise ValueError(f"Unsupported dataset type: {dataset}")
 
     # Write conversion errors to results folder
-    errors_nwb_file_path = results_dir / "conversion_errors.txt"
+    conversion_errors_list_path = results_dir / "conversion_errors.txt"
     if errors:
-        with open(errors_nwb_file_path, 'w') as f:
+        with open(conversion_errors_list_path, 'w') as f:
             f.write("Conversion Errors Report\n")
             f.write("=" * 50 + "\n\n")
             for error in errors:
                 f.write(error + "\n\n")
-        print(f"\nWrote {len(errors)} NWB file errors to {errors_nwb_file_path}")
+        print(f"\nWrote {len(errors)} NWB file errors to {conversion_errors_list_path}")
+
+        print("Conversion Errors Report\n")
+        print("=" * 50 + "\n\n")
+        for error in errors:
+            print(error + "\n\n")
 
 
 if __name__ == "__main__":

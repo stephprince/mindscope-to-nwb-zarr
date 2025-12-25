@@ -405,12 +405,12 @@ def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:
     return nwbfile
 
 
-def inspect_zarr_file(zarr_filename: Path, inspector_report_path: Path) -> None:
+def inspect_zarr_file(zarr_path: Path, inspector_report_path: Path) -> None:
     """Inspect a Zarr NWB file using nwbinspector and save the report to a text file.
     """
     # PyNWB validation does not yet support Zarr paths, but we can use NWBZarrIO to get an IO object
     # and validate that.
-    messages = list(_inspect_zarr_file_helper(zarr_filename=zarr_filename))
+    messages = list(_inspect_zarr_file_helper(zarr_path=zarr_path))
     
     # Format and print messages to text file
     if messages:
@@ -422,12 +422,12 @@ def inspect_zarr_file(zarr_filename: Path, inspector_report_path: Path) -> None:
         )
 
 
-def _inspect_zarr_file_helper(zarr_filename: Path) -> Iterable[Optional[InspectorMessage]]:
+def _inspect_zarr_file_helper(zarr_path: Path) -> Iterable[Optional[InspectorMessage]]:
     """Helper function to inspect a Zarr NWB file and yield InspectorMessages."""
     config = load_config("dandi")
     io = None
     try:
-        io = NWBZarrIO(zarr_filename, mode='r')
+        io = NWBZarrIO(zarr_path, mode='r')
         in_memory_nwbfile = io.read()
 
         validation_result = validate(io=io)
@@ -442,14 +442,14 @@ def _inspect_zarr_file_helper(zarr_filename: Path) -> Iterable[Optional[Inspecto
                 importance=Importance.PYNWB_VALIDATION,
                 check_function_name=validation_error.name,
                 location=validation_error.location,
-                file_path=zarr_filename,
+                file_path=zarr_path,
             )
 
         for inspector_message in inspect_nwbfile_object(
             nwbfile_object=in_memory_nwbfile,
             config=config,
         ):
-            inspector_message.file_path = zarr_filename
+            inspector_message.file_path = zarr_path
             yield inspector_message
 
     except Exception as exception:
@@ -462,7 +462,7 @@ def _inspect_zarr_file_helper(zarr_filename: Path) -> Iterable[Optional[Inspecto
                 f"This indicates that PyNWB was unable to read the file. "
                 f"See the traceback message for more details."
             ),
-            file_path=zarr_filename,
+            file_path=zarr_path,
         )
     finally:
         if io is not None:
