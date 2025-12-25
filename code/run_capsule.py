@@ -49,6 +49,7 @@ def convert_visual_behavior_2p(results_dir: Path) -> str:
     """Convert Visual Behavior 2P NWB files to Zarr format."""
     # TODO: reorganize as in convert_visual_behavior_ephys_file_to_zarr
     sessions = list(iterate_visual_behavior_ophys_sessions(data_dir=VISBEH_OPHYS_DATA_DIR))
+    sessions = sessions[74:76]  # TODO remove limit
     errors = []
 
     for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
@@ -119,7 +120,7 @@ def convert_visual_behavior_ephys(results_dir: Path) -> str:
         try:
             convert_visual_behavior_ephys_file_to_zarr(
                 hdf5_base_filename=nwb_path,
-                zarr_filename=result_zarr_path,
+                zarr_path=result_zarr_path,
                 probe_filenames=probe_paths
             )
         except Exception as e:
@@ -165,7 +166,7 @@ def convert_visual_coding_ephys(results_dir: Path) -> str:
         try:
             convert_visual_coding_ephys_file_to_zarr(
                 hdf5_base_filename=nwb_path,
-                zarr_filename=result_zarr_path,
+                zarr_path=result_zarr_path,
                 probe_filenames=probe_paths
             )
         except Exception as e:

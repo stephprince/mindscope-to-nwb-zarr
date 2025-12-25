@@ -18,7 +18,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 
-def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_filename: Path, probe_filenames: list[Path] = None) -> None:
+def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path: Path, probe_filenames: list[Path] = None) -> None:
     """ Convert a Visual Coding Ephys NWB HDF5 file and associated probe files to NWB Zarr format.
     
     The key difference between this and the Visual Behavior Ephys conversion is that the Visual Coding
@@ -60,7 +60,7 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_file
             nwbfile = fix_vector_index_dtypes(nwbfile)
 
             # export to zarr
-            with NWBZarrIO(zarr_filename, mode='w') as export_io:
+            with NWBZarrIO(zarr_path, mode='w') as export_io:
                 export_io.export(src_io=read_io, nwbfile=nwbfile, write_args=dict(link_data=False))
         finally:
             # close IO objects for probe files
@@ -68,8 +68,8 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_file
                 probe_io.close()
     
     # inspect and validate the resulting zarr file
-    inspect_zarr_file(zarr_filename,
-                      inspector_report_path=zarr_filename.with_suffix('.inspector_report.txt'))
+    inspect_zarr_file(zarr_path,
+                      inspector_report_path=zarr_path.with_suffix('.inspector_report.txt'))
 
 
 def iterate_visual_coding_ephys_sessions(data_dir: Path):
