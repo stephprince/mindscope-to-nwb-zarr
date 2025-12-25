@@ -1,12 +1,6 @@
 {
 	"version": 1,
 	"named_parameters": true,
-	"datasets": [
-		{
-			"id": "cab43d4e-e1dd-437b-9c37-544f8911c4d9",
-			"name": "Visual Behavior Ophys Behavior Sessions"
-		}
-	],
 	"parameters": [
 		{
 			"id": "bOpuXxVVBa3NORL2",
