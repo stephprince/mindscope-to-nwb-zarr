@@ -100,6 +100,7 @@ def convert_visual_behavior_2p(results_dir: Path) -> str:
 def convert_visual_behavior_ephys(results_dir: Path) -> str:
     """Convert Visual Behavior Ephys NWB files to Zarr format."""
     sessions = list(iterate_visual_behavior_ephys_sessions(data_dir=VISBEH_EPHYS_BEHAVIOR_DATA_DIR))
+    sessions = sessions[:2]  # TODO remove limit
     errors = []
 
     for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
