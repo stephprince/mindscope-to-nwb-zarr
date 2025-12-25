@@ -204,8 +204,10 @@ def combine_multiplane_info(plane_nwbfiles: list[NWBFile], hdf5_paths: list[Path
         # Add to the base NWB file
         base_nwbfile.add_lab_meta_data(metadata_object)
 
+    return base_nwbfile
 
-def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Path):
+
+def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Path) -> None:
     """Combine multiple single-plane NWB HDF5 files into one multi-plane Zarr file.
 
     Each input NWB file contains one ImagingPlane, one ophys ProcessingModule,
