@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
         # convert session hdf5_base_filename
         hdf5_base_filename = local_path / f"session_{session_id}.nwb"
-        zarr_filename = Path(f"./session_{session_id}.nwb.zarr")
+        zarr_path = Path(f"./session_{session_id}.nwb.zarr")
         probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
 
-        convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename, zarr_filename, probe_filenames)
+        convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename, zarr_path, probe_filenames)

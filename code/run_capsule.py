@@ -92,7 +92,7 @@ def convert_visual_behavior_2p(results_dir: Path) -> str:
 
         # inspect resulting file
         inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-        inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+        inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
     return errors
 
@@ -133,7 +133,7 @@ def convert_visual_behavior_ephys(results_dir: Path) -> str:
 
         # inspect resulting file
         inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-        inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+        inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
     return errors
 
@@ -178,7 +178,7 @@ def convert_visual_coding_ephys(results_dir: Path) -> str:
 
         # inspect resulting file
         inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-        inspect_zarr_file(zarr_filename=result_zarr_path, inspector_report_path=inspector_report_path)
+        inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
     return errors
 

@@ -156,8 +156,8 @@ if __name__ == "__main__":
 
             # identify and validate probe files
             probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
-            zarr_filename = Path(f"./ecephys_session_{session_id}.nwb.zarr")
-            convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename, zarr_filename, probe_filenames)
+            zarr_path = Path(f"./ecephys_session_{session_id}.nwb.zarr")
+            convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename, zarr_path, probe_filenames)
 
     if convert_behavior_sessions:
         session_dir = Path(f"data/behavior_only_sessions")
@@ -190,5 +190,5 @@ if __name__ == "__main__":
                 b.fetch(base_filename, local_path / Path(base_filename).name)
 
             # convert session (no probe files for behavior-only)
-            zarr_filename = Path(f"./behavior_session_{session_id}.nwb.zarr")
-            convert_visual_behavior_ephys_file_to_zarr(local_path / Path(base_filename).name, zarr_filename)
+            zarr_path = Path(f"./behavior_session_{session_id}.nwb.zarr")
+            convert_visual_behavior_ephys_file_to_zarr(local_path / Path(base_filename).name, zarr_path)
