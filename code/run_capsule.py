@@ -1,7 +1,6 @@
 import argparse
 from pathlib import Path
 import shutil
-import pandas as pd
 from tqdm import tqdm
 from pynwb import load_namespaces
 
@@ -48,6 +47,7 @@ VISCODING_EPHYS_DATA_DIR = data_folder / "allen-brain-observatory" / "visual-cod
 
 def convert_visual_behavior_2p(results_dir: Path) -> str:
     """Convert Visual Behavior 2P NWB files to Zarr format."""
+    # TODO: reorganize as in convert_visual_behavior_ephys_file_to_zarr
     sessions = list(iterate_visual_behavior_ophys_sessions(data_dir=VISBEH_OPHYS_DATA_DIR))
     errors = []
 

@@ -106,9 +106,9 @@ def iterate_visual_behavior_ophys_sessions(data_dir: Path):
                 }
 
 
-def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Path):
+def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_base_filename: Path, zarr_path: Path):
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
-    with _open_nwbhdf5(hdf5_path, 'r') as read_io:
+    with _open_nwbhdf5(hdf5_base_filename, 'r') as read_io:
         read_nwbfile = read_io.read()
         # Set session_id so that naming on DANDI is more similar to original NWB file
         read_nwbfile.session_id = read_nwbfile.identifier
@@ -205,7 +205,7 @@ def combine_multiplane_info(plane_nwbfiles: list[NWBFile], hdf5_paths: list[Path
         base_nwbfile.add_lab_meta_data(metadata_object)
 
 
-def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
+def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Path):
     """Combine multiple single-plane NWB HDF5 files into one multi-plane Zarr file.
 
     Each input NWB file contains one ImagingPlane, one ophys ProcessingModule,
@@ -217,6 +217,7 @@ def combine_multiplane_nwb_to_zarr(hdf5_paths: list[Path], zarr_path: Path):
     - Updates PlaneSegmentation references to point to the correct imaging planes
     - Exports the combined file to Zarr format
     """
+    hdf5_paths = hdf5_base_filename
     base_io = _open_nwbhdf5(hdf5_paths[0], 'r')
     base_nwbfile = base_io.read()
     plane_ios = [base_io] + [_open_nwbhdf5(p, 'r', manager=base_io.manager) for p in hdf5_paths[1:]]
