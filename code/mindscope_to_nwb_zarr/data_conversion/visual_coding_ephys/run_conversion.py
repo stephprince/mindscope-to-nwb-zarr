@@ -56,7 +56,7 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path
             # add missing experiment description field (from technical white paper)
             nwbfile = add_missing_descriptions(nwbfile)
 
-            # fix VectorIndex dtypes to use minimal unsigned integer types
+            # fix VectorIndex dtypes to be uint64
             nwbfile = fix_vector_index_dtypes(nwbfile)
 
             # export to zarr

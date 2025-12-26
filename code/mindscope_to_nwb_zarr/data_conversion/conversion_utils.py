@@ -41,6 +41,19 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     for k in original_stimulus_keys:
         print(f"\nConverting stimulus template {k} to Images container")
 
+        # Visual Coding Ephys files don't have any stimulus template or presentation data
+
+        # Visual Coding 2p files use ImageSeries for stimulus templates, e.g.,
+        # "natural_movie_one", "natural_scenes_template"
+
+        # Visual Behavior Ephys files use StimulusTemplate for stimulus templates, e.g.,
+        # "Natural_Images_Lum_Matched_set_ophys_G_2019.05.26" without matching presentation series
+
+        # Visual Behavior 2p files use StimulusTemplate for stimulus templates, e.g.,
+        # "grating", "Natural_Images_Lum_Matched_set_training_2017.07.14" with additional
+        # presentation series, e.g., "spontaneous_stimulus" (TimeIntervals),
+        # "static_gratings" (TimeIntervals)
+
         stimulus_template = nwbfile.stimulus_template[k]
         assert stimulus_template.__class__.__name__ == "StimulusTemplate", \
             f"Expected stimulus template '{k}' to be of type StimulusTemplate"
@@ -65,7 +78,7 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
             raise ValueError(
                 f"Stimulus template '{k}' data should be 3D (num_images, height, width), "
                 f"but got shape {data_shape}"
-        )
+            )
         image_data = stimulus_template.data[:]  # Shape should be (num_images, height, width)
         image_data_unwarped = stimulus_template.unwarped[:]
 
@@ -73,7 +86,7 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         if stimulus_template.description is not None and stimulus_template.description != "no description":
             description = stimulus_template.description
         else:
-            description =  "Visual stimuli images shown to the animal."
+            description =  "Visual stimuli images shown to the subject."
 
         # Create new image objects
         all_images_unwarped = []
@@ -189,7 +202,7 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     # WARNING: this is a workaround to modify an attribute that should not be able to be reset, 
     # validation should always be performed afterwards
     new_lfp = LFP(name=lfp_container.name, electrical_series=old_electrical_series)
-    old_electrical_series._remove_child(old_electrical_series.electrodes)  # TODO is there a better way to do this?
+    old_electrical_series.electrodes.reset_parent()
     old_electrical_series.fields['electrodes'] = new_electrodes_region
     old_electrical_series.fields['electrodes'].parent = old_electrical_series
     
@@ -360,7 +373,7 @@ def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:
 
     VectorIndex objects should use uint8, uint16, uint32, or uint64 depending on the
     maximum value. This function goes through known tables and converts their VectorIndex
-    columns to use the minimal appropriate unsigned integer dtype.
+    columns to use dtype=uint64.
 
     Args:
         nwbfile: The NWBFile object to fix
@@ -382,7 +395,6 @@ def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:
                     if data.dtype != target_dtype:
                         # WARNING: This is a workaround to modify a protected attribute,
                         # validation should always be performed afterwards
-                        # TODO - is there a better way to perform this dtype fix?
                         col._Data__data = data[:].astype(target_dtype)
 
     # Fix units table

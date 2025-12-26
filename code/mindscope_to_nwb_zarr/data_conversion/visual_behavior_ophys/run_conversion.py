@@ -2,6 +2,7 @@ from pathlib import Path
 import warnings
 
 from hdmf_zarr.nwb import NWBZarrIO
+from mindscope_to_nwb_zarr.data_conversion.conversion_utils import convert_stimulus_template_to_images
 import pandas as pd
 from pynwb import NWBHDF5IO, NWBFile
 
@@ -229,6 +230,9 @@ def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Pa
 
     # Set session_id so that naming on DANDI is more similar to original NWB files
     combined_nwbfile.session_id = combined_nwbfile.identifier
+
+    # change stimulus_template to Image objects in Images container
+    combined_nwbfile = convert_stimulus_template_to_images(combined_nwbfile)
 
     # Export the combined NWB file to Zarr (link_data=False copies all data)
     with NWBZarrIO(str(zarr_path), mode='w') as export_io:
