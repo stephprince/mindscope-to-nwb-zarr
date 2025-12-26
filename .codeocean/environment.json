@@ -14,12 +14,12 @@
 					"version": "2.3.0"
 				},
 				{
-					"name": "hdmf",
-					"version": "4.2.0"
+					"name": "git+https://github.com/hdmf-dev/hdmf-zarr#egg=hdmf-zarr",
+					"version": "a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b"
 				},
 				{
-					"name": "hdmf-zarr",
-					"version": "0.12.0"
+					"name": "hdmf",
+					"version": "4.2.0"
 				},
 				{
 					"name": "nwbinspector",
