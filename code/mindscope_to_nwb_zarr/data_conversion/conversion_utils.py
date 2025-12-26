@@ -11,14 +11,6 @@ from pynwb import NWBFile, validate, get_class, NWBHDF5IO
 from pynwb.ecephys import LFP
 from pynwb.image import Images, GrayscaleImage, IndexSeries
 
-try:
-    WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
-except KeyError:
-    raise RuntimeError(
-        "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
-        "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'"
-    )
-
 
 def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
     """Open a visual behavior ephys/ophys NWB HDF5 file, suppressing cached namespace warnings.
@@ -54,6 +46,13 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     ImageSeries to an ordered set of Image objects in an Images container, and
     changing the IndexSeries to link to this Images container.
     """
+    try:
+        WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
+    except KeyError:
+        raise RuntimeError(
+            "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
+            "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'"
+        )
 
     # Find the stimulus templates
     if not nwbfile.stimulus_template:

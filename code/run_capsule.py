@@ -4,10 +4,6 @@ import shutil
 from tqdm import tqdm
 
 
-from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
-    inspect_zarr_file,
-)
-
 from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion import (
     convert_behavior_or_single_plane_nwb_to_zarr,
     combine_multiplane_nwb_to_zarr,
@@ -22,6 +18,11 @@ from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion 
 from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys.run_conversion import (
     convert_visual_coding_ephys_file_to_zarr,
     iterate_visual_coding_ephys_sessions,
+)
+
+# should be loaded last to ensure extensions are registered
+from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
+    inspect_zarr_file,
 )
 
 print("STARTING CODE OCEAN CAPSULE RUN")
