@@ -1,7 +1,7 @@
 import pandas as pd
 
 from pathlib import Path
-from pynwb import NWBHDF5IO, load_namespaces
+from pynwb import load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 
 # load modified extensions before impoting local modules that use them
@@ -15,6 +15,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     convert_stimulus_template_to_images,
     add_missing_descriptions,
     inspect_zarr_file,
+    open_visual_behavior_nwb_hdf5,
 )
 
 def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path: Path, probe_filenames: list[Path] = None) -> None:
@@ -29,13 +30,13 @@ def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_pa
     for pf in probe_filenames:
         print(f"    - {pf.name}")
 
-    with NWBHDF5IO(hdf5_base_filename, 'r') as read_io:
+    with open_visual_behavior_nwb_hdf5(hdf5_base_filename, 'r') as read_io:
         nwbfile = read_io.read()
         nwbfile.subject.strain = "unknown"  # TODO set appropriate strain value
         nwbfile.set_modified()
 
         # pull additional data from each of the probe files and add to the main nwbfile
-        io_objects = [NWBHDF5IO(f, 'r') for f in probe_filenames]
+        io_objects = [open_visual_behavior_nwb_hdf5(f, 'r', manager=read_io.manager) for f in probe_filenames]
         try:
             for probe_io in io_objects:
                 probe_nwbfile = probe_io.read()

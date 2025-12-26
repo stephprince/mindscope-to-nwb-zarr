@@ -7,15 +7,39 @@ import numpy as np
 from hdmf.common.table import VectorIndex
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
-from pynwb import NWBFile, validate, get_class
+from pynwb import NWBFile, validate, get_class, NWBHDF5IO
 from pynwb.ecephys import LFP
 from pynwb.image import Images, GrayscaleImage, IndexSeries
 
 try:
     WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
 except KeyError:
-    raise(KeyError, "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
-                    "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'")
+    raise RuntimeError(
+        "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
+        "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'"
+    )
+
+
+def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
+    """Open a visual behavior ephys/ophys NWB HDF5 file, suppressing cached namespace warnings.
+    
+    ndx-aibs-ecephys, ndx-aibs-stimulus-template, and ndx-ellipse-eye-tracking should be
+    both cached in the file and loaded via load_namespaces prior to calling this function.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=(
+                r"Ignoring the following cached namespace[\s\S]*"
+                r"ndx-aibs-ecephys[\s\S]*"
+                r"ndx-aibs-stimulus-template[\s\S]*"
+                r"ndx-ellipse-eye-tracking"
+            ),
+            category=UserWarning
+        )
+        if manager is not None:
+            return NWBHDF5IO(str(path), mode, manager=manager)
+        return NWBHDF5IO(str(path), mode)
 
 
 def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:

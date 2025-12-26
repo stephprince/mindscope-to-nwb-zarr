@@ -1,6 +1,7 @@
 ## Visual Coding - Neuropixels
 
 ### Implemented
+- Updated to use latest NWB schema 2.9.0 and HDMF Common schema 1.8.0.
 * Combined probe files containing LFP + CSD data into single NWB file
 * Moved LFP data into processing module (best practice for storing downsampled and lowpass filtered data)
 * Added missing experiment description if needed

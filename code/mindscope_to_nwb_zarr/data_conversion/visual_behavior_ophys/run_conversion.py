@@ -2,28 +2,19 @@ from pathlib import Path
 import warnings
 
 from hdmf_zarr.nwb import NWBZarrIO
-from mindscope_to_nwb_zarr.data_conversion.conversion_utils import convert_stimulus_template_to_images
 import pandas as pd
-from pynwb import NWBHDF5IO, NWBFile
+from pynwb import NWBFile, load_namespaces
 
+# load modified extensions before impoting local modules that use them
+root_dir = Path(__file__).parent.parent.parent.parent
+load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
 
-def _open_nwbhdf5(path: Path, mode: str = 'r', manager=None) -> NWBHDF5IO:
-    """Open an NWB HDF5 file, suppressing cached namespace warnings."""
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=(
-                r"Ignoring the following cached namespace[\s\S]*"
-                r"ndx-aibs-ecephys[\s\S]*"
-                r"ndx-aibs-stimulus-template[\s\S]*"
-                r"ndx-ellipse-eye-tracking"
-            ),
-            category=UserWarning
-        )
-        if manager is not None:
-            return NWBHDF5IO(str(path), mode, manager=manager)
-        return NWBHDF5IO(str(path), mode)
-
+from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
+    convert_stimulus_template_to_images,
+    open_visual_behavior_nwb_hdf5,
+)
 
 
 def iterate_visual_behavior_ophys_sessions(data_dir: Path):
@@ -109,7 +100,7 @@ def iterate_visual_behavior_ophys_sessions(data_dir: Path):
 
 def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_base_filename: Path, zarr_path: Path):
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
-    with _open_nwbhdf5(hdf5_base_filename, 'r') as read_io:
+    with open_visual_behavior_nwb_hdf5(hdf5_base_filename, 'r') as read_io:
         read_nwbfile = read_io.read()
         # Set session_id so that naming on DANDI is more similar to original NWB file
         read_nwbfile.session_id = read_nwbfile.identifier
@@ -221,9 +212,9 @@ def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Pa
     - Exports the combined file to Zarr format
     """
     hdf5_paths = hdf5_base_filename
-    base_io = _open_nwbhdf5(hdf5_paths[0], 'r')
+    base_io = open_visual_behavior_nwb_hdf5(hdf5_paths[0], 'r')
     base_nwbfile = base_io.read()
-    plane_ios = [base_io] + [_open_nwbhdf5(p, 'r', manager=base_io.manager) for p in hdf5_paths[1:]]
+    plane_ios = [base_io] + [open_visual_behavior_nwb_hdf5(p, 'r', manager=base_io.manager) for p in hdf5_paths[1:]]
     plane_nwbfiles = [base_nwbfile] + [io.read() for io in plane_ios[1:]]
 
     combined_nwbfile = combine_multiplane_info(plane_nwbfiles, hdf5_paths)

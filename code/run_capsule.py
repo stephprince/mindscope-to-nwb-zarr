@@ -2,16 +2,7 @@ import argparse
 from pathlib import Path
 import shutil
 from tqdm import tqdm
-from pynwb import load_namespaces
 
-# Load extension namespaces before importing local modules that use them
-# These extensions will be used instead of the older extension cached in the NWB file
-# TODO confirm that loading extra namespaces that are not used does not pollute the NWB file (it probably does)
-# The Visual Behavior 2p dataset started with ndx-aibs-ecephys, but what about the others?
-# Load the updated extensions into the global type map
-load_namespaces("ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml")
-load_namespaces("ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml")
-load_namespaces("ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml")
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     inspect_zarr_file,
