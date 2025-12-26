@@ -57,6 +57,16 @@ def convert_visual_behavior_2p(results_dir: Path) -> str:
         nwb_path = session_info['nwb_path']
         behavior_session_id = session_info['behavior_session_id']
 
+        # Check for missing NWB files
+        all_paths = nwb_path if isinstance(nwb_path, list) else [nwb_path]
+        missing_paths = [p for p in all_paths if not p.exists()]
+        if missing_paths:
+            for missing_path in missing_paths:
+                error_msg = (f"Missing expected NWB files for behavior_session_id: {behavior_session_id}, "
+                             f"nwb_path: {missing_path}")
+                errors.append(error_msg)
+            continue
+
         # Output Zarr file path
         if session_type == 'behavior_ophys':
             if isinstance(nwb_path, list):
@@ -70,11 +80,13 @@ def convert_visual_behavior_2p(results_dir: Path) -> str:
 
         result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if session_type == 'behavior_ophys' and isinstance(nwb_path, list):
+        if session_type == 'behavior_ophys':
             # Multi-plane conversion
+            assert isinstance(nwb_path, list), "Expected nwb_path to be a list for multi-plane sessions"
             convert_func = combine_multiplane_nwb_to_zarr
         else:
-            # Single-plane conversion
+            # Single-plane or behavior only conversion
+            assert isinstance(nwb_path, Path), "Expected nwb_path to be a Path for single-plane or behavior only sessions"
             convert_func = convert_behavior_or_single_plane_nwb_to_zarr
 
         try:
