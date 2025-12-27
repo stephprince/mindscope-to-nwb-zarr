@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pynwb import NWBHDF5IO, NWBFile, load_namespaces
+from pynwb import NWBHDF5IO, NWBFile, get_class, load_namespaces
 from pynwb.base import ImageReferences
 from pynwb.image import GrayscaleImage, Images
 from hdmf_zarr.nwb import NWBZarrIO
@@ -9,6 +9,7 @@ import pandas as pd
 # load modified extensions before impoting local modules that use them
 root_dir = Path(__file__).parent.parent.parent.parent
 load_namespaces(str(root_dir / "ndx-aibs-visual-coding-2p/ndx-aibs-visual-coding-2p.namespace.yaml"))
+OphysExperimentMetadata = get_class('OphysExperimentMetadata', 'ndx-aibs-visual-coding-2p')
 
 from ..conversion_utils import H5DatasetDataChunkIterator
 
@@ -48,6 +49,7 @@ def download_visual_coding_ophys_files_from_dandi(processed_file_name: str, scra
         if not asset:
             raise RuntimeError(f"No asset found for processed ophys file {processed_file_name} in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}")
         processed_download_path = scratch_dir_path / processed_file_name
+        print(f"Downloading processed file to {processed_download_path} ...")
         asset.download(filepath=processed_download_path)
 
         # Download raw file
@@ -55,6 +57,7 @@ def download_visual_coding_ophys_files_from_dandi(processed_file_name: str, scra
         if not asset:
             raise RuntimeError(f"No asset found for raw ophys file {raw_file_name} in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}")
         raw_download_path = scratch_dir_path / raw_file_name
+        print(f"Downloading raw file to {raw_download_path} ...")
         asset.download(filepath=raw_download_path)
 
     return (processed_download_path, raw_download_path)
@@ -96,8 +99,8 @@ def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> No
     # Create new Image objects for each frame in the stimulus template
     # NOTE: This can take about 5 minutes for natural movie one with 900 frames
     images = []
-    from tqdm import tqdm
-    for i in tqdm(range(stimulus_template.data.shape[0]), desc="Converting natural movie frames to Images"):
+    print("Converting natural movie stimulus template frames to Images container ...")
+    for i in range(stimulus_template.data.shape[0]):
         image_frame = GrayscaleImage(
             name=f"NaturalMovieOne_{i}",
             data=stimulus_template.data[i],
@@ -145,8 +148,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     # Confirm there is only one placeholder file in the input directory
     placeholder_files = list(INPUT_FILE_DIR.glob("*.nwb"))
     if len(placeholder_files) != 1:
-        pass  # TODO bring this back
-        # raise RuntimeError(f"Expected exactly one NWB placeholder file in {INPUT_FILE_DIR}, found {len(placeholder_files)} files.")
+        raise RuntimeError(f"Expected exactly one NWB placeholder file in {INPUT_FILE_DIR}, found {len(placeholder_files)} files.")
     processed_file_name = placeholder_files[0]
 
     processed_file_path, raw_file_path = download_visual_coding_ophys_files_from_dandi(
@@ -169,6 +171,10 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         # WARNING: This approach modifies an attribute that should not be 
         # able to be reset. Validation should always be performed afterwards.
         base_nwbfile.subject.fields['subject_id'] = new_subject_id
+
+        # Add ophys experiment metadata to NWB file via extension
+        metadata = OphysExperimentMetadata(name="ophys_experiment_metadata", ophys_experiment_metadata=match.to_json())
+        base_nwbfile.add_lab_meta_data(metadata)
 
         # Change stimulus_template to Image objects in Images container
         convert_natural_movie_template_imageseries_to_images(base_nwbfile)
@@ -193,6 +199,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
             # Make sure sufficient memory is available - at least 64 GB is recommended.
             new_base_filename = processed_file_path.stem.replace(old_subject_id, new_subject_id)
             zarr_path = results_dir / "visual-coding-ophys" / f"{new_base_filename}.zarr"
+            print(f"Exporting to Zarr file {zarr_path} ...")
             with NWBZarrIO(str(zarr_path), mode='w') as export_io:
                 export_io.export(src_io=processed_io, nwbfile=base_nwbfile, write_args=dict(link_data=False))
 

@@ -5,12 +5,6 @@ from hdmf_zarr.nwb import NWBZarrIO
 import pandas as pd
 from pynwb import NWBFile, load_namespaces
 
-# load modified extensions before impoting local modules that use them
-root_dir = Path(__file__).parent.parent.parent.parent
-load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
-
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     convert_stimulus_template_to_images,
     open_visual_behavior_nwb_hdf5,
@@ -100,6 +94,12 @@ def iterate_visual_behavior_ophys_sessions(data_dir: Path):
 
 def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_base_filename: Path, zarr_path: Path):
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
+    # Load updated extensions
+    root_dir = Path(__file__).parent.parent.parent.parent
+    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
+
     with open_visual_behavior_nwb_hdf5(hdf5_base_filename, 'r') as read_io:
         read_nwbfile = read_io.read()
         
@@ -216,6 +216,12 @@ def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Pa
     - Updates PlaneSegmentation references to point to the correct imaging planes
     - Exports the combined file to Zarr format
     """
+    # Load updated extensions
+    root_dir = Path(__file__).parent.parent.parent.parent
+    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
+
     hdf5_paths = hdf5_base_filename
     base_io = open_visual_behavior_nwb_hdf5(hdf5_paths[0], 'r')
     base_nwbfile = base_io.read()

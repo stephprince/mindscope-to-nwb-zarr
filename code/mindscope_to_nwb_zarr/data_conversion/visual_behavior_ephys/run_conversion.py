@@ -4,12 +4,6 @@ from pathlib import Path
 from pynwb import load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 
-# load modified extensions before impoting local modules that use them
-root_dir = Path(__file__).parent.parent.parent.parent
-load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
-
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
     convert_stimulus_template_to_images,
@@ -20,6 +14,12 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 
 def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path: Path, probe_filenames: list[Path] = None) -> None:
     """ Convert a Visual Behavior Ephys NWB HDF5 file and associated probe files to NWB Zarr format."""
+
+    # Load updated extensions
+    root_dir = Path(__file__).parent.parent.parent.parent
+    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
 
     if probe_filenames is None:
         probe_filenames = []

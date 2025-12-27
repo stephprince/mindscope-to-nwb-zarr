@@ -4,12 +4,6 @@ from pathlib import Path
 from pynwb import NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
 
-# load modified extensions before impoting local modules that use them
-root_dir = Path(__file__).parent.parent.parent.parent
-load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
-
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
     add_missing_descriptions,
@@ -25,6 +19,11 @@ def convert_visual_coding_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path
     dataset does not have stimulus template data included in the NWB files. This data needs to be
     added in separately.
     """
+    # Load updated extensions
+    root_dir = Path(__file__).parent.parent.parent.parent
+    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
 
     # Log probe files found
     print(f"\nConverting {hdf5_base_filename.name}")

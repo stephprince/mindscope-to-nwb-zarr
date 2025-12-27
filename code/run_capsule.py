@@ -19,14 +19,7 @@ from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys.run_conversion im
     iterate_visual_coding_ephys_sessions,
 )
 
-from mindscope_to_nwb_zarr.data_conversion.visual_coding_ophys.run_conversion import (
-    convert_visual_coding_ophys_hdf5_to_zarr,
-)
-
-# should be loaded last to ensure extensions are registered
-from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
-    inspect_zarr_file,
-)
+from mindscope_to_nwb_zarr.data_conversion.conversion_utils import inspect_zarr_file
 
 print("STARTING CODE OCEAN CAPSULE RUN")
 
@@ -218,12 +211,14 @@ def run():
     elif dataset.lower() == "visual coding ephys":
         errors = convert_visual_coding_ephys(results_dir=results_dir)
     elif dataset.lower() == "visual coding 2p":
+        from mindscope_to_nwb_zarr.data_conversion.visual_coding_ophys.run_conversion import convert_visual_coding_ophys_hdf5_to_zarr
         result_zarr_path = convert_visual_coding_ophys_hdf5_to_zarr(results_dir=results_dir, scratch_dir=scratch_dir)
     else:
         raise ValueError(f"Unsupported dataset type: {dataset}")
 
     # Validate and inspect resulting Zarr file
     inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+    print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
     inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
     # Write conversion errors to results folder

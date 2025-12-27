@@ -45,4 +45,3 @@ Visual Coding Ephys
 - Set an appropriate "strain" value for the `Subject` object instead of using the placeholder "unknown".
 - Add stimulus template data for natural scenes, natural movies, and natural movie shuffled stimuli
 - Add descriptions to several objects in the file (see inspector report for full information)
-
