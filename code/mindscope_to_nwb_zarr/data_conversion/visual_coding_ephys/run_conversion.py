@@ -106,8 +106,6 @@ def iterate_visual_coding_ephys_sessions(data_dir: Path):
 
 
 if __name__ == "__main__":
-    # TODO - this section should be replacable within codeocean with extraction directly from attached data assets
-
     # get all session ids
     import quilt3 as q3
     output_dir = Path(".cache/visual_coding_neuropixels_cache_dir")

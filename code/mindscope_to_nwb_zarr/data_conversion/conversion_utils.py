@@ -8,6 +8,7 @@ from hdmf.common.table import VectorIndex
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
 from pynwb import NWBFile, validate, get_class, NWBHDF5IO
+from pynwb.base import ImageReferences
 from pynwb.ecephys import LFP
 from pynwb.image import Images, GrayscaleImage, IndexSeries
 
@@ -62,12 +63,13 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     original_stimulus_keys = list(nwbfile.stimulus_template.keys())
     new_stimulus_templates = {}
     for k in original_stimulus_keys:
-        print(f"\nConverting stimulus template {k} to Images container")
+        # TODO remove print
+        print(f"\nConverting stimulus template {k} to Images containers")
 
         # Visual Coding Ephys files don't have any stimulus template or presentation data
 
-        # Visual Coding 2p files use ImageSeries for stimulus templates, e.g.,
-        # "natural_movie_one", "natural_scenes_template"
+        # Visual Coding 2p files use different types for stimulus templates, e.g.,
+        # "natural_movie_one" (ImageSeries), "natural_scenes_template" (Images)
 
         # Visual Behavior Ephys files use StimulusTemplate for stimulus templates, e.g.,
         # "Natural_Images_Lum_Matched_set_ophys_G_2019.05.26" without matching presentation series
@@ -134,11 +136,13 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
             name=stimulus_template.name,
             description=description,
             images=all_images,
+            order_of_images=ImageReferences(name="order_of_images", data=all_images),
         )
         all_unwarped_images_container = Images(
             name=f'{stimulus_template.name}_unwarped',
             description=f'{description} unwarped',
             images=all_images_unwarped,
+            order_of_images=ImageReferences(name="order_of_images", data=all_images_unwarped),
         )
 
         new_stimulus_templates[k] = all_images_container

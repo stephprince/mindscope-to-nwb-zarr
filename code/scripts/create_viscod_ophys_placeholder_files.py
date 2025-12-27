@@ -3,7 +3,8 @@ Create empty placeholder files for Visual Coding 2p ophys sessions from dandiset
 
 This script fetches the file list from DANDI Archive dandiset 000728 version 0.240827.1809
 and creates empty files with the same names for files ending in "_behavior+image+ophys.nwb".
-There should be 1518 such files.
+There should be 1518 such files. There is no file hierarchy created; all files are placed
+directly in the output directory.
 """
 
 from pathlib import Path
@@ -19,7 +20,7 @@ EXPECTED_FILE_COUNT = 1518
 
 def main():
     # Output directory for placeholder files
-    results_dir = Path(__file__).parent.parent.parent / "data" / "visual_coding_ophys"
+    results_dir = Path(__file__).parent.parent.parent / "data" / "visual-coding-ophys"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Fetching assets from dandiset {DANDISET_ID} version {DANDISET_VERSION}...")

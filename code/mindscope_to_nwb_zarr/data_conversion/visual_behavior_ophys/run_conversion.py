@@ -102,8 +102,13 @@ def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_base_filename: Path, zarr_
     """Convert behavior or single-plane NWB HDF5 file to Zarr."""
     with open_visual_behavior_nwb_hdf5(hdf5_base_filename, 'r') as read_io:
         read_nwbfile = read_io.read()
+        
         # Set session_id so that naming on DANDI is more similar to original NWB file
         read_nwbfile.session_id = read_nwbfile.identifier
+
+        # Change stimulus_template to Image objects in Images container
+        read_nwbfile = convert_stimulus_template_to_images(read_nwbfile)
+
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
             export_io.export(src_io=read_io, nwbfile=read_nwbfile, write_args=dict(link_data=False))
 
@@ -222,7 +227,7 @@ def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Pa
     # Set session_id so that naming on DANDI is more similar to original NWB files
     combined_nwbfile.session_id = combined_nwbfile.identifier
 
-    # change stimulus_template to Image objects in Images container
+    # Change stimulus_template to Image objects in Images container
     combined_nwbfile = convert_stimulus_template_to_images(combined_nwbfile)
 
     # Export the combined NWB file to Zarr (link_data=False copies all data)

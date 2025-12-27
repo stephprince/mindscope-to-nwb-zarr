@@ -3,6 +3,10 @@ from pathlib import Path
 import shutil
 from tqdm import tqdm
 
+from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion import (
+    convert_visual_behavior_ephys_file_to_zarr,
+    iterate_visual_behavior_ephys_sessions
+)
 
 from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion import (
     convert_behavior_or_single_plane_nwb_to_zarr,
@@ -10,14 +14,13 @@ from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion 
     iterate_visual_behavior_ophys_sessions,
 )
 
-from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion import (
-    convert_visual_behavior_ephys_file_to_zarr,
-    iterate_visual_behavior_ephys_sessions
-)
-
 from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys.run_conversion import (
     convert_visual_coding_ephys_file_to_zarr,
     iterate_visual_coding_ephys_sessions,
+)
+
+from mindscope_to_nwb_zarr.data_conversion.visual_coding_ophys.run_conversion import (
+    convert_visual_coding_ophys_hdf5_to_zarr,
 )
 
 # should be loaded last to ensure extensions are registered
@@ -188,11 +191,6 @@ def convert_visual_coding_ephys(results_dir: Path) -> str:
     return errors
 
 
-# Code Ocean workflow:
-# Iterate through behavior_session_table.csv and process each NWB file
-# Example usage:
-# cd code && python run_capsule.py --dataset "Visual Behavior 2P"
-
 def run():
     # Parse command line arguments
     parser = argparse.ArgumentParser()
@@ -212,29 +210,36 @@ def run():
     print(f"Cleared results folder: {list(results_dir.iterdir())}")
 
     # Convert NWB files based on dataset type
-    if dataset.lower() == "visual behavior 2p":
-        errors = convert_visual_behavior_2p(results_dir=results_dir)
-    elif dataset.lower() == "visual behavior ephys":
+    
+    if dataset.lower() == "visual behavior ephys":
         errors = convert_visual_behavior_ephys(results_dir=results_dir)
+    elif dataset.lower() == "visual behavior 2p":
+        errors = convert_visual_behavior_2p(results_dir=results_dir)
     elif dataset.lower() == "visual coding ephys":
         errors = convert_visual_coding_ephys(results_dir=results_dir)
+    elif dataset.lower() == "visual coding 2p":
+        result_zarr_path = convert_visual_coding_ophys_hdf5_to_zarr(results_dir=results_dir)
     else:
         raise ValueError(f"Unsupported dataset type: {dataset}")
 
-    # Write conversion errors to results folder
-    conversion_errors_list_path = results_dir / "conversion_errors.txt"
-    if errors:
-        with open(conversion_errors_list_path, 'w') as f:
-            f.write("Conversion Errors Report\n")
-            f.write("=" * 50 + "\n\n")
-            for error in errors:
-                f.write(error + "\n\n")
-        print(f"\nWrote {len(errors)} NWB file errors to {conversion_errors_list_path}")
+    # Validate and inspect resulting Zarr file
+    inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+    inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
-        print("Conversion Errors Report\n")
-        print("=" * 50 + "\n\n")
-        for error in errors:
-            print(error + "\n\n")
+    # Write conversion errors to results folder
+    # conversion_errors_list_path = results_dir / "conversion_errors.txt"
+    # if errors:
+    #     with open(conversion_errors_list_path, 'w') as f:
+    #         f.write("Conversion Errors Report\n")
+    #         f.write("=" * 50 + "\n\n")
+    #         for error in errors:
+    #             f.write(error + "\n\n")
+    #     print(f"\nWrote {len(errors)} NWB file errors to {conversion_errors_list_path}")
+
+    #     print("Conversion Errors Report\n")
+    #     print("=" * 50 + "\n\n")
+    #     for error in errors:
+    #         print(error + "\n\n")
 
 
 if __name__ == "__main__":

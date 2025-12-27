@@ -11,7 +11,3 @@
    * stimulus presentations table and related columns
    * optogenetic_stimulation time intervals 
 * Converted VectorIndex dtypes to use minimal unsigned integer type to be compliant with later schema versions
-
-### TODO 
-* Add stimulus template data for natural scenes, natural movies, and natural movie shuffled stimuli
-* add description to several objects in the file (see report for full information)

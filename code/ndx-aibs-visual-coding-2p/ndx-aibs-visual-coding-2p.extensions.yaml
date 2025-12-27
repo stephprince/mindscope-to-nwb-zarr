@@ -1,0 +1,16 @@
+groups:
+- neurodata_type_def: OphysExperimentMetadata
+  neurodata_type_inc: LabMetaData
+  doc: Metadata from the original Allen Brain Observatory Visual Coding 2p 
+    dataset on S3
+    (`s3://allen-brain-observatory/visual-coding-2p/ophys_experiments.json`).
+    The metadata is stored as a JSON string for flexibility and to preserve
+    the original structure.
+  # NOTE: `ophys_experiment_metadata` is a dataset and not an attribute 
+  # because attributes have a maximum size limit in HDF5 files.
+  datasets:
+  - name: ophys_experiment_metadata
+    dtype: text
+    doc: JSON string containing experiment metadata. This includes fields such as
+      experiment container information, imaging depth, targeted structure,
+      stimulus name, specimen details, and other experiment parameters.

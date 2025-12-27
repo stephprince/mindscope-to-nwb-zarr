@@ -1,0 +1,18 @@
+namespaces:
+- author:
+  - Saskia de Vries
+  - Ryan Ly
+  - Stephanie Prince
+  contact:
+  - saskiad@alleninstitute.org
+  - rly@lbl.gov
+  - smprince@lbl.gov
+  doc:
+    Allen Institute Brain Observatory Visual Coding 2-photon Extension.
+    Defines OphysExperimentMetadata, a neurodata type that extends LabMetaData
+    and stores a JSON string containing experiment metadata.
+  name: ndx-aibs-visual-coding-2p
+  schema:
+  - namespace: core
+  - source: ndx-aibs-visual-coding-2p.extensions.yaml
+  version: 0.1.0
