@@ -15,7 +15,7 @@ from ..conversion_utils import H5DatasetDataChunkIterator
 
 
 # OPHYS_EXPERIMENT_METADATA_FILE = root_dir.parent / "data" / "allen-brain-observatory" / "visual-coding-2p" / "ophys_experiments.json"
-OPHYS_EXPERIMENT_METADATA_FILE = root_dir.parent / "data" / "visual_coding_2p_ophys_experiments.json"
+OPHYS_EXPERIMENT_METADATA_FILE = root_dir.parent / "reference" / "visual_coding_2p_ophys_experiments.json"
 INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys" 
 DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
