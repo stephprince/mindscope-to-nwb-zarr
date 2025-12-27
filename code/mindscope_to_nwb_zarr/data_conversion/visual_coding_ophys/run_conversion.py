@@ -166,7 +166,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     ophys_experiment_metadata = pd.read_json(OPHYS_EXPERIMENT_METADATA_FILE)
 
     # Confirm there is only one placeholder file in the input directory
-    placeholder_files = list(INPUT_FILE_DIR.glob("*.nwb"))
+    placeholder_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
     if len(placeholder_files) != 1:
         # TODO uncomment after testing
         pass
