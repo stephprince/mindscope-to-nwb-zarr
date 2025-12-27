@@ -9,6 +9,28 @@ The Code Ocean capsule is set up with an App Builder with a single input paramet
 
 To run the conversion on Code Ocean, sync the capsule, enter the desired dataset option, and click "Run with parameters".
 
+### Visual Coding Ophys
+
+This conversion is run in a Code Ocean pipeline to parallelize over the 1518 sessions. Because the latest HDF5-based NWB 2.0 files exist on DANDI, the conversion pipeline downloads the necessary files from DANDI for each session and performs the conversion.
+
+To run this pipeline, we need a Code Ocean data asset with one input file for each of the 1518 sessions. We will first create a Code Ocean data asset with placeholder NWB files, one per session, that tells the conversion scripts which DANDI assets to download. If this Code Ocean data asset already exists, you can skip this step.
+
+```bash
+cd code
+uv run python ./scripts/create_viscod_ophys_placeholder_files.py
+```
+
+This will create 1518 empty (0 B) NWB files in the `data/visual-coding-ophys` directory.
+
+Then, create a new Code Ocean data asset using the web interface by dragging and dropping the selection of 1518 empty NWB files from the `data/visual-coding-ophys` directory and fill out the rest of the form to create the data asset.
+- Source Data Name: Visual Coding Ophys NWB HDF5 to Zarr Input
+- Folder Name: data/visual-coding-ophys
+- Description: Placeholder NWB HDF5 files for Visual Coding Ophys sessions to indicate which DANDI assets to download for conversion to Zarr format.
+- Tags: Allen Brain Observatory
+- Leave the rest blank
+
+Then, go to the [Allen Brain Observatory Visual Coding 2p NWB HDF5 to Zarr](https://codeocean.allenneuraldynamics.org/capsule/9983566/tree) pipeline, add the new data asset to the `data` directory, and add the new data asset as an input to the pipeline. Map the paths from the data asset to the capsule (`data/visual-coding-ophys` to `capsule/data/visual-coding-ophys`), configure the capsule with the correct parameter (`--dataset Visual Coding 2p`), and connect and map the capsule to the results bucket (defaults should be fine). Finally, run the pipeline. It will take several minutes to load pipeline monitoring before starting tasks.
+
 ## Testing Locally
 
 1. `cd code`
