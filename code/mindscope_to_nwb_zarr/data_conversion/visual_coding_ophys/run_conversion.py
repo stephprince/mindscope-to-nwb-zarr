@@ -4,19 +4,17 @@ from pynwb import NWBHDF5IO, NWBFile, get_class, load_namespaces
 from pynwb.base import ImageReferences
 from pynwb.image import GrayscaleImage, Images
 from hdmf_zarr.nwb import NWBZarrIO
+from hdmf_zarr import ZarrDataIO
 import pandas as pd
 
-# load modified extensions before impoting local modules that use them
 root_dir = Path(__file__).parent.parent.parent.parent
 load_namespaces(str(root_dir / "ndx-aibs-visual-coding-2p/ndx-aibs-visual-coding-2p.namespace.yaml"))
 OphysExperimentMetadata = get_class('OphysExperimentMetadata', 'ndx-aibs-visual-coding-2p')
 
 from ..conversion_utils import H5DatasetDataChunkIterator
 
-
-# OPHYS_EXPERIMENT_METADATA_FILE = root_dir.parent / "data" / "allen-brain-observatory" / "visual-coding-2p" / "ophys_experiments.json"
 OPHYS_EXPERIMENT_METADATA_FILE = root_dir / "reference" / "visual_coding_2p_ophys_experiments.json"
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys" 
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys"
 DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
 
@@ -152,7 +150,7 @@ def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> No
         stimulus_presentation.fields['indexed_images'] = images_container
 
 
-def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> None:
+def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
     """Convert NWB HDF5 file to Zarr.
 
     Downloads the necessary NWB files from DANDI, modifies the NWBFile object
@@ -162,6 +160,9 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     Args:
         results_dir: Directory to save the converted Zarr file.
         scratch_dir: Directory to download the NWB files to.
+
+    Returns:
+        Path to the converted Zarr file.
     """
     ophys_experiment_metadata = pd.read_json(OPHYS_EXPERIMENT_METADATA_FILE)
 
@@ -209,10 +210,30 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
                 # WARNING: This approach modifies an attribute that should not be 
                 # able to be reset. Validation should always be performed afterwards.
                 acq_data.fields["imaging_plane"] = base_nwbfile.get_imaging_plane()
-                acq_data.fields["data"] = H5DatasetDataChunkIterator(
+
+                # Use an iterator to read raw data in chunks so we don't
+                # have to load the entire dataset into memory at once
+                data_iterator = H5DatasetDataChunkIterator(
                     dataset=acq_data.data,
                     chunk_shape=acq_data.data.chunks,
                     buffer_gb=8,
+                )
+                # Rechunk the raw 2p data to optimize for cloud computing
+                # and also reduce the number of chunks created.
+                # Code Ocean limits the rate of PUT requests per S3 prefix
+                # so we cannot have too many chunks per Zarr array or else
+                # we get a 503 Slow Down error from S3 and a Code Ocean
+                # pipeline task failure.
+                # Here we use chunks of (75, 512, 512) which results in
+                # about 1500-1700 chunks for a typical raw 2p dataset with
+                # 110,000-120,000 frames.
+                assert acq_data.data.shape[1:] == (512, 512), (
+                    "Expected raw acquisition data shape to have spatial "
+                    f"dimensions (512, 512), found {acq_data.data.shape[1:]}"
+                )
+                acq_data.fields["data"] = ZarrDataIO(
+                    data=data_iterator,
+                    chunks=[75, 512, 512],
                 )
                 base_nwbfile.add_acquisition(acq_data)
 
@@ -223,4 +244,4 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
             with NWBZarrIO(str(zarr_path), mode='w') as export_io:
                 export_io.export(src_io=processed_io, nwbfile=base_nwbfile, write_args=dict(link_data=False))
 
-            return zarr_path
+    return zarr_path
