@@ -65,11 +65,11 @@ def download_visual_coding_ophys_files_from_dandi(processed_file_name: str, scra
 
 
 def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> None:
-    """Update the natural movie stimulus template in the NWB file to use an Images container.
+    """Update the natural movie stimulus template(s) in the NWB file to use an Images container.
 
     In the original HDF5 versions of the data, stimulus template images, e.g., four
     gratings or eight natural images, were stored in an NWB ImageSeries object where
-    the timestamps are NaN or starting time and sampling rate are NaN. 
+    the timestamps are NaN or starting time and sampling rate are NaN.
     In the /stimulus/presentation group, a separate IndexSeries
     object represents the times at which each image in the ImageSeries is displayed.
     This approach of linking an IndexSeries to an ImageSeries with NaN timestamps is
@@ -83,51 +83,73 @@ def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> No
         None. The NWBFile is modified in place.
     """
 
-    # Find the natural movie stimulus template ImageSeries
-    assert "natural_movie_one" in nwbfile.stimulus_template, \
-        "Expected stimulus_template 'natural_movie_one' not found in NWBFile"
-    stimulus_template = nwbfile.stimulus_template["natural_movie_one"]
-    assert stimulus_template.__class__.__name__ == "ImageSeries", \
-        "Expected stimulus_template 'natural_movie_one' to be of type ImageSeries"
-    
-    # Find the corresponding stimulus presentation IndexSeries
-    assert "natural_movie_one_stimulus" in nwbfile.stimulus, \
-        "Expected stimulus_presentation 'natural_movie_one_stimulus' not found in NWBFile"
-    stimulus_presentation = nwbfile.stimulus["natural_movie_one_stimulus"]
-    assert stimulus_presentation.__class__.__name__ == "IndexSeries", \
-        "Expected stimulus_presentation 'natural_movie_one_stimulus' to be of type IndexSeries"
+    # Define the natural movie templates to process
+    natural_movie_templates = [
+        ("natural_movie_one", "NaturalMovieOne"),
+        ("natural_movie_two", "NaturalMovieTwo"),
+        ("natural_movie_three", "NaturalMovieThree"),
+    ]
 
-    # Create new Image objects for each frame in the stimulus template
-    # NOTE: This can take about 5 minutes for natural movie one with 900 frames
-    images = []
-    print("Converting natural movie stimulus template frames to Images container ...")
-    for i in range(stimulus_template.data.shape[0]):
-        image_frame = GrayscaleImage(
-            name=f"NaturalMovieOne_{i}",
-            data=stimulus_template.data[i],
-            description="A single frame of a natural movie presented to the subject.",
-        )
-        images.append(image_frame)
-
-    # Create new Images container
-    images_container = Images(
-        name=stimulus_template.name,
-        description=stimulus_template.description,
-        images=images,
-        order_of_images=ImageReferences(name="order_of_images", data=images),
+    # Confirm at least one natural movie template exists
+    found_templates = [
+        name
+        for name, _ in natural_movie_templates
+        if name in nwbfile.stimulus_template
+    ]
+    assert found_templates, (
+        "Expected at least one natural movie stimulus template "
+        "(natural_movie_one, natural_movie_two, or natural_movie_three) "
+        "in NWBFile"
     )
 
-    # Remove old stimulus template
-    nwbfile.stimulus_template.pop("natural_movie_one")
+    for template_name, image_prefix in natural_movie_templates:
+        # Check if this natural movie template exists in the file
+        if template_name not in nwbfile.stimulus_template:
+            continue
 
-    # Add new stimulus template
-    nwbfile.add_stimulus_template(images_container)
+        stimulus_template = nwbfile.stimulus_template[template_name]
+        assert stimulus_template.__class__.__name__ == "ImageSeries", \
+            f"Expected stimulus_template '{template_name}' to be of type ImageSeries"
 
-    # Update IndexSeries reference
-    # WARNING: This approach modifies an attribute that should not be 
-    # able to be reset. Validation should always be performed afterwards.
-    stimulus_presentation.fields['indexed_timeseries'] = None
-    stimulus_presentation.fields['indexed_images'] = images_container
+        # Find the corresponding stimulus presentation IndexSeries
+        stimulus_name = f"{template_name}_stimulus"
+        assert stimulus_name in nwbfile.stimulus, \
+            f"Expected stimulus_presentation '{stimulus_name}' not found in NWBFile"
+        stimulus_presentation = nwbfile.stimulus[stimulus_name]
+        assert stimulus_presentation.__class__.__name__ == "IndexSeries", \
+            f"Expected stimulus_presentation '{stimulus_name}' to be of type IndexSeries"
+
+        # Create new Image objects for each frame in the stimulus template
+        # NOTE: This can take about 5 minutes for natural movie one with 900 frames
+        images = []
+        print(f"Converting {template_name} stimulus template frames to Images container ...")
+        for i in range(stimulus_template.data.shape[0]):
+            image_frame = GrayscaleImage(
+                name=f"{image_prefix}_{i}",
+                data=stimulus_template.data[i],
+                description="A single frame of a natural movie presented to the subject.",
+            )
+            images.append(image_frame)
+
+        # Create new Images container
+        images_container = Images(
+            name=stimulus_template.name,
+            description=stimulus_template.description,
+            images=images,
+            order_of_images=ImageReferences(name="order_of_images", data=images),
+        )
+
+        # Remove old stimulus template
+        nwbfile.stimulus_template.pop(template_name)
+
+        # Add new stimulus template
+        nwbfile.add_stimulus_template(images_container)
+
+        # Update IndexSeries reference
+        # WARNING: This approach modifies an attribute that should not be
+        # able to be reset. Validation should always be performed afterwards.
+        stimulus_presentation.fields['indexed_timeseries'] = None
+        stimulus_presentation.fields['indexed_images'] = images_container
 
 
 def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> None:
