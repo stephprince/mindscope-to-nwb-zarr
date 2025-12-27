@@ -207,34 +207,35 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
             raw_nwbfile = raw_io.read()
             for acq_data in raw_nwbfile.acquisition.values():
                 acq_data.reset_parent()
-                # WARNING: This approach modifies an attribute that should not be 
-                # able to be reset. Validation should always be performed afterwards.
-                acq_data.fields["imaging_plane"] = base_nwbfile.get_imaging_plane()
+                if acq_data.name == "MotionCorrectedTwoPhotonSeries":
+                    # WARNING: This approach modifies an attribute that should not be 
+                    # able to be reset. Validation should always be performed afterwards.
+                    acq_data.fields["imaging_plane"] = base_nwbfile.get_imaging_plane()
 
-                # Use an iterator to read raw data in chunks so we don't
-                # have to load the entire dataset into memory at once
-                data_iterator = H5DatasetDataChunkIterator(
-                    dataset=acq_data.data,
-                    chunk_shape=acq_data.data.chunks,
-                    buffer_gb=8,
-                )
-                # Rechunk the raw 2p data to optimize for cloud computing
-                # and also reduce the number of chunks created.
-                # Code Ocean limits the rate of PUT requests per S3 prefix
-                # so we cannot have too many chunks per Zarr array or else
-                # we get a 503 Slow Down error from S3 and a Code Ocean
-                # pipeline task failure.
-                # Here we use chunks of (75, 512, 512) which results in
-                # about 1500-1700 chunks for a typical raw 2p dataset with
-                # 110,000-120,000 frames.
-                assert acq_data.data.shape[1:] == (512, 512), (
-                    "Expected raw acquisition data shape to have spatial "
-                    f"dimensions (512, 512), found {acq_data.data.shape[1:]}"
-                )
-                acq_data.fields["data"] = ZarrDataIO(
-                    data=data_iterator,
-                    chunks=[75, 512, 512],
-                )
+                    # Use an iterator to read raw data in chunks so we don't
+                    # have to load the entire dataset into memory at once
+                    data_iterator = H5DatasetDataChunkIterator(
+                        dataset=acq_data.data,
+                        chunk_shape=acq_data.data.chunks,
+                        buffer_gb=8,
+                    )
+                    # Rechunk the raw 2p data to optimize for cloud computing
+                    # and also reduce the number of chunks created.
+                    # Code Ocean limits the rate of COPY requests per S3 prefix
+                    # so we cannot have too many chunks per Zarr array or else
+                    # we get a 503 Slow Down error from S3 and a Code Ocean
+                    # pipeline task failure.
+                    # Here we use chunks of (75, 512, 512) which results in
+                    # about 1500-1700 chunks for a typical raw 2p dataset with
+                    # 110,000-120,000 frames.
+                    assert acq_data.data.shape[1:] == (512, 512), (
+                        "Expected raw acquisition data shape to have spatial "
+                        f"dimensions (512, 512), found {acq_data.data.shape[1:]}"
+                    )
+                    acq_data.fields["data"] = ZarrDataIO(
+                        data=data_iterator,
+                        chunks=[75, 512, 512],
+                    )
                 base_nwbfile.add_acquisition(acq_data)
 
             # Export to Zarr
