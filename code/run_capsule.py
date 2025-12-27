@@ -33,7 +33,7 @@ print("STARTING CODE OCEAN CAPSULE RUN")
 # Define Code Ocean folder paths
 code_folder = Path(__file__).parent
 data_folder = Path("../data/")
-scratch_folder = Path("../scratch/")
+scratch_dir = Path("../scratch/")
 
 VISBEH_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys"
 VISBEH_EPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-neuropixels"
@@ -218,7 +218,7 @@ def run():
     elif dataset.lower() == "visual coding ephys":
         errors = convert_visual_coding_ephys(results_dir=results_dir)
     elif dataset.lower() == "visual coding 2p":
-        result_zarr_path = convert_visual_coding_ophys_hdf5_to_zarr(results_dir=results_dir)
+        result_zarr_path = convert_visual_coding_ophys_hdf5_to_zarr(results_dir=results_dir, scratch_dir=scratch_dir)
     else:
         raise ValueError(f"Unsupported dataset type: {dataset}")
 

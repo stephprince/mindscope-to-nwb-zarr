@@ -10,6 +10,8 @@ import pandas as pd
 root_dir = Path(__file__).parent.parent.parent.parent
 load_namespaces(str(root_dir / "ndx-aibs-visual-coding-2p/ndx-aibs-visual-coding-2p.namespace.yaml"))
 
+from ..conversion_utils import H5DatasetDataChunkIterator
+
 
 OPHYS_EXPERIMENT_METADATA_FILE = root_dir.parent / "data" / "allen-brain-observatory" / "visual-coding-2p" / "ophys_experiments.json"
 INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys" 
@@ -17,7 +19,7 @@ DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
 
 
-def download_visual_coding_ophys_files_from_dandi(processed_file_name: str) -> tuple[Path, Path]:
+def download_visual_coding_ophys_files_from_dandi(processed_file_name: str, scratch_dir_path: Path) -> tuple[Path, Path]:
     """Download Visual Coding Ophys NWB files from DANDI.
     
     Both the NWB file containing metadata and processed 2p data, and
@@ -25,6 +27,7 @@ def download_visual_coding_ophys_files_from_dandi(processed_file_name: str) -> t
 
     Args:
         processed_file_name: Base name of the processed NWB file to download.
+        scratch_dir_path: Directory to download the files to.
 
     Returns:
         Tuple of Paths: (processed_file_path, raw_file_path)
@@ -44,15 +47,14 @@ def download_visual_coding_ophys_files_from_dandi(processed_file_name: str) -> t
         asset = dandiset.get_asset_by_path(f"{subject_dir}/{processed_file_name}")
         if not asset:
             raise RuntimeError(f"No asset found for processed ophys file {processed_file_name} in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}")
-        processed_download_path = INPUT_FILE_DIR / processed_file_name
-        # This download will replace the existing placeholder file
+        processed_download_path = scratch_dir_path / processed_file_name
         asset.download(filepath=processed_download_path)
 
         # Download raw file
         asset = dandiset.get_asset_by_path(f"{subject_dir}/{raw_file_name}")
         if not asset:
             raise RuntimeError(f"No asset found for raw ophys file {raw_file_name} in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}")
-        raw_download_path = INPUT_FILE_DIR / raw_file_name
+        raw_download_path = scratch_dir_path / raw_file_name
         asset.download(filepath=raw_download_path)
 
     return (processed_download_path, raw_download_path)
@@ -124,7 +126,7 @@ def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> No
     stimulus_presentation.fields['indexed_images'] = images_container
 
 
-def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path) -> None:
+def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> None:
     """Convert NWB HDF5 file to Zarr.
 
     Downloads the necessary NWB files from DANDI, modifies the NWBFile object
@@ -136,6 +138,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path) -> None:
     
     Args:
         results_dir: Directory to save the converted Zarr file.
+        scratch_dir: Directory to download the NWB files to.
     """
     ophys_experiment_metadata = pd.read_json(OPHYS_EXPERIMENT_METADATA_FILE)
 
@@ -146,7 +149,10 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path) -> None:
         # raise RuntimeError(f"Expected exactly one NWB placeholder file in {INPUT_FILE_DIR}, found {len(placeholder_files)} files.")
     processed_file_name = placeholder_files[0]
 
-    processed_file_path, raw_file_path = download_visual_coding_ophys_files_from_dandi(processed_file_name.name)
+    processed_file_path, raw_file_path = download_visual_coding_ophys_files_from_dandi(
+        processed_file_name=processed_file_name.name, 
+        scratch_dir_path=scratch_dir
+    )
 
     with NWBHDF5IO(processed_file_path, 'r') as processed_io:
         base_nwbfile = processed_io.read()
@@ -175,6 +181,11 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path) -> None:
                 # WARNING: This approach modifies an attribute that should not be 
                 # able to be reset. Validation should always be performed afterwards.
                 acq_data.fields["imaging_plane"] = base_nwbfile.get_imaging_plane()
+                acq_data.fields["data"] = H5DatasetDataChunkIterator(
+                    dataset=acq_data.data,
+                    chunk_shape=acq_data.data.chunks,
+                    buffer_gb=8,
+                )
                 base_nwbfile.add_acquisition(acq_data)
 
             # Export to Zarr

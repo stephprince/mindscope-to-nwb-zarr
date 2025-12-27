@@ -1,16 +1,34 @@
 from pathlib import Path
 import traceback
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 import warnings
 
 import numpy as np
 from hdmf.common.table import VectorIndex
+from hdmf.data_utils import GenericDataChunkIterator
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
 from pynwb import NWBFile, validate, get_class, NWBHDF5IO
 from pynwb.base import ImageReferences
 from pynwb.ecephys import LFP
 from pynwb.image import Images, GrayscaleImage, IndexSeries
+
+
+class H5DatasetDataChunkIterator(GenericDataChunkIterator):
+    """A data chunk iterator that reads chunks over the 0th dimension of an HDF5 dataset."""
+
+    def __init__(self, dataset: Any, **kwargs: Any) -> None:
+        self.dataset = dataset
+        super().__init__(**kwargs)
+
+    def _get_data(self, selection: Any) -> Any:
+        return self.dataset[selection]
+
+    def _get_maxshape(self) -> tuple[int, ...]:
+        return self.dataset.shape
+
+    def _get_dtype(self) -> Any:
+        return self.dataset.dtype
 
 
 def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
