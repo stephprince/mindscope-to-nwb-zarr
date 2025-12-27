@@ -169,9 +169,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     # Confirm there is only one placeholder file in the input directory
     placeholder_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
     if len(placeholder_files) != 1:
-        # TODO uncomment after testing
-        pass
-        # raise RuntimeError(f"Expected exactly one NWB placeholder file in {INPUT_FILE_DIR}, found {len(placeholder_files)} files.")
+        raise RuntimeError(f"Expected exactly one NWB placeholder file in {INPUT_FILE_DIR}, found {len(placeholder_files)} files.")
     processed_file_name = placeholder_files[0]
 
     processed_file_path, raw_file_path = download_visual_coding_ophys_files_from_dandi(
