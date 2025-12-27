@@ -135,9 +135,6 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     Downloads the necessary NWB files from DANDI, modifies the NWBFile object
     to update subject ID and stimulus template images, adds raw 2p data as
     acquisition, and exports to Zarr format.
-
-    Due to the size of the raw 2p data, this function requires at least 64 GB
-    of available memory to run successfully.
     
     Args:
         results_dir: Directory to save the converted Zarr file.
@@ -195,8 +192,6 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
                 base_nwbfile.add_acquisition(acq_data)
 
             # Export to Zarr
-            # NOTE: This loads all raw ophys data into memory while writing to Zarr.
-            # Make sure sufficient memory is available - at least 64 GB is recommended.
             new_base_filename = processed_file_path.stem.replace(old_subject_id, new_subject_id)
             zarr_path = results_dir / "visual-coding-ophys" / f"{new_base_filename}.zarr"
             print(f"Exporting to Zarr file {zarr_path} ...")
