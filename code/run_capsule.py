@@ -147,9 +147,10 @@ def run():
         raise ValueError(f"Unsupported dataset type: {dataset}")
 
     # Validate and inspect resulting Zarr file
-    inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-    print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
-    inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
+    if result_zarr_path:
+        inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+        print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
+        inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
     # Write conversion errors to results folder
     # conversion_errors_list_path = results_dir / "conversion_errors.txt"

@@ -323,8 +323,19 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
 
     Returns:
         Path to the converted Zarr file, or None if the file was skipped
-        (additional plane of multiplane session).
+        (additional plane of multiplane session or no NWB files in the input directory).
     """
+    # Confirm there is only one input file in the input directory
+    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
+    if not input_files:
+        return None
+    elif len(input_files) > 1:
+        raise RuntimeError(
+            f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
+            f"found {len(input_files)} files."
+        )
+    input_file = input_files[0]
+
     # Download behavior session table metadata
     print("Downloading behavior session table metadata from S3 ...")
     b = q3.Bucket("s3://visual-behavior-ophys-data")
@@ -332,15 +343,6 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
     download_path = (scratch_dir / "behavior_session_table.csv").as_posix()
     b.fetch(session_metadata_path, download_path)
     behavior_session_table = pd.read_csv(download_path)
-
-    # Confirm there is only one input file in the input directory
-    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
-    if len(input_files) != 1:
-        raise RuntimeError(
-            f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
-            f"found {len(input_files)} files."
-        )
-    input_file = input_files[0]
 
     # Determine session type and get list of additional files to download
     session_info = get_session_info_from_input_file(
