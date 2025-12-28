@@ -362,14 +362,14 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
 
     if session_type == "behavior":
         # Behavior-only session
-        zarr_filename = input_file.stem + ".zarr"
+        zarr_filename = input_file.stem + ".nwb.zarr"
         zarr_path = results_dir / zarr_filename
         print(f"Converting behavior-only session to {zarr_path} ...")
         convert_behavior_or_single_plane_nwb_to_zarr(input_file, zarr_path)
 
     elif session_type == "single_plane_ophys":
         # Single-plane ophys session
-        zarr_filename = input_file.stem + ".zarr"
+        zarr_filename = input_file.stem + ".nwb.zarr"
         zarr_path = results_dir / zarr_filename
         print(f"Converting single-plane ophys session to {zarr_path} ...")
         convert_behavior_or_single_plane_nwb_to_zarr(input_file, zarr_path)
@@ -382,7 +382,7 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
         ]
 
         behavior_session_id = session_info["behavior_session_id"]
-        zarr_filename = f"behavior_session_{behavior_session_id}.zarr"
+        zarr_filename = f"behavior_session_{behavior_session_id}.nwb.zarr"
         zarr_path = results_dir / zarr_filename
         print(f"Converting multiplane session ({len(additional_files) + 1} planes) to {zarr_path} ...")
         combine_multiplane_nwb_to_zarr(input_file, additional_files, zarr_path)
