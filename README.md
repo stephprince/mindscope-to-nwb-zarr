@@ -13,7 +13,7 @@ Sync the capsule with the GitHub repository, make sure the appropriate data asse
 
 ### Visual Behavior Ophys
 
-The current pipeline relies on the fact that the only NWB files in the Code Ocean visual-behavior-ophys data asset are the NWB files to be converted. This is because the "Map Paths" configuration from the data asset to the capsule is set to "**" which maps all files in the data asset to the capsule (non-NWB files will trigger tasks but the conversion script will skip them).
+The current pipeline relies on the fact that the only NWB files in the Code Ocean visual-behavior-ophys data asset are the NWB files to be converted. This is because the "Map Paths" configuration from the data asset to the capsule is set to "**" which maps all files in the data asset to the capsule (non-NWB files will trigger tasks but the conversion script will skip them). It would be really nice to be able to specify a file extension filter when mapping paths from a data asset to a capsule in Code Ocean pipelines or to combine multiple directories from a data asset into a single directory in the capsule.
 
 ### Visual Coding Ophys
 
