@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import shutil
 from tqdm import tqdm
+from uuid import uuid4
 
 from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion import (
     convert_visual_behavior_ephys_file_to_zarr,
@@ -151,6 +152,11 @@ def run():
         inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
         print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
         inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
+    else:
+        # Apparently Code Ocean requires at least one output file, so we write an empty file
+        dummy_output_path = results_dir / f"dummy_output_{uuid4()}.txt"
+        print(f"Writing dummy output file {dummy_output_path} ...")
+        dummy_output_path.touch()
 
     # Write conversion errors to results folder
     # conversion_errors_list_path = results_dir / "conversion_errors.txt"
