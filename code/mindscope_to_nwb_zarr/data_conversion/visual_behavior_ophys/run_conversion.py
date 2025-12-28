@@ -1,114 +1,43 @@
 from pathlib import Path
-import warnings
 
 from hdmf_zarr.nwb import NWBZarrIO
 import pandas as pd
 from pynwb import NWBFile, load_namespaces
+import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
-    convert_stimulus_template_to_images,
+    convert_visual_behavior_stimulus_template_to_images,
     open_visual_behavior_nwb_hdf5,
 )
 
+root_dir = Path(__file__).parent.parent.parent.parent
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ophys"
 
-def iterate_visual_behavior_ophys_sessions(data_dir: Path):
-    """Iterate through behavior_session_table.csv and yield NWB file paths.
+MULTIPLANE_PROJECT_CODES = {"VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d"}
 
-    NWB files follow naming patterns:
-    - Behavior only: behavior_session_{behavior_session_id}.nwb
-    - Behavior-ophys: behavior_ophys_experiment_{ophys_experiment_id}.nwb
+# Load updated NWB extensions used by Visual Behavior Ophys files
+load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
 
-    For multi-plane behavior-ophys sessions (Multiscope projects),
-    yields a single session_info dict with nwb_path as a list of paths.
-    For single-plane sessions, nwb_path is a single Path object.
+
+def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Path) -> None:
+    """Convert behavior or single-plane NWB HDF5 file to Zarr.
+
+    Args:
+        hdf5_path: Path to input NWB HDF5 file.
+        zarr_path: Path to output Zarr file.
     """
-    MULTIPLANE_PROJECT_CODES = {"VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d"}
-
-    VISBEH_OPHYS_BEHAVIOR_DATA_DIR = data_dir / "behavior_sessions"
-    VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR = data_dir / "behavior_ophys_experiments"
-
-    VISBEH_OPHYS_METADATA_TABLES_DIR = data_dir / "project_metadata"
-    assert VISBEH_OPHYS_METADATA_TABLES_DIR.exists(), \
-        f"Visual behavior ophys project metadata tables directory does not exist: {VISBEH_OPHYS_METADATA_TABLES_DIR}"
-
-    csv_path = VISBEH_OPHYS_METADATA_TABLES_DIR / "behavior_session_table.csv"
-    df = pd.read_csv(csv_path)
-
-    for idx, row in df.iterrows():
-        behavior_session_id = row['behavior_session_id']
-        ophys_experiment_id = row['ophys_experiment_id']
-        project_code = row['project_code']
-
-        if pd.isna(ophys_experiment_id):
-            # No ophys session - behavior only
-            data_dir = VISBEH_OPHYS_BEHAVIOR_DATA_DIR
-            session_type = "behavior"
-            nwb_filename = f"behavior_session_{behavior_session_id}.nwb"
-            nwb_path = data_dir / nwb_filename
-
-            yield {
-                'behavior_session_id': behavior_session_id,
-                'ophys_experiment_id': None,
-                'session_type': session_type,
-                'nwb_path': nwb_path,
-            }
-        else:
-            # Has ophys session - parse the list of ophys_experiment_ids
-            data_dir = VISBEH_OPHYS_BEHAVIOR_OPHYS_DATA_DIR
-            session_type = "behavior_ophys"
-
-            # ophys_experiment_id is stored as a string like "[123, 456, 789]"
-            # Parse by stripping brackets and splitting on commas
-            ids_str = ophys_experiment_id.strip('[]').strip()
-            if not ids_str:
-                warnings.warn(f"behavior_session_id {behavior_session_id} has empty "
-                              f"ophys_experiment_id list, skipping")
-                continue
-            ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
-
-            if project_code in MULTIPLANE_PROJECT_CODES:
-                # Multi-plane session: store all NWB paths in a list
-                nwb_paths = [
-                    data_dir / f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
-                    for ophys_exp_id in ophys_exp_ids
-                ]
-                yield {
-                    'behavior_session_id': behavior_session_id,
-                    'ophys_experiment_id': ophys_exp_ids,
-                    'session_type': session_type,
-                    'nwb_path': nwb_paths,
-                }
-            else:
-                # Single-plane session
-                ophys_exp_id = ophys_exp_ids[0]
-                nwb_filename = f"behavior_ophys_experiment_{ophys_exp_id}.nwb"
-                nwb_path = data_dir / nwb_filename
-
-                yield {
-                    'behavior_session_id': behavior_session_id,
-                    'ophys_experiment_id': ophys_exp_id,
-                    'session_type': session_type,
-                    'nwb_path': nwb_path,
-                }
-
-
-def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_base_filename: Path, zarr_path: Path):
-    """Convert behavior or single-plane NWB HDF5 file to Zarr."""
-    # Load updated extensions
-    root_dir = Path(__file__).parent.parent.parent.parent
-    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
-    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
-
-    with open_visual_behavior_nwb_hdf5(hdf5_base_filename, 'r') as read_io:
+    print(f"Reading NWB file {hdf5_path} ...")
+    with open_visual_behavior_nwb_hdf5(hdf5_path, 'r') as read_io:
         read_nwbfile = read_io.read()
-        
+
         # Set session_id so that naming on DANDI is more similar to original NWB file
         read_nwbfile.session_id = read_nwbfile.identifier
 
         # Change stimulus_template to Image objects in Images container
-        read_nwbfile = convert_stimulus_template_to_images(read_nwbfile)
+        read_nwbfile = convert_visual_behavior_stimulus_template_to_images(read_nwbfile)
 
+        print(f"Exporting to Zarr file {zarr_path} ...")
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
             export_io.export(src_io=read_io, nwbfile=read_nwbfile, write_args=dict(link_data=False))
 
@@ -204,7 +133,11 @@ def combine_multiplane_info(plane_nwbfiles: list[NWBFile], hdf5_paths: list[Path
     return base_nwbfile
 
 
-def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Path) -> None:
+def combine_multiplane_nwb_to_zarr(
+    base_hdf5_path: Path,
+    additional_hdf5_paths: list[Path],
+    zarr_path: Path,
+) -> None:
     """Combine multiple single-plane NWB HDF5 files into one multi-plane Zarr file.
 
     Each input NWB file contains one ImagingPlane, one ophys ProcessingModule,
@@ -215,31 +148,239 @@ def combine_multiplane_nwb_to_zarr(hdf5_base_filename: list[Path], zarr_path: Pa
     - Re-links all imaging planes to a single shared device
     - Updates PlaneSegmentation references to point to the correct imaging planes
     - Exports the combined file to Zarr format
+
+    Args:
+        base_hdf5_path: Path to the first plane's NWB HDF5 file.
+        additional_hdf5_paths: Paths to additional plane NWB HDF5 files.
+        zarr_path: Path to output Zarr file.
     """
-    # Load updated extensions
-    root_dir = Path(__file__).parent.parent.parent.parent
-    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
-    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
+    all_hdf5_paths = [base_hdf5_path] + additional_hdf5_paths
 
-    hdf5_paths = hdf5_base_filename
-    base_io = open_visual_behavior_nwb_hdf5(hdf5_paths[0], 'r')
+    print(f"Reading base NWB file {base_hdf5_path} ...")
+    base_io = open_visual_behavior_nwb_hdf5(base_hdf5_path, 'r')
     base_nwbfile = base_io.read()
-    plane_ios = [base_io] + [open_visual_behavior_nwb_hdf5(p, 'r', manager=base_io.manager) for p in hdf5_paths[1:]]
-    plane_nwbfiles = [base_nwbfile] + [io.read() for io in plane_ios[1:]]
 
-    combined_nwbfile = combine_multiplane_info(plane_nwbfiles, hdf5_paths)
+    print(f"Reading {len(additional_hdf5_paths)} additional plane NWB files ...")
+    additional_ios = [
+        open_visual_behavior_nwb_hdf5(p, 'r', manager=base_io.manager)
+        for p in additional_hdf5_paths
+    ]
+    plane_ios = [base_io] + additional_ios
+    plane_nwbfiles = [base_nwbfile] + [io.read() for io in additional_ios]
+
+    print("Combining multiplane info ...")
+    combined_nwbfile = combine_multiplane_info(plane_nwbfiles, all_hdf5_paths)
 
     # Set session_id so that naming on DANDI is more similar to original NWB files
     combined_nwbfile.session_id = combined_nwbfile.identifier
 
     # Change stimulus_template to Image objects in Images container
-    combined_nwbfile = convert_stimulus_template_to_images(combined_nwbfile)
+    combined_nwbfile = convert_visual_behavior_stimulus_template_to_images(combined_nwbfile)
 
     # Export the combined NWB file to Zarr (link_data=False copies all data)
+    print(f"Exporting to Zarr file {zarr_path} ...")
     with NWBZarrIO(str(zarr_path), mode='w') as export_io:
         export_io.export(src_io=base_io, nwbfile=combined_nwbfile, write_args=dict(link_data=False))
 
-    # Close all additional IOs after export is complete
+    # Close all IOs after export is complete
     for io in plane_ios:
         io.close()
+
+def download_visual_behavior_ophys_file_from_s3(filename: str, scratch_dir: Path) -> Path:
+    """Download a Visual Behavior Ophys NWB file from S3.
+
+    Args:
+        filename: Name of the NWB file to download.
+        scratch_dir: Directory to download the file to.
+
+    Returns:
+        Path to the downloaded file.
+    """
+    b = q3.Bucket("s3://visual-behavior-ophys-data")
+
+    if filename.startswith("behavior_ophys_experiment_"):
+        s3_path = f"visual-behavior-ophys/behavior_ophys_experiments/{filename}"
+    else:
+        raise ValueError(f"Unknown file type: {filename}")
+
+    download_path = (scratch_dir / filename).as_posix()
+    print(f"Downloading {filename} from S3 to {download_path} ...")
+    b.fetch(s3_path, download_path)
+    return download_path
+
+
+def get_session_info_from_input_file(input_filename: str, behavior_session_table: pd.DataFrame) -> dict:
+    """Determine session type and related info from an input NWB filename.
+
+    Args:
+        input_filename: Name of the input NWB file (without path).
+        behavior_session_table: DataFrame containing behavior session metadata.
+
+    Returns:
+        Dict with keys:
+            - session_type: "behavior", "single_plane_ophys", "first_multiplane", or "additional_multiplane"
+            - behavior_session_id: The behavior session ID
+            - ophys_experiment_id: Single ID (for ophys sessions) or None (for behavior-only)
+            - all_ophys_experiment_ids: List of all ophys experiment IDs (for multiplane) or None
+            - additional_filenames: List of additional filenames to download (for first_multiplane)
+    """
+    # Parse the input filename to determine session type
+    if input_filename.startswith("behavior_session_"):
+        # Behavior-only session
+        behavior_session_id = int(input_filename.replace("behavior_session_", "").replace(".nwb", ""))
+        return {
+            "session_type": "behavior",
+            "behavior_session_id": behavior_session_id,
+            "ophys_experiment_id": None,
+            "all_ophys_experiment_ids": None,
+            "additional_filenames": [],
+        }
+
+    elif input_filename.startswith("behavior_ophys_experiment_"):
+        # Ophys session - need to determine if single-plane or multiplane
+        ophys_experiment_id = int(input_filename.replace("behavior_ophys_experiment_", "").replace(".nwb", ""))
+
+        # Find the row in behavior_session_table that contains this ophys_experiment_id
+        matching_row = None
+        for idx, row in behavior_session_table.iterrows():
+            if pd.isna(row['ophys_experiment_id']):
+                continue
+
+            # Parse the list of ophys_experiment_ids from the string format "[123, 456, 789]"
+            ids_str = str(row['ophys_experiment_id']).strip('[]').strip()
+            if not ids_str:
+                continue
+            ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
+
+            if ophys_experiment_id in ophys_exp_ids:
+                matching_row = row
+                all_ophys_exp_ids = ophys_exp_ids
+                break
+
+        if matching_row is None:
+            raise RuntimeError(f"Could not find ophys_experiment_id {ophys_experiment_id} in behavior_session_table")
+
+        behavior_session_id = matching_row['behavior_session_id']
+        project_code = matching_row['project_code']
+
+        if project_code in MULTIPLANE_PROJECT_CODES:
+            # Multiplane session - check if this is the first plane
+            if ophys_experiment_id == all_ophys_exp_ids[0]:
+                # First plane of multiplane session - need to download additional planes
+                additional_filenames = [
+                    f"behavior_ophys_experiment_{exp_id}.nwb"
+                    for exp_id in all_ophys_exp_ids[1:]  # Skip first, we already have it
+                ]
+                return {
+                    "session_type": "first_multiplane",
+                    "behavior_session_id": behavior_session_id,
+                    "ophys_experiment_id": ophys_experiment_id,
+                    "all_ophys_experiment_ids": all_ophys_exp_ids,
+                    "additional_filenames": additional_filenames,
+                }
+            else:
+                # Additional plane of multiplane session - skip
+                return {
+                    "session_type": "additional_multiplane",
+                    "behavior_session_id": behavior_session_id,
+                    "ophys_experiment_id": ophys_experiment_id,
+                    "all_ophys_experiment_ids": all_ophys_exp_ids,
+                    "additional_filenames": [],
+                }
+        else:
+            # Single-plane ophys session
+            return {
+                "session_type": "single_plane_ophys",
+                "behavior_session_id": behavior_session_id,
+                "ophys_experiment_id": ophys_experiment_id,
+                "all_ophys_experiment_ids": None,
+                "additional_filenames": [],
+            }
+
+    else:
+        raise ValueError(f"Unknown input filename format: {input_filename}")
+
+
+def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
+    """Convert NWB HDF5 file to Zarr.
+
+    Reads the input NWB file from INPUT_FILE_DIR, determines the session type
+    (behavior-only, single-plane ophys, or multiplane ophys), and converts
+    accordingly. For multiplane sessions, only the first plane triggers
+    conversion (downloading additional planes from S3); additional planes
+    are skipped.
+
+    Args:
+        results_dir: Directory to save the converted Zarr file.
+        scratch_dir: Directory to download additional NWB files to (for multiplane).
+
+    Returns:
+        Path to the converted Zarr file, or None if the file was skipped
+        (additional plane of multiplane session).
+    """
+    # Download behavior session table metadata
+    print("Downloading behavior session table metadata from S3 ...")
+    b = q3.Bucket("s3://visual-behavior-ophys-data")
+    session_metadata_path = "visual-behavior-ophys/project_metadata/behavior_session_table.csv"
+    download_path = (scratch_dir / "behavior_session_table.csv").as_posix()
+    b.fetch(session_metadata_path, download_path)
+    behavior_session_table = pd.read_csv(download_path)
+
+    # Confirm there is only one input file in the input directory
+    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
+    if len(input_files) != 1:
+        # TODO: uncomment after testing
+        pass
+        # raise RuntimeError(
+        #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
+        #     f"found {len(input_files)} files."
+        # )
+    input_file = input_files[0]
+
+    # Determine session type and get list of additional files to download
+    session_info = get_session_info_from_input_file(
+        input_filename=input_file.name,
+        behavior_session_table=behavior_session_table,
+    )
+
+    session_type = session_info["session_type"]
+
+    # Skip additional planes of multiplane sessions
+    if session_type == "additional_multiplane":
+        print(
+            f"Skipping {input_file.name} - additional plane of multiplane session. "
+            f"Will be processed with first plane (ophys_experiment_id={session_info['all_ophys_experiment_ids'][0]})."
+        )
+        return None
+
+    if session_type == "behavior":
+        # Behavior-only session
+        zarr_filename = input_file.stem + ".zarr"
+        zarr_path = results_dir / zarr_filename
+        print(f"Converting behavior-only session to {zarr_path} ...")
+        convert_behavior_or_single_plane_nwb_to_zarr(input_file, zarr_path)
+
+    elif session_type == "single_plane_ophys":
+        # Single-plane ophys session
+        zarr_filename = input_file.stem + ".zarr"
+        zarr_path = results_dir / zarr_filename
+        print(f"Converting single-plane ophys session to {zarr_path} ...")
+        convert_behavior_or_single_plane_nwb_to_zarr(input_file, zarr_path)
+
+    elif session_type == "first_multiplane":
+        # First plane of multiplane session - download additional planes and combine
+        additional_files = [
+            download_visual_behavior_ophys_file_from_s3(filename, scratch_dir)
+            for filename in session_info["additional_filenames"]
+        ]
+
+        behavior_session_id = session_info["behavior_session_id"]
+        zarr_filename = f"behavior_session_{behavior_session_id}.zarr"
+        zarr_path = results_dir / zarr_filename
+        print(f"Converting multiplane session ({len(additional_files) + 1} planes) to {zarr_path} ...")
+        combine_multiplane_nwb_to_zarr(input_file, additional_files, zarr_path)
+
+    else:
+        raise RuntimeError(f"Unexpected session type: {session_type}")
+
+    return zarr_path

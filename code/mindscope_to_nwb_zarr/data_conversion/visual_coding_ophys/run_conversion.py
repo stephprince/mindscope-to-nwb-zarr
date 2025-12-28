@@ -7,16 +7,18 @@ from hdmf_zarr.nwb import NWBZarrIO
 from hdmf_zarr import ZarrDataIO
 import pandas as pd
 
-root_dir = Path(__file__).parent.parent.parent.parent
-load_namespaces(str(root_dir / "ndx-aibs-visual-coding-2p/ndx-aibs-visual-coding-2p.namespace.yaml"))
-OphysExperimentMetadata = get_class('OphysExperimentMetadata', 'ndx-aibs-visual-coding-2p')
+from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
 
-from ..conversion_utils import H5DatasetDataChunkIterator
+root_dir = Path(__file__).parent.parent.parent.parent
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys"
 
 OPHYS_EXPERIMENT_METADATA_FILE = root_dir / "reference" / "visual_coding_2p_ophys_experiments.json"
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys"
 DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
+
+# Load NWB extension used by new Visual Coding Ophys files
+load_namespaces(str(root_dir / "ndx-aibs-visual-coding-2p/ndx-aibs-visual-coding-2p.namespace.yaml"))
+OphysExperimentMetadata = get_class('OphysExperimentMetadata', 'ndx-aibs-visual-coding-2p')
 
 
 def download_visual_coding_ophys_files_from_dandi(processed_file_name: str, scratch_dir_path: Path) -> tuple[Path, Path]:

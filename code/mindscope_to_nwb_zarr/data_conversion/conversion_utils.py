@@ -7,7 +7,14 @@ import numpy as np
 from hdmf.common.table import VectorIndex
 from hdmf.data_utils import GenericDataChunkIterator
 from hdmf_zarr.nwb import NWBZarrIO
-from nwbinspector import inspect_nwbfile_object, format_messages, save_report, load_config, Importance, InspectorMessage
+from nwbinspector import (
+    inspect_nwbfile_object,
+    format_messages,
+    save_report,
+    load_config,
+    Importance,
+    InspectorMessage
+)
 from pynwb import NWBFile, validate, get_class, NWBHDF5IO
 from pynwb.base import ImageReferences
 from pynwb.ecephys import LFP
@@ -34,7 +41,7 @@ class H5DatasetDataChunkIterator(GenericDataChunkIterator):
 def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
     """Open a visual behavior ephys/ophys NWB HDF5 file, suppressing cached namespace warnings.
     
-    ndx-aibs-ecephys, ndx-aibs-stimulus-template, and ndx-ellipse-eye-tracking should be
+    ndx-aibs-stimulus-template and ndx-ellipse-eye-tracking should be
     both cached in the file and loaded via load_namespaces prior to calling this function.
     """
     with warnings.catch_warnings():
@@ -42,7 +49,6 @@ def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF
             "ignore",
             message=(
                 r"Ignoring the following cached namespace[\s\S]*"
-                r"ndx-aibs-ecephys[\s\S]*"
                 r"ndx-aibs-stimulus-template[\s\S]*"
                 r"ndx-ellipse-eye-tracking"
             ),
@@ -53,23 +59,31 @@ def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF
         return NWBHDF5IO(str(path), mode)
 
 
-def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
-    """Convert stimulus_template from ImageSeries to Images container with IndexSeries references.
+def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
+    """Convert Visual Behavior stimulus_template from StimulusTemplate to Images container.
 
-    In the original HDF5 versions of the data, stimulus template images, e.g., four
-    gratings or eight natural images, were stored in an NWB ImageSeries object where
-    the timestamps are NaN. In the /stimulus/presentation group, a separate IndexSeries
-    object represents the times at which each image in the ImageSeries is displayed.
-    This approach of linking an IndexSeries to an ImageSeries with NaN timestamps is
-    deprecated. This function reorganizes the stimulus templates by changing the
-    ImageSeries to an ordered set of Image objects in an Images container, and
-    changing the IndexSeries to link to this Images container.
+    In the original HDF5 versions of Visual Behavior data, stimulus template images
+    (e.g., gratings or natural images) were stored in a StimulusTemplate object.
+    In the /stimulus/presentation group, a separate IndexSeries object represented
+    the times at which each image in the StimulusTemplate was displayed.
+    This approach of linking an IndexSeries to a StimulusTemplate is deprecated in NWB.
+    This function reorganizes the stimulus templates by changing the StimulusTemplate
+    to an ordered set of Image objects in an Images container, and changing the
+    IndexSeries to link to this Images container.
+
+    Visual Behavior Ephys files use StimulusTemplate for stimulus templates, e.g.,
+    "Natural_Images_Lum_Matched_set_ophys_G_2019.05.26" without matching presentation series.
+
+    Visual Behavior 2p files use StimulusTemplate for stimulus templates, e.g.,
+    "grating", "Natural_Images_Lum_Matched_set_training_2017.07.14" with additional
+    presentation series, e.g., "spontaneous_stimulus" (TimeIntervals),
+    "static_gratings" (TimeIntervals).
     """
     try:
         WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
     except KeyError:
         raise RuntimeError(
-            "The ndx-aibs-stimulus-template extension was not found. Please try loading the namespace "
+            "The ndx-aibs-stimulus-template extension was not found. Please first load the namespace "
             "with 'load_namespaces(\"ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml\")'"
         )
 
@@ -81,21 +95,7 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
     original_stimulus_keys = list(nwbfile.stimulus_template.keys())
     new_stimulus_templates = {}
     for k in original_stimulus_keys:
-        # TODO remove print
-        print(f"\nConverting stimulus template {k} to Images containers")
-
-        # Visual Coding Ephys files don't have any stimulus template or presentation data
-
-        # Visual Coding 2p files use different types for stimulus templates, e.g.,
-        # "natural_movie_one" (ImageSeries), "natural_scenes_template" (Images)
-
-        # Visual Behavior Ephys files use StimulusTemplate for stimulus templates, e.g.,
-        # "Natural_Images_Lum_Matched_set_ophys_G_2019.05.26" without matching presentation series
-
-        # Visual Behavior 2p files use StimulusTemplate for stimulus templates, e.g.,
-        # "grating", "Natural_Images_Lum_Matched_set_training_2017.07.14" with additional
-        # presentation series, e.g., "spontaneous_stimulus" (TimeIntervals),
-        # "static_gratings" (TimeIntervals)
+        print(f"Converting stimulus template {k} to Images container ...")
 
         stimulus_template = nwbfile.stimulus_template[k]
         assert stimulus_template.__class__.__name__ == "StimulusTemplate", \
@@ -125,11 +125,11 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         image_data = stimulus_template.data[:]  # Shape should be (num_images, height, width)
         image_data_unwarped = stimulus_template.unwarped[:]
 
-        # Adapt description TODO: Adapt for different stimulus types if non-visual?
+        # Adapt description
         if stimulus_template.description is not None and stimulus_template.description != "no description":
             description = stimulus_template.description
         else:
-            description =  "Visual stimuli images shown to the subject."
+            description = "Visual stimuli images shown to the subject."
 
         # Create new image objects
         all_images_unwarped = []
@@ -137,13 +137,13 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
         for i in range(image_data.shape[0]):
             unwarped_image = GrayscaleImage(
                 name=stimulus_template.control_description[i],
-                data=image_data_unwarped[i].astype('float32'),
-                description=f"Natural scene image unwarped {stimulus_template.control[i]}",
+                data=image_data_unwarped[i],
+                description=f"Unwarped stimulus template: {stimulus_template.control[i]}",
             )
             warped_image = WarpedStimulusTemplateImage(
                 name=stimulus_template.control_description[i],
-                data=image_data[i].astype('float32'),
-                description=f"Natural scene image {stimulus_template.control[i]}",
+                data=image_data[i],
+                description=f"Warped stimulus template: {stimulus_template.control[i]}",
                 unwarped=unwarped_image,
             )
             all_images_unwarped.append(unwarped_image)
@@ -172,7 +172,7 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
 
     # Add new stimulus templates and update IndexSeries references
     for k in original_stimulus_keys:
-        # add unwarped images first so BuildManager can find them when building warped images
+        # Add unwarped images first so BuildManager can find them when building warped images
         nwbfile.add_stimulus_template(new_stimulus_templates[k + "_unwarped"])
         nwbfile.add_stimulus_template(new_stimulus_templates[k])
 
@@ -193,16 +193,10 @@ def convert_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
                 index_series.fields['indexed_images'] = new_stimulus_templates[k]
                 if index_series.description is None or index_series.description == "no description":
                     index_series.fields['description'] = f"Timestamps and indices of the {k} stimulus template presentations."
-                    # TODO - is this an ok description or should it be included?
             else:
                 raise ValueError(
                     f"IndexSeries '{k}' missing 'indexed_timeseries' field"
                 )
-
-    # TODO: Add "image" column to stimulus presentation table to reference the displayed images
-    # TODO: Add "initial_image" and "change_image" columns to trials table to reference images shown during trials
-    # NOTE: There are existing columns in the stimulus presentation and trials table for this information,
-    # is there a specific reason to update them to reference the new Images container vs. the name / indices?
 
     return nwbfile
 

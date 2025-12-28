@@ -8,11 +8,6 @@ from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys.run_conversion 
     iterate_visual_behavior_ephys_sessions
 )
 
-from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion import (
-    convert_behavior_or_single_plane_nwb_to_zarr,
-    combine_multiplane_nwb_to_zarr,
-    iterate_visual_behavior_ophys_sessions,
-)
 
 from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys.run_conversion import (
     convert_visual_coding_ephys_file_to_zarr,
@@ -28,73 +23,8 @@ code_folder = Path(__file__).parent
 data_folder = Path("../data/")
 scratch_dir = Path("../scratch/")
 
-VISBEH_OPHYS_DATA_DIR = data_folder / "visual-behavior-ophys"
 VISBEH_EPHYS_BEHAVIOR_DATA_DIR = data_folder / "visual-behavior-neuropixels"
 VISCODING_EPHYS_DATA_DIR = data_folder / "allen-brain-observatory" / "visual-coding-neuropixels" / "ecephys-cache"
-
-
-def convert_visual_behavior_2p(results_dir: Path) -> str:
-    """Convert Visual Behavior 2P NWB files to Zarr format."""
-    # TODO: reorganize as in convert_visual_behavior_ephys_file_to_zarr
-    sessions = list(iterate_visual_behavior_ophys_sessions(data_dir=VISBEH_OPHYS_DATA_DIR))
-    sessions = sessions[74:76]  # TODO remove limit
-    errors = []
-
-    for session_info in tqdm(sessions, desc="Converting NWB to Zarr"):
-        session_type = session_info['session_type']
-        nwb_path = session_info['nwb_path']
-        behavior_session_id = session_info['behavior_session_id']
-
-        # Check for missing NWB files
-        all_paths = nwb_path if isinstance(nwb_path, list) else [nwb_path]
-        missing_paths = [p for p in all_paths if not p.exists()]
-        if missing_paths:
-            for missing_path in missing_paths:
-                error_msg = (f"Missing expected NWB files for behavior_session_id: {behavior_session_id}, "
-                             f"nwb_path: {missing_path}")
-                errors.append(error_msg)
-            continue
-
-        # Output Zarr file path
-        if session_type == 'behavior_ophys':
-            if isinstance(nwb_path, list):
-                # Multi-plane session
-                result_zarr_path = results_dir / "visual-behavior-2p" / "multiplane_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
-            else:
-                # Single-plane session
-                result_zarr_path = results_dir / "visual-behavior-2p" / "singleplane_sessions" / f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
-        elif session_type == 'behavior':
-            result_zarr_path = results_dir / "visual-behavior-2p" / "behavior_only_sessions" / f"behavior_session_{behavior_session_id}.nwb.zarr"
-
-        result_zarr_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if session_type == 'behavior_ophys':
-            # Multi-plane conversion
-            assert isinstance(nwb_path, list), "Expected nwb_path to be a list for multi-plane sessions"
-            convert_func = combine_multiplane_nwb_to_zarr
-        else:
-            # Single-plane or behavior only conversion
-            assert isinstance(nwb_path, Path), "Expected nwb_path to be a Path for single-plane or behavior only sessions"
-            convert_func = convert_behavior_or_single_plane_nwb_to_zarr
-
-        try:
-            convert_func(
-                hdf5_base_filename=nwb_path,
-                zarr_path=result_zarr_path
-            )
-        except Exception as e:
-            error_msg = (f"session_type: {session_type}, "
-                         f"behavior_session_id: {behavior_session_id}, "
-                         f"nwb_path: {nwb_path}, "
-                         f"error: {str(e)}")
-            errors.append(error_msg)
-            continue
-
-        # inspect resulting file
-        inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
-        inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
-
-    return errors
 
 
 def convert_visual_behavior_ephys(results_dir: Path) -> str:
@@ -203,11 +133,11 @@ def run():
     print(f"Cleared results folder: {list(results_dir.iterdir())}")
 
     # Convert NWB files based on dataset type
-    
     if dataset.lower() == "visual behavior ephys":
         errors = convert_visual_behavior_ephys(results_dir=results_dir)
     elif dataset.lower() == "visual behavior 2p":
-        errors = convert_visual_behavior_2p(results_dir=results_dir)
+        from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ophys.run_conversion import convert_visual_behavior_ophys_hdf5_to_zarr
+        result_zarr_path = convert_visual_behavior_ophys_hdf5_to_zarr(results_dir=results_dir, scratch_dir=scratch_dir)
     elif dataset.lower() == "visual coding ephys":
         errors = convert_visual_coding_ephys(results_dir=results_dir)
     elif dataset.lower() == "visual coding 2p":

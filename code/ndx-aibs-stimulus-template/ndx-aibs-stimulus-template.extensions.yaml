@@ -23,7 +23,6 @@ datasets:
     relative to the monitor. This extension stores an attribute reference to the unwarped
     version of the image in which a mask has been applied such that only the pixels 
     visible after warping are included.
-  dtype: float
   attributes:
   - name: unwarped
     dtype:
