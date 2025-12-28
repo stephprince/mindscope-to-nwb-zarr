@@ -1,7 +1,7 @@
 import pandas as pd
 
 from pathlib import Path
-from pynwb import load_namespaces
+from pynwb import load_namespaces, NWBFile
 from hdmf_zarr.nwb import NWBZarrIO
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
@@ -11,6 +11,39 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     inspect_zarr_file,
     open_visual_behavior_nwb_hdf5,
 )
+
+def add_missing_visual_behavior_ephys_descriptions(nwbfile: NWBFile) -> None:
+    # TODO update usage of this here
+    """Add missing descriptions to NWB file based on the technical white paper."""
+
+    if nwbfile.experiment_description is None:
+        nwbfile.experiment_description = (
+            "The Visual Behavior Neuropixels project utilized the "
+            "Allen Brain Observatory platform for in vivo Neuropixels "
+            "recordings to collect a large-scale, highly standardized "
+            "dataset consisting of recordings of neural activity "
+            "in mice performing a visually guided task. The Visual "
+            "Behavior dataset is built upon a change detection "
+            "behavioral task. Briefly, in this go/no-go task, mice "
+            "are presented with a continuous series of briefly "
+            "presented stimuli and they earn water rewards by correctly "
+            "reporting when the identity of the image changes. "
+            "This dataset includes recordings using Neuropixels 1.0 "
+            "probes. We inserted up to 6 probes simultaneously in "
+            "each mouse for up to two consecutive recording days."
+        )
+
+    # Add units table description
+    if hasattr(nwbfile, 'units') and nwbfile.units is not None:
+        nwbfile.units.fields['description'] = (
+            "Units identified from spike sorting using Kilosort2. "
+            "Note that unlike the data from the Visual Coding Neuropixels pipeline, "
+            "for which potential noise units were filtered from the released "
+            "dataset, we have elected to return all units for the Visual Behavior "
+            "Neuropixels dataset."
+        )
+
+    return nwbfile
 
 def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path: Path, probe_filenames: list[Path] = None) -> None:
     """ Convert a Visual Behavior Ephys NWB HDF5 file and associated probe files to NWB Zarr format."""

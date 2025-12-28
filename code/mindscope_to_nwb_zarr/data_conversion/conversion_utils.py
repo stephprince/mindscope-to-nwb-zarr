@@ -59,7 +59,7 @@ def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF
         return NWBHDF5IO(str(path), mode)
 
 
-def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> NWBFile:
+def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> None:
     """Convert Visual Behavior stimulus_template from StimulusTemplate to Images container.
 
     In the original HDF5 versions of Visual Behavior data, stimulus template images
@@ -72,12 +72,18 @@ def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> NWB
     IndexSeries to link to this Images container.
 
     Visual Behavior Ephys files use StimulusTemplate for stimulus templates, e.g.,
-    "Natural_Images_Lum_Matched_set_ophys_G_2019.05.26" without matching presentation series.
+    "gratings", "Natural_Images_Lum_Matched_set_ophys_G_2019.05.26" that may or may not have
+    matching presentation series.
 
     Visual Behavior 2p files use StimulusTemplate for stimulus templates, e.g.,
     "grating", "Natural_Images_Lum_Matched_set_training_2017.07.14" with additional
     presentation series, e.g., "spontaneous_stimulus" (TimeIntervals),
     "static_gratings" (TimeIntervals).
+
+    Args:
+        nwbfile: The NWBFile object to convert.
+    Returns:
+        None, the NWBFile object is modified in place.
     """
     try:
         WarpedStimulusTemplateImage = get_class("WarpedStimulusTemplateImage", "ndx-aibs-stimulus-template")
@@ -198,7 +204,6 @@ def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> NWB
                     f"IndexSeries '{k}' missing 'indexed_timeseries' field"
                 )
 
-    return nwbfile
 
 def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NWBFile:
     """ Combine LFP and CSD data from a probe NWB file into the main NWB file."""
@@ -267,32 +272,18 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     
     return base_nwbfile
 
-def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
-    """Add missing descriptions to NWB file based on the technical white paper."""
 
-    if nwbfile.experiment_description is None:
-        nwbfile.experiment_description = ("The Visual Behavior Neuropixels project utilized the "
-                                        "Allen Brain Observatory platform for in vivo Neuropixels "
-                                        "recordings to collect a large-scale, highly standardized "
-                                        "dataset consisting of recordings of neural activity "
-                                        "in mice performing a visually guided task. The Visual "
-                                        "Behavior dataset is built upon a change detection "
-                                        "behavioral task. Briefly, in this go/no-go task, mice "
-                                        "are presented with a continuous series of briefly "
-                                        "presented stimuli and they earn water rewards by correctly "
-                                        "reporting when the identity of the image changes. "
-                                        "This dataset includes recordings using Neuropixels 1.0 "
-                                        "probes. We inserted up to 6 probes simultaneously in "
-                                        "each mouse for up to two consecutive recording days.")
+def add_missing_descriptions(nwbfile: NWBFile) -> None:
+    """Add missing descriptions to NWB file based on the technical white paper.
+    
+    Args:
+        nwbfile: The NWBFile object to add descriptions to.
+    Returns:
+        None, the NWBFile object is modified in place.
+    """
 
     # Add units table description
     if hasattr(nwbfile, 'units') and nwbfile.units is not None:
-        nwbfile.units.fields['description'] = ("Units identified from spike sorting using Kilosort2. "
-                                     "Note that unlike the data from the Visual Coding Neuropixels pipeline, "
-                                     "for which potential noise units were filtered from the released "
-                                     "dataset, we have elected to return all units for the Visual Behavior "
-                                     "Neuropixels dataset.")
-
         # Add descriptions for unit metrics columns from technical white papers and documentation
         # See https://allensdk.readthedocs.io/en/latest/_static/examples/nb/visual_behavior_neuropixels_quality_metrics.html
         # See https://brainmapportal-live-4cc80a57cd6e400d854-f7fdcae.divio-media.net/filer_public/80/75/8075a100-ca64-429a-b39a-569121b612b2/neuropixels_visual_coding_-_white_paper_v10.pdf
@@ -374,7 +365,6 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
                  nwbfile.trials[col_name].description == "no description")):
                 nwbfile.trials[col_name].fields['description'] = description
 
-
     # Add descriptions for stimulus presentations table (stored in intervals)
     if hasattr(nwbfile, 'intervals') and nwbfile.intervals is not None:
         # Check for grating_presentations or other stimulus presentation intervals
@@ -403,8 +393,6 @@ def add_missing_descriptions(nwbfile: NWBFile) -> NWBFile:
                         if (stimulus_table[col_name].description is None or
                             stimulus_table[col_name].description.lower() == "no description"):
                             stimulus_table[col_name].fields['description'] = description
-
-    return nwbfile
 
 
 def fix_vector_index_dtypes(nwbfile: NWBFile) -> NWBFile:

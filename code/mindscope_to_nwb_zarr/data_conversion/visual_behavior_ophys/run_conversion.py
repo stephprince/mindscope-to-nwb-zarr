@@ -6,6 +6,7 @@ from pynwb import NWBFile, load_namespaces
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
+    add_missing_descriptions,
     convert_visual_behavior_stimulus_template_to_images,
     open_visual_behavior_nwb_hdf5,
 )
@@ -35,7 +36,10 @@ def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Pat
         read_nwbfile.session_id = read_nwbfile.identifier
 
         # Change stimulus_template to Image objects in Images container
-        read_nwbfile = convert_visual_behavior_stimulus_template_to_images(read_nwbfile)
+        convert_visual_behavior_stimulus_template_to_images(read_nwbfile)
+
+        # Add missing experiment description field (from technical white paper)
+        add_missing_descriptions(read_nwbfile)
 
         print(f"Exporting to Zarr file {zarr_path} ...")
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
@@ -175,7 +179,10 @@ def combine_multiplane_nwb_to_zarr(
     combined_nwbfile.session_id = combined_nwbfile.identifier
 
     # Change stimulus_template to Image objects in Images container
-    combined_nwbfile = convert_visual_behavior_stimulus_template_to_images(combined_nwbfile)
+    convert_visual_behavior_stimulus_template_to_images(combined_nwbfile)
+
+    # Add missing experiment description field (from technical white paper)
+    add_missing_descriptions(combined_nwbfile)
 
     # Export the combined NWB file to Zarr (link_data=False copies all data)
     print(f"Exporting to Zarr file {zarr_path} ...")
@@ -329,12 +336,10 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
     # Confirm there is only one input file in the input directory
     input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
     if len(input_files) != 1:
-        # TODO: uncomment after testing
-        pass
-        # raise RuntimeError(
-        #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
-        #     f"found {len(input_files)} files."
-        # )
+        raise RuntimeError(
+            f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
+            f"found {len(input_files)} files."
+        )
     input_file = input_files[0]
 
     # Determine session type and get list of additional files to download
