@@ -1,4 +1,4 @@
-# hash:sha256:0bfd64f7d8ac76fbc8907eb6f77169e65c6df2e15dbbbcbc64e61a9e50e138f3
+# hash:sha256:c861da6fcc751555e7516e5ba29bb36ac316147b42218fc39a27d42645125ac2
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:24.5.0-0-python3.12.4-ubuntu22.04
 
@@ -14,6 +14,7 @@ RUN --mount=type=secret,id=git-access-token \
     hdmf==4.2.0 \
     nwbinspector==0.6.5 \
     pynwb==3.1.3 \
+    quilt3==7.1.0 \
     -e git+https://github.com/hdmf-dev/hdmf-zarr@a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b#egg=hdmf-zarr
 
 ADD "https://github.com/coder/code-server/releases/download/v4.100.3/code-server-4.100.3-linux-amd64.tar.gz" /.code-server/code-server.tar.gz
