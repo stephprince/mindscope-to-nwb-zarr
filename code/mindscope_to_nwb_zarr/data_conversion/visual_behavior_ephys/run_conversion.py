@@ -6,7 +6,7 @@ from hdmf_zarr.nwb import NWBZarrIO
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
-    convert_stimulus_template_to_images,
+    convert_visual_behavior_stimulus_template_to_images,
     add_missing_descriptions,
     inspect_zarr_file,
     open_visual_behavior_nwb_hdf5,
@@ -43,7 +43,7 @@ def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_pa
                 nwbfile = combine_probe_file_info(nwbfile, probe_nwbfile)
 
             # change stimulus_template to Image objects in Images container
-            nwbfile = convert_stimulus_template_to_images(nwbfile)
+            nwbfile = convert_visual_behavior_stimulus_template_to_images(nwbfile)
 
             # add missing experiment description field (from technical white paper)
             nwbfile = add_missing_descriptions(nwbfile)
