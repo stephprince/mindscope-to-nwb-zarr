@@ -87,11 +87,11 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, api_host: Opti
     with aind_metadata_service_client.ApiClient(configuration) as api_client:
         api_instance = aind_metadata_service_client.DefaultApi(api_client)
 
-        # there are known validation issues with old procedures data, always get raw response
-        # TODO - what will happen if no response, keep track of sessions with missing info
+        # there are known validation issues with old procedures data, try to get the content here but accept the raw response if needed
+        raw_data = None
         try:
             procedures_response = api_instance.get_procedures(subject_id=subject_id)
-            return procedures_response
+            procedures = Procedures(**procedures_response)
         except ApiException as e:
             # If validation fails, try to get the raw response
             warnings.warn(f"Warning: Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
@@ -105,5 +105,6 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, api_host: Opti
 
             # Create Procedures from the fixed data
             procedures = Procedures(**raw_data)
-            return procedures
+
+        return procedures
         
