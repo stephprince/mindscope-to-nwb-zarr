@@ -1,6 +1,7 @@
 """Generates an example JSON file for visual behavior ephys subject"""
 
 import pandas as pd
+import warnings
 from pynwb import NWBFile
 from typing import Optional
 
@@ -71,6 +72,7 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
             # Fix null maternal_genotype issue
             if raw_data.get('subject_details', {}).get('breeding_info', {}).get('maternal_genotype') is None:
                 raw_data['subject_details']['breeding_info']['maternal_genotype'] = ""
+                warnings.warn(f"Fixed null maternal genotype for subject {subject_id} in metadata service response. Setting to empty string.")
 
             # Create Subject from the fixed data
             subject = Subject(**raw_data)

@@ -80,8 +80,10 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
             # Fix null maternal_genotype and/or paternal_genotype issue
             if raw_data.get('subject_details', {}).get('breeding_info', {}).get('maternal_genotype') is None:
                 raw_data['subject_details']['breeding_info']['maternal_genotype'] = ""
+                warnings.warn(f"Fixed null maternal genotype for subject {subject_id} in metadata service response. Setting to empty string.")
             if raw_data.get('subject_details', {}).get('breeding_info', {}).get('paternal_genotype') is None:
                 raw_data['subject_details']['breeding_info']['paternal_genotype'] = ""
+                warnings.warn(f"Fixed null paternal genotype for subject {subject_id} in metadata service response. Setting to empty string.")
 
             # Create Subject from the fixed data
             subject = Subject(**raw_data)
