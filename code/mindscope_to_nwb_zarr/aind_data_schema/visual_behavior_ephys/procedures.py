@@ -84,7 +84,7 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: 
         # TODO - what will happen if no response, keep track of sessions with missing info
         try:
             procedures_response = api_instance.get_procedures(subject_id=subject_id)
-            return procedures_response
+            procedures = Procedures(**procedures_response)
         except ApiException as e:
             # If validation fails, try to get the raw response
             warnings.warn(f"Warning: Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
@@ -98,5 +98,5 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: 
 
             # Create Procedures from the fixed data
             procedures = Procedures(**raw_data)
-            return procedures
+        return procedures
         
