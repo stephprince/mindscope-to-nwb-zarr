@@ -85,3 +85,6 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
 - Convert and add raw highpass data to the NWB file from the S3 bucket.
 - Describe the "stimulus" `ProcessingModule` and the "timestamps" `TimeSeries` more clearly, and consider renaming/reorganizing the time series to link more clearly to the stimulus presentations.
 - Remove the "imp" column from the electrodes table which contains all NaN values.
+
+### AIND Metadata Extraction 
+- Look into the subject DOB, age, and related procedures for the Visual Coding Neuropixels dataset. For example, looking at specimen ID 699733581 / mouse ID 386129, from the subject metadata we get a DOB of 2018-03-02 and from the procedures metadata we get a perfusion recorded on 2018-06-28. However, the NWB file/allensdk metadata says the data acquisition date is 2019-01-19T08:54:18Z and the age is 118D (which matches the date of the perfusion, but does not match the data of data acquisition for that animal’s supposed DOB). 
