@@ -6,6 +6,10 @@
 			"mount": "visual-coding-ophys"
 		},
 		{
+			"id": "95dc955b-e621-4be6-a5c2-f0500e767b73",
+			"mount": "visual-coding-ephys"
+		},
+		{
 			"id": "a63a5366-59e9-4ace-9b1d-d3d0b72a264a",
 			"mount": "allen-brain-observatory"
 		},
