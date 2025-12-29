@@ -19,9 +19,10 @@ from datetime import datetime, timezone, timedelta
 from pynwb import NWBFile
 
 
-def get_subject_id(nwbfile: NWBFile, session_info: pd.DataFrame) -> str:
+def get_subject_id(nwbfile: NWBFile, session_info: pd.DataFrame = None) -> str:
     """Get the subject ID from the NWB file, cross-checked with the session info. e.g., "457841"."""
-    assert session_info['mouse_id'].values[0] == int(nwbfile.subject.subject_id), "subject_id mismatch occurred"
+    if session_info is not None:
+        assert session_info['mouse_id'].values[0] == int(nwbfile.subject.subject_id), "subject_id mismatch occurred"
     return nwbfile.subject.subject_id
 
 def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
@@ -163,7 +164,8 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
                     notes=None,
                 )
             )
-    assert len(set(all_targeted_structures)) == len(all_targeted_structures), "Duplicate targeted structures found across probes"
+    if len(set(all_targeted_structures)) != len(all_targeted_structures):
+        warnings.warn(f"Multiple probes targeting same brain structure found: {all_targeted_structures}")
 
     return probe_configs
 

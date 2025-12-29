@@ -7,7 +7,8 @@ from pynwb import read_nwb
 
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.data_description import generate_data_description
-from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import generate_subject
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import fetch_subject_from_aind_metadata_service
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.procedures import fetch_procedures_from_aind_metadata_service
 
 
 def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
@@ -35,7 +36,7 @@ def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
     return session_info
 
 
-def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: Path, output_dir: Path):
+def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: Path, output_dir: Path, subject_mapping_path: Path) -> None:
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -49,6 +50,8 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
         Path to directory containing metadata CSV files
     output_dir : Path
         Path to directory to save output JSON files
+    subject_mapping_path : Path
+        Path to JSON file containing subject ID mapping
     """
     # Load allen sdk session info
     session_info = load_session_info(session_id, cache_dir)
@@ -62,12 +65,12 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)
-    subject = generate_subject(nwbfile, session_info)
+    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info, subject_mapping_path=subject_mapping_path)
     acquisition = generate_acquisition(nwbfile, session_info)
-    #procedures = generate_procedures(nwbfile, session_info) # TODO - add procedures generation
+    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, subject_mapping_path=subject_mapping_path)
     #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
-    metadata_models = [data_description, subject, acquisition]
-
+    metadata_models = [data_description, subject, acquisition, procedures]  # add instrument when available
+    
     # Save the metadata files
     Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)
     for model in metadata_models:
@@ -81,11 +84,12 @@ if __name__ == "__main__":
     cache_dir = repo_root / ".cache/visual_coding_ephys_cache_dir/"
     output_dir = repo_root / "data/schema/ephys_visual_coding/"
     output_dir.mkdir(parents=True, exist_ok=True)
+    subject_mapping_path = repo_root / "data/visual_coding_ephys_subject_mapping.json"
 
     # Define sessions to process
     # TODO - create list of all session ids and corresponding nwb file paths
     sessions = [
-        (766640955, repo_root / "data/sub-744912845_ses-766640955.nwb"),
+        (715093703, repo_root / "data/allen-brain-observatory/visual-coding-neuropixels/ecephys-cache/session_715093703/session_715093703.nwb"),
     ]
 
     # Process each session
@@ -94,6 +98,7 @@ if __name__ == "__main__":
         generate_session_metadata(nwb_file_path=nwb_file_path,
                                   session_id=session_id,
                                   cache_dir=cache_dir,
-                                  output_dir=output_dir)
+                                  output_dir=output_dir,
+                                  subject_mapping_path=subject_mapping_path)
 
     print("\nDone!")
