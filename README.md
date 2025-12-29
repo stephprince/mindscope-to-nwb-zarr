@@ -79,5 +79,9 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
 
 
 ### Visual Coding Ephys
+- The ndx-aibs-ecephys extension is 
 - Set an appropriate "strain" value for the `Subject` object instead of using the placeholder "unknown".
 - Add stimulus template data for natural scenes, natural movies, and natural movie shuffled stimuli
+- Convert and add raw highpass data to the NWB file from the S3 bucket.
+- Describe the "stimulus" `ProcessingModule` and the "timestamps" `TimeSeries` more clearly, and consider renaming/reorganizing the time series to link more clearly to the stimulus presentations.
+- Remove the "imp" column from the electrodes table which contains all NaN values.

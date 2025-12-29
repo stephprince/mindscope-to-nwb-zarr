@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 from hdmf.common.table import VectorIndex
 from hdmf.data_utils import GenericDataChunkIterator
+from hdmf_zarr import ZarrDataIO
 from hdmf_zarr.nwb import NWBZarrIO
 from nwbinspector import (
     inspect_nwbfile_object,
@@ -234,6 +235,25 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     old_electrical_series = lfp_container[f'{acquisition_name}_data']
     old_electrical_series.reset_parent()
 
+    # Use an iterator to read LFP data in chunks so we don't have to load the
+    # entire dataset into memory at once
+    data_iterator = H5DatasetDataChunkIterator(
+        dataset=old_electrical_series.data,
+        chunk_shape=old_electrical_series.data.chunks,
+        buffer_gb=8,
+    )
+    # Rechunk LFP data to optimize for cloud computing and reduce number of chunks.
+    # Previously there were about 20K chunks, each about 85 KB large, which is very
+    # suboptimal for both read and write.
+    # Code Ocean limits the rate of COPY requests per S3 prefix so we cannot have
+    # too many chunks per Zarr array or else we get a 503 Slow Down error from S3.
+    # This rechunks the LFP data to about 325 chunks, each about 10 MB large after
+    # compression.
+    old_electrical_series.fields['data'] = ZarrDataIO(
+        data=data_iterator,
+        chunks=(400_000, 8),
+    )
+
     # Create new electrode table region with updated indices
     old_electrodes = old_electrical_series.electrodes
     new_electrode_indices = [electrode_mapping[idx] for idx in old_electrodes.data]
@@ -267,7 +287,7 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
             )
         )
     
-    base_nwbfile.processing['ecephys'].add(new_lfp)
+    base_nwbfile.add_acquisition(new_lfp)
     base_nwbfile.processing['ecephys'].add(csd)
     
     return base_nwbfile
