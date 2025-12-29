@@ -8,6 +8,7 @@ metadata/metadata.yml
 data/*
 resources/*
 *.nwb.zarr
+*.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
