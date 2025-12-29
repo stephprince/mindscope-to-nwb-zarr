@@ -23,7 +23,6 @@ import quilt3 as q3
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
     add_missing_descriptions,
-    fix_ecephys_sampling_rate_dtypes,
     fix_vector_index_dtypes,
 )
 
@@ -165,10 +164,6 @@ def convert_session_to_zarr(
             print("Adding missing descriptions ...")
             add_missing_descriptions(nwbfile)
 
-            # Fix sampling_rate dtypes to be float64
-            print("Fixing sampling_rate dtypes ...")
-            fix_ecephys_sampling_rate_dtypes(nwbfile)
-
             # Fix VectorIndex dtypes to be uint64
             print("Fixing VectorIndex dtypes ...")
             fix_vector_index_dtypes(nwbfile)
@@ -202,7 +197,7 @@ def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         print(f"No NWB files found in {INPUT_FILE_DIR}")
         return None
     elif len(input_files) > 1:
-        # TODO uncomment after testing
+        # Placeholder NWB HDF5 files for Visual Coding Ophys sessions to indicate which DANDI assets to download for conversion to Zarr format. uncomment after testing
         pass
         # raise RuntimeError(
         #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
