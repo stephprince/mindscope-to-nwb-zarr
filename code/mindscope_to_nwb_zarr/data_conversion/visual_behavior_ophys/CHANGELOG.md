@@ -4,6 +4,8 @@
 
 The source HDF5-based NWB files for Visual Behavior - 2p data can be found in the S3 bucket `s3://visual-behavior-ophys-data` under the paths `visual-behavior-ophys/behavior_ophys_experiments` and `visual-behavior-ophys/behavior_sessions`. The experiment metadata in `visual-behavior-ophys/project_metadata/behavior_session_table.csv` was used to obtain additional metadata for the conversion.
 
+There are 4782 sessions in total. Sessions can be behavior only, single-plane ophys, or multiscope ophys. Behavior-only sessions and single-plane ophys sessions each have one NWB HDF5 file. Multiscope ophys sessions have up to 8 NWB HDF5 files (one per imaging plane).
+
 ### Changes made when migrating from HDF5 to Zarr
 
 - Updated to use latest NWB schema version 2.9.0 from version 2.6.0-alpha.
@@ -15,3 +17,4 @@ The source HDF5-based NWB files for Visual Behavior - 2p data can be found in th
 - Converted `StimulusTemplate` stimulus templates which had `NaN` timestamps to be stored as `WarpedStimulusTemplateImage` objects in an `Images` container to follow best practices for storing stimulus template data. 
   - Added unwarped images as `GrayscaleImage` objects in a separate `Images` container.
   - Adjusted the corresponding stimulus presentation `IndexSeries` to reference the `Images` container containing `WarpedStimulusTemplateImage` objects.
+- Added missing description fields to several objects in the file based on information from the Visual Behavior technical white paper.
