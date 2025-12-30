@@ -16,9 +16,10 @@ Session structure:
 from pathlib import Path
 import warnings
 
-from pynwb import get_class, load_namespaces, NWBHDF5IO, register_map
 from hdmf.build import ObjectMapper
 from hdmf_zarr.nwb import NWBZarrIO
+import pandas as pd
+from pynwb import get_class, load_namespaces, NWBHDF5IO, register_map
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
@@ -28,10 +29,11 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ephys-placeholders"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ephys-inputs"
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"
+S3_SESSIONS_CSV_PATH = f"{S3_ECEPHYS_CACHE_PATH}/sessions.csv"
 
 # Load NWB extensions used by Visual Coding Ephys files
 load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
@@ -203,39 +205,49 @@ def convert_session_to_zarr(
                 probe_io.close()
 
 
-def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
+def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
     """Convert NWB HDF5 file to Zarr.
 
-    Reads the input placeholder file from INPUT_FILE_DIR, downloads the actual
-    NWB files from S3, and converts to Zarr format.
+    Reads the input file from INPUT_FILE_DIR (a file named with a row index),
+    uses that index to look up the session in the sessions.csv table from S3,
+    downloads the actual NWB files from S3, and converts to Zarr format.
 
     Args:
         results_dir: Directory to save the converted Zarr file.
         scratch_dir: Directory to download NWB files to.
 
     Returns:
-        Path to the converted Zarr file, or None if no input files found.
+        Path to the converted Zarr file.
     """
-    # Confirm there is only one input file in the input directory
-    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
-    if not input_files:
-        print(f"No NWB files found in {INPUT_FILE_DIR}")
-        return None
-    elif len(input_files) > 1:
-        # Placeholder NWB HDF5 files for Visual Coding Ophys sessions to indicate which DANDI assets to download for conversion to Zarr format. uncomment after testing
-        pass
-        # raise RuntimeError(
-        #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
-        #     f"found {len(input_files)} files."
-        # )
+    # Confirm there is exactly one input file in the input directory
+    input_files = list(INPUT_FILE_DIR.iterdir())
+    if len(input_files) != 1:
+        raise RuntimeError(
+            f"Expected exactly one input file in {INPUT_FILE_DIR}, "
+            f"found {len(input_files)} files."
+        )
     input_file = input_files[0]
 
-    # Parse session ID from filename (pattern: session_{session_id}.nwb)
-    if not input_file.stem.startswith("session_"):
-        raise ValueError(f"Unexpected filename format: {input_file.name}. Expected session_{{session_id}}.nwb")
+    # Parse row index from filename
+    row_index = int(input_file.name)
+    print(f"Processing row index {row_index} ...")
 
-    session_id = int(input_file.stem.replace("session_", ""))
-    print(f"Processing session {session_id} ...")
+    # Download sessions.csv from S3
+    print("Downloading sessions.csv from S3 ...")
+    b = q3.Bucket(S3_BUCKET)
+    csv_download_path = scratch_dir / "sessions.csv"
+    b.fetch(S3_SESSIONS_CSV_PATH, csv_download_path.as_posix())
+    sessions_df = pd.read_csv(csv_download_path)
+
+    # Get the row at the specified index
+    if row_index < 0 or row_index >= len(sessions_df):
+        raise RuntimeError(
+            f"Row index {row_index} out of range. "
+            f"Table has {len(sessions_df)} rows (0-{len(sessions_df)-1})."
+        )
+    session_row = sessions_df.iloc[row_index]
+    session_id = int(session_row['id'])
+    print(f"Session ID: {session_id}")
 
     # Download session files from S3
     base_file_path, probe_file_paths = download_visual_coding_ephys_session_files(
