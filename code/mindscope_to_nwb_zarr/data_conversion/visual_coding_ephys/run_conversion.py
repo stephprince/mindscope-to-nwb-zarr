@@ -27,7 +27,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ephys"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ephys-placeholders"
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"

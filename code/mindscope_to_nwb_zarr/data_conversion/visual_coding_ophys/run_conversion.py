@@ -10,7 +10,7 @@ import pandas as pd
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys-placeholders"
 
 OPHYS_EXPERIMENT_METADATA_FILE = root_dir / "reference" / "visual_coding_2p_ophys_experiments.json"
 DANDISET_ID = "000728"
