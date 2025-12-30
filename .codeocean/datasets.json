@@ -8,6 +8,14 @@
 		{
 			"id": "7fd81399-7941-47c9-87f0-debc1bb94e74",
 			"mount": "visual-behavior-ophys-inputs"
+		},
+		{
+			"id": "ce969f4d-2762-48b1-b246-80e45460e21e",
+			"mount": "visual-coding-ephys-inputs"
+		},
+		{
+			"id": "cfea6dbb-6f78-4ea4-a065-c05e57deae54",
+			"mount": "visual-behavior-ephys-inputs"
 		}
 	]
 }
