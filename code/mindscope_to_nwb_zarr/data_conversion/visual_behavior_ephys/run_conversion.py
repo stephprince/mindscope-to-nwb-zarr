@@ -1,19 +1,70 @@
-import pandas as pd
+"""Visual Behavior Neuropixels (ephys) NWB HDF5 to Zarr conversion.
+
+This module converts Visual Behavior Neuropixels NWB HDF5 files to Zarr format.
+Each session has a base NWB file and multiple probe files that are combined
+into a single Zarr output file.
+
+Source data is located in S3 at:
+    s3://visual-behavior-neuropixels-data/visual-behavior-neuropixels/
+
+Session structure:
+    behavior_ecephys_sessions/{ecephys_session_id}/
+        ecephys_session_{ecephys_session_id}.nwb  - Base session file
+        probe_{probe_id}.nwb                       - Probe data (one per probe)
+
+    behavior_only_sessions/{behavior_session_id}/
+        behavior_session_{behavior_session_id}.nwb - Behavior-only session file
+"""
 
 from pathlib import Path
-from pynwb import load_namespaces, NWBFile
+import warnings
+
+from pynwb import NWBFile, NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
+import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     combine_probe_file_info,
     convert_visual_behavior_stimulus_template_to_images,
     add_missing_descriptions,
-    inspect_zarr_file,
-    open_visual_behavior_nwb_hdf5,
+    fix_vector_index_dtypes,
 )
 
+root_dir = Path(__file__).parent.parent.parent.parent
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-neuropixels-placeholders"
+
+S3_BUCKET = "s3://visual-behavior-neuropixels-data"
+S3_DATA_PATH = "visual-behavior-neuropixels"
+
+# Load NWB extensions used by Visual Behavior Ephys files
+load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
+load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
+
+
+def _open_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
+    """Open a Visual Behavior Ephys NWB HDF5 file, suppressing cached namespace warnings.
+
+    ndx-aibs-stimulus-template, ndx-ellipse-eye-tracking, and ndx-aibs-ecephys should be
+    both cached in the file and loaded via load_namespaces prior to calling this function.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=(
+                r"Ignoring the following cached namespace[\s\S]*"
+                r"ndx-aibs-stimulus-template[\s\S]*"
+                r"ndx-ellipse-eye-tracking[\s\S]*"
+                r"ndx-aibs-ecephys"
+            ),
+            category=UserWarning
+        )
+        if manager is not None:
+            return NWBHDF5IO(str(path), mode, manager=manager)
+        return NWBHDF5IO(str(path), mode)
+
+
 def add_missing_visual_behavior_ephys_descriptions(nwbfile: NWBFile) -> None:
-    # TODO update usage of this here
     """Add missing descriptions to NWB file based on the technical white paper."""
 
     if nwbfile.experiment_description is None:
@@ -45,184 +96,199 @@ def add_missing_visual_behavior_ephys_descriptions(nwbfile: NWBFile) -> None:
 
     return nwbfile
 
-def convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename: Path, zarr_path: Path, probe_filenames: list[Path] = None) -> None:
-    """ Convert a Visual Behavior Ephys NWB HDF5 file and associated probe files to NWB Zarr format."""
 
-    # Load updated extensions
-    root_dir = Path(__file__).parent.parent.parent.parent
-    load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-    load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
-    load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
+def download_visual_behavior_ephys_session_files(
+    session_id: int,
+    session_type: str,
+    scratch_dir: Path
+) -> tuple[Path, list[Path]]:
+    """Download Visual Behavior Ephys NWB files from S3.
 
-    if probe_filenames is None:
-        probe_filenames = []
+    Downloads the base session NWB file and all associated probe files
+    for a given session ID.
 
-    # Log probe files found
-    print(f"\nConverting {hdf5_base_filename.name}")
-    print(f"  Found {len(probe_filenames)} probe files:")
-    for pf in probe_filenames:
+    Args:
+        session_id: The session ID to download files for.
+        session_type: Either 'behavior_ephys' or 'behavior'.
+        scratch_dir: Directory to download the files to.
+
+    Returns:
+        Tuple of (base_file_path, list of probe_file_paths)
+    """
+    b = q3.Bucket(S3_BUCKET)
+
+    if session_type == 'behavior_ephys':
+        session_dir = f"{S3_DATA_PATH}/behavior_ecephys_sessions/{session_id}"
+        base_filename = f"ecephys_session_{session_id}.nwb"
+    elif session_type == 'behavior':
+        session_dir = f"{S3_DATA_PATH}/behavior_only_sessions/{session_id}"
+        base_filename = f"behavior_session_{session_id}.nwb"
+    else:
+        raise ValueError(f"Unknown session_type: {session_type}. Expected 'behavior_ephys' or 'behavior'.")
+
+    # List all files in the session directory
+    print(f"Listing files in {session_dir}/ ...")
+    dir_contents = b.ls(f"{session_dir}/")
+
+    if not dir_contents or len(dir_contents) < 2:
+        raise RuntimeError(f"No files found in S3 at {session_dir}/")
+
+    # Filter for NWB files
+    nwb_files = [
+        f['Key'] for f in dir_contents[1]
+        if f.get('IsLatest', True) and f['Key'].endswith('.nwb')
+    ]
+
+    if not nwb_files:
+        raise RuntimeError(f"No NWB files found in S3 at {session_dir}/")
+
+    # Download base session file
+    base_s3_path = f"{session_dir}/{base_filename}"
+    if base_s3_path not in nwb_files:
+        raise RuntimeError(f"Base session file not found in S3: {base_s3_path}")
+
+    base_download_path = scratch_dir / base_filename
+    if not base_download_path.exists():  # TODO remove after testing
+        print(f"Downloading base session file to {base_download_path} ...")
+        b.fetch(base_s3_path, base_download_path.as_posix())
+
+    # Download probe files (only for behavior_ephys sessions)
+    probe_download_paths = []
+    if session_type == 'behavior_ephys':
+        probe_files = [f for f in nwb_files if 'probe_' in Path(f).name and f != base_s3_path]
+
+        for probe_s3_path in sorted(probe_files):
+            probe_filename = Path(probe_s3_path).name
+            probe_download_path = scratch_dir / probe_filename
+            if not probe_download_path.exists():  # TODO remove after testing
+                print(f"Downloading probe file to {probe_download_path} ...")
+                b.fetch(probe_s3_path, probe_download_path.as_posix())
+            probe_download_paths.append(probe_download_path)
+
+    return base_download_path, probe_download_paths
+
+
+def convert_session_to_zarr(
+    base_hdf5_path: Path,
+    probe_hdf5_paths: list[Path],
+    zarr_path: Path,
+) -> None:
+    """Convert a Visual Behavior Ephys session to Zarr format.
+
+    Combines the base session NWB file with all probe files into a single
+    Zarr output file.
+
+    Args:
+        base_hdf5_path: Path to the base session NWB HDF5 file.
+        probe_hdf5_paths: Paths to probe NWB HDF5 files.
+        zarr_path: Path to output Zarr file.
+    """
+    print(f"Reading base NWB file {base_hdf5_path} ...")
+    print(f"  Found {len(probe_hdf5_paths)} probe files:")
+    for pf in probe_hdf5_paths:
         print(f"    - {pf.name}")
 
-    with open_visual_behavior_nwb_hdf5(hdf5_base_filename, 'r') as read_io:
+    with _open_nwb_hdf5(base_hdf5_path, 'r') as read_io:
         nwbfile = read_io.read()
-        nwbfile.subject.strain = "unknown"  # TODO set appropriate strain value
+
+        # Set strain to unknown (required field)
+        # TODO set to actual strain if known
+        nwbfile.subject.strain = "unknown"
         nwbfile.set_modified()
 
-        # pull additional data from each of the probe files and add to the main nwbfile
-        io_objects = [open_visual_behavior_nwb_hdf5(f, 'r', manager=read_io.manager) for f in probe_filenames]
+        # Open and read all probe files
+        probe_ios = [_open_nwb_hdf5(f, 'r', manager=read_io.manager) for f in probe_hdf5_paths]
         try:
-            for probe_io in io_objects:
+            # Combine LFP and CSD data from each probe file
+            for probe_io in probe_ios:
+                print(f"Combining probe data from {probe_io.source} ...")
                 probe_nwbfile = probe_io.read()
                 nwbfile = combine_probe_file_info(nwbfile, probe_nwbfile)
 
-            # change stimulus_template to Image objects in Images container
-            nwbfile = convert_visual_behavior_stimulus_template_to_images(nwbfile)
+            # Convert stimulus templates to Images containers
+            print("Converting stimulus templates to Images containers ...")
+            convert_visual_behavior_stimulus_template_to_images(nwbfile)
 
-            # add missing experiment description field (from technical white paper)
-            nwbfile = add_missing_descriptions(nwbfile)
+            # Add missing description fields (from technical white paper)
+            print("Adding missing descriptions ...")
+            add_missing_descriptions(nwbfile)
+            add_missing_visual_behavior_ephys_descriptions(nwbfile)
 
-            # export to zarr
-            with NWBZarrIO(zarr_path, mode='w') as export_io:
+            # Fix VectorIndex dtypes to be uint64
+            print("Fixing VectorIndex dtypes ...")
+            fix_vector_index_dtypes(nwbfile)
+
+            # Export to Zarr
+            print(f"Exporting to Zarr file {zarr_path} ...")
+            with NWBZarrIO(str(zarr_path), mode='w') as export_io:
                 export_io.export(src_io=read_io, nwbfile=nwbfile, write_args=dict(link_data=False))
         finally:
-            # close IO objects for probe files
-            for probe_io in io_objects:
+            # Close all probe IO objects
+            for probe_io in probe_ios:
                 probe_io.close()
-    
-    # inspect and validate the resulting zarr file
-    inspect_zarr_file(zarr_path, 
-                      inspector_report_path=zarr_path.with_suffix('.inspector_report.txt'))
 
-def iterate_visual_behavior_ephys_sessions(data_dir: Path):
-    """Iterate through visual behavior ephys metadata and yield NWB file paths.
 
-    NWB files follow naming patterns:
-    - Behavior only: behavior_session_{behavior_session_id}.nwb
-    - Behavior-ephys: ecephys_session_{ecephys_session_id}.nwb (base file)
-                      + probe_{probe_id}.nwb files (one per probe)
+def convert_visual_behavior_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
+    """Convert NWB HDF5 file to Zarr.
 
-    For ephys sessions, yields session_info dict with nwb_path as the base file
-    and probe_paths as a list of probe files.
+    Reads the input placeholder file from INPUT_FILE_DIR, downloads the actual
+    NWB files from S3, and converts to Zarr format.
+
+    Args:
+        results_dir: Directory to save the converted Zarr file.
+        scratch_dir: Directory to download NWB files to.
+
+    Returns:
+        Path to the converted Zarr file, or None if no input files found.
     """
-    # Check for ephys sessions metadata
-    ephys_csv_path = data_dir / "project_metadata" / "ecephys_sessions.csv"
-    behavior_csv_path = data_dir / "project_metadata" / "behavior_sessions.csv"
+    # Confirm there is only one input file in the input directory
+    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
+    if not input_files:
+        print(f"No NWB files found in {INPUT_FILE_DIR}")
+        return None
+    elif len(input_files) > 1:
+        # TODO uncomment after testing
+        pass
+        # raise RuntimeError(
+        #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
+        #     f"found {len(input_files)} files."
+        # )
+    input_file = input_files[0]
 
-    # Process ephys sessions if metadata exists
-    df = pd.read_csv(ephys_csv_path)
-    for _, row in df.iterrows():
-        ecephys_session_id = row['ecephys_session_id']
-        session_dir = data_dir / 'behavior_ecephys_sessions' / str(ecephys_session_id)
+    # Parse session ID and type from filename
+    # Patterns: ecephys_session_{session_id}.nwb or behavior_session_{session_id}.nwb
+    filename_stem = input_file.stem
+    if filename_stem.startswith("ecephys_session_"):
+        session_id = int(filename_stem.replace("ecephys_session_", ""))
+        session_type = "behavior_ephys"
+        zarr_filename = f"ecephys_session_{session_id}.nwb.zarr"
+    elif filename_stem.startswith("behavior_session_"):
+        session_id = int(filename_stem.replace("behavior_session_", ""))
+        session_type = "behavior"
+        zarr_filename = f"behavior_session_{session_id}.nwb.zarr"
+    else:
+        raise ValueError(
+            f"Unexpected filename format: {input_file.name}. "
+            f"Expected ecephys_session_{{session_id}}.nwb or behavior_session_{{session_id}}.nwb"
+        )
 
-        # Base NWB file
-        base_nwb_path = session_dir / f"ecephys_session_{ecephys_session_id}.nwb"
+    print(f"Processing {session_type} session {session_id} ...")
 
-        # Find all probe files for this session
-        probe_paths = []
-        if session_dir.exists():
-            probe_paths = sorted(session_dir.glob("probe_*.nwb"))
+    # Download session files from S3
+    base_file_path, probe_file_paths = download_visual_behavior_ephys_session_files(
+        session_id=session_id,
+        session_type=session_type,
+        scratch_dir=scratch_dir,
+    )
 
-        yield {
-            'session_id': ecephys_session_id,
-            'session_type': 'behavior_ephys',
-            'nwb_path': base_nwb_path,
-            'probe_paths': probe_paths,
-        }
+    # Determine output path
+    zarr_path = results_dir / zarr_filename
 
-    # Process behavior-only sessions if metadata exists
-    df = pd.read_csv(behavior_csv_path)
-    for _, row in df.iterrows():
-        behavior_session_id = row['behavior_session_id']
-        session_dir = data_dir / 'behavior_only_sessions' / str(behavior_session_id)
-        nwb_path = session_dir / f"behavior_session_{behavior_session_id}.nwb"
+    # Convert to Zarr
+    convert_session_to_zarr(
+        base_hdf5_path=base_file_path,
+        probe_hdf5_paths=probe_file_paths,
+        zarr_path=zarr_path,
+    )
 
-        yield {
-            'session_id': behavior_session_id,
-            'session_type': 'behavior',
-            'nwb_path': nwb_path,
-            'probe_paths': [],
-        }
-
-if __name__ == "__main__":
-    # TODO - this section should be replacable within codeocean with extraction directly from attached data assets
-
-    # get all session ids
-    import quilt3 as q3
-    output_dir =  Path(".cache/visual_behavior_neuropixels_cache_dir")
-    b = q3.Bucket("s3://visual-behavior-neuropixels-data")
-    behavior_session_path = f"visual-behavior-neuropixels/project_metadata/behavior_sessions.csv"
-    ephys_session_path = f"visual-behavior-neuropixels/project_metadata/ecephys_sessions.csv"
-
-    convert_ephys_sessions = False
-    convert_behavior_sessions = True
-
-    if convert_ephys_sessions:
-        session_dir = Path(f"data/behavior_ecephys_sessions")
-        b.fetch(ephys_session_path, session_dir / "ecephys_sessions.csv")
-        ephys_session_table = pd.read_csv(session_dir / "ecephys_sessions.csv")
-        ephys_session_ids = ephys_session_table['ecephys_session_id'].astype(str).to_list()
-
-        # download ephys session files
-        for session_id in ephys_session_ids:
-            print(f"\n{'='*60}")
-            print(f"Processing ephys session {session_id}")
-            print(f"{'='*60}")
-
-            # get all relevant filenames for that session
-            s3_bucket_path = f"visual-behavior-neuropixels/behavior_ecephys_sessions/{session_id}/"
-            dir_contents = b.ls(s3_bucket_path)[1]
-            hdf5_files = [f['Key'] for f in dir_contents if f['IsLatest'] == True]
-            
-            # fetch file from s3 bucket
-            local_path = Path(session_dir / session_id)
-            local_path.mkdir(parents=True, exist_ok=True)
-            for f in hdf5_files:
-                if not (local_path / Path(f).name).exists():
-                    b.fetch(f, local_path / Path(f).name)
-
-            # validate base session file exists
-            hdf5_base_filename = local_path / f"ecephys_session_{session_id}.nwb"
-            if not hdf5_base_filename.exists():
-                raise FileNotFoundError(
-                    f"Base session file not found: {hdf5_base_filename.name}. "
-                    f"Available files: {[f.name for f in local_path.glob('*.nwb')]}"
-                )
-
-            # identify and validate probe files
-            probe_filenames = [local_path / Path(f).name for f in hdf5_files if 'probe' in f]
-            zarr_path = Path(f"./ecephys_session_{session_id}.nwb.zarr")
-            convert_visual_behavior_ephys_file_to_zarr(hdf5_base_filename, zarr_path, probe_filenames)
-
-    if convert_behavior_sessions:
-        session_dir = Path(f"data/behavior_only_sessions")
-        b.fetch(behavior_session_path, session_dir / "behavior_sessions.csv")
-        behavior_session_table = pd.read_csv(session_dir / "behavior_sessions.csv")
-        behavior_session_ids = behavior_session_table['behavior_session_id'].sort_values().to_list()
-
-        # download behavior only session files
-        for session_id in behavior_session_ids:
-            print(f"\n{'='*60}")
-            print(f"Processing behavior session {session_id}")
-            print(f"{'='*60}")
-
-            s3_bucket_path = f"visual-behavior-neuropixels/behavior_only_sessions/{session_id}/"
-            dir_contents = b.ls(s3_bucket_path)[1]
-            hdf5_files = [f['Key'] for f in dir_contents if f['IsLatest'] == True]
-            
-            # validate exactly one file for behavior-only sessions
-            if len(hdf5_files) != 1:
-                raise ValueError(
-                    f"Expected exactly one file for behavior-only session {session_id}, "
-                    f"found {len(hdf5_files)} files: {[Path(f).name for f in hdf5_files]}"
-                )
-            base_filename = hdf5_files[0]
-
-            # fetch file from s3 bucket
-            local_path = Path(f"data/behavior_only_sessions/{session_id}/")
-            local_path.mkdir(parents=True, exist_ok=True)
-            if not (local_path / Path(base_filename).name).exists():
-                b.fetch(base_filename, local_path / Path(base_filename).name)
-
-            # convert session (no probe files for behavior-only)
-            zarr_path = Path(f"./behavior_session_{session_id}.nwb.zarr")
-            convert_visual_behavior_ephys_file_to_zarr(local_path / Path(base_filename).name, zarr_path)
+    return zarr_path

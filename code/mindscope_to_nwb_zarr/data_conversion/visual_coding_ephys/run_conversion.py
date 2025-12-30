@@ -33,8 +33,6 @@ S3_BUCKET = "s3://allen-brain-observatory"
 S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"
 
 # Load NWB extensions used by Visual Coding Ephys files
-load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
-load_namespaces(str(root_dir / "ndx-ellipse-eye-tracking/ndx-ellipse-eye-tracking.namespace.yaml"))
 load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
 
 
@@ -160,7 +158,7 @@ def convert_session_to_zarr(
             # load natural movie shuffled from here:
             # https://community.brain-map.org/t/accessing-frames-for-natural-movie-shuffled-in-neuropixel-data/1010/22
 
-            # Add missing experiment description field (from technical white paper)
+            # Add missing description fields (from technical white paper)
             print("Adding missing descriptions ...")
             add_missing_descriptions(nwbfile)
 

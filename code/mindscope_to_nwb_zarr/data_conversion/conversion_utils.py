@@ -40,27 +40,6 @@ class H5DatasetDataChunkIterator(GenericDataChunkIterator):
         return self.dataset.dtype
 
 
-def open_visual_behavior_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
-    """Open a visual behavior ephys/ophys NWB HDF5 file, suppressing cached namespace warnings.
-    
-    ndx-aibs-stimulus-template and ndx-ellipse-eye-tracking should be
-    both cached in the file and loaded via load_namespaces prior to calling this function.
-    """
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=(
-                r"Ignoring the following cached namespace[\s\S]*"
-                r"ndx-aibs-stimulus-template[\s\S]*"
-                r"ndx-ellipse-eye-tracking"
-            ),
-            category=UserWarning
-        )
-        if manager is not None:
-            return NWBHDF5IO(str(path), mode, manager=manager)
-        return NWBHDF5IO(str(path), mode)
-
-
 def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> None:
     """Convert Visual Behavior stimulus_template from StimulusTemplate to Images container.
 
