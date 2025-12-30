@@ -3,6 +3,7 @@ import traceback
 from typing import Any, Iterable, Optional
 import warnings
 
+from numcodecs import GZip
 import numpy as np
 from hdmf.common.table import VectorIndex
 from hdmf.data_utils import GenericDataChunkIterator
@@ -252,6 +253,7 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     old_electrical_series.fields['data'] = ZarrDataIO(
         data=data_iterator,
         chunks=(400_000, 8),
+        compressor=GZip(level=9),
     )
 
     # Create new electrode table region with updated indices
