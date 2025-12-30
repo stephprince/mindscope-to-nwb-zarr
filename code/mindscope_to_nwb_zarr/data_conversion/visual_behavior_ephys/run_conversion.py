@@ -31,7 +31,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-neuropixels-placeholders"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ephys-placeholders"
 
 S3_BUCKET = "s3://visual-behavior-neuropixels-data"
 S3_DATA_PATH = "visual-behavior-neuropixels"
@@ -53,9 +53,9 @@ def _open_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
             "ignore",
             message=(
                 r"Ignoring the following cached namespace[\s\S]*"
+                r"ndx-aibs-ecephys[\s\S]*"
                 r"ndx-aibs-stimulus-template[\s\S]*"
-                r"ndx-ellipse-eye-tracking[\s\S]*"
-                r"ndx-aibs-ecephys"
+                r"ndx-ellipse-eye-tracking"
             ),
             category=UserWarning
         )
@@ -253,7 +253,7 @@ def convert_visual_behavior_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
         #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
         #     f"found {len(input_files)} files."
         # )
-    input_file = input_files[0]
+    input_file = input_files[-1]
 
     # Parse session ID and type from filename
     # Patterns: ecephys_session_{session_id}.nwb or behavior_session_{session_id}.nwb

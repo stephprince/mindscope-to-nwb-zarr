@@ -29,7 +29,7 @@ S3_BEHAVIOR_SESSIONS_CSV = f"{S3_DATA_PATH}/project_metadata/behavior_sessions.c
 
 def main():
     # Output directory for placeholder files
-    results_dir = Path(__file__).parent.parent.parent / "data" / "visual-behavior-neuropixels-placeholders"
+    results_dir = Path(__file__).parent.parent.parent / "data" / "visual-behavior-ephys-placeholders"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Scratch directory for downloading CSVs

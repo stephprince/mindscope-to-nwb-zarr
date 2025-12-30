@@ -85,6 +85,7 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
 - Convert and add raw highpass data to the NWB file from the S3 bucket.
 - Describe the "stimulus" `ProcessingModule` and the "timestamps" `TimeSeries` more clearly, and consider renaming/reorganizing the time series to link more clearly to the stimulus presentations.
 - Remove the "imp" column from the electrodes table which contains all NaN values.
+- Times in the "intervals/invalid_times" table are not in increasing order and should be to conform with NWB best practices.
 - The raw LFP data is stored with gzip level 9 compression, which has a high compression ratio but is very slow to write and read. Consider using a faster compression algorithm or lower compression level, like Blosc-zstd level 5.
 
 ### AIND Metadata Extraction 

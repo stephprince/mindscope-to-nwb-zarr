@@ -165,10 +165,14 @@ def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> Non
 
         # Validate that matching IndexSeries exists
         if k not in nwbfile.stimulus:
-            warnings.warn(
-                f"No matching IndexSeries found in stimulus presentations for template '{k}'. "
-                f"Available stimulus presentations: {list(nwbfile.stimulus.keys())}"
-            )
+            if k.startswith("Natural_Images_Lum_Matched_set_ophys"):
+                # Known case where no matching IndexSeries exists; skip with warning
+                pass
+            else:
+                warnings.warn(
+                    f"No matching IndexSeries found in stimulus presentations for template '{k}'. "
+                    f"Available stimulus presentations: {list(nwbfile.stimulus.keys())}"
+                )
         else:
             # replace references in stimulus presentation IndexSeries
             index_series = nwbfile.stimulus[k]
@@ -227,11 +231,11 @@ def combine_probe_file_info(base_nwbfile: NWBFile, probe_nwbfile: NWBFile) -> NW
     # suboptimal for both read and write.
     # Code Ocean limits the rate of COPY requests per S3 prefix so we cannot have
     # too many chunks per Zarr array or else we get a 503 Slow Down error from S3.
-    # This rechunks the LFP data to about 325 chunks, each about 10 MB large after
-    # compression.
+    # This rechunks the LFP data to chunks that about 10 MB large after
+    # compression (gzip level 9)
     old_electrical_series.fields['data'] = ZarrDataIO(
         data=data_iterator,
-        chunks=(400_000, 8),
+        chunks=(500_000, 8),
         compressor=GZip(level=9),
     )
 
