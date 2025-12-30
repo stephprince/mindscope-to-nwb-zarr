@@ -6,57 +6,108 @@ from pynwb.image import GrayscaleImage, Images
 from hdmf_zarr.nwb import NWBZarrIO
 from hdmf_zarr import ZarrDataIO
 import pandas as pd
+import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys-placeholders"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys-inputs"
 
-OPHYS_EXPERIMENT_METADATA_FILE = root_dir / "reference" / "visual_coding_2p_ophys_experiments.json"
+S3_BUCKET = "s3://allen-brain-observatory"
+S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
+
 DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
+
+# Mapping from stimulus_name in metadata JSON to stim suffix for DANDI asset path
+STIMULUS_NAME_TO_SUFFIX = {
+    "three_session_A": "StimA",
+    "three_session_B": "StimB",
+    "three_session_C": "StimC",
+    "three_session_C2": "StimC2",
+}
 
 # Load NWB extension used by new Visual Coding Ophys files
 load_namespaces(str(root_dir / "ndx-aibs-visual-coding-2p/ndx-aibs-visual-coding-2p.namespace.yaml"))
 OphysExperimentMetadata = get_class('OphysExperimentMetadata', 'ndx-aibs-visual-coding-2p')
 
 
-def download_visual_coding_ophys_files_from_dandi(processed_file_name: str, scratch_dir_path: Path) -> tuple[Path, Path]:
+def get_dandi_asset_paths(experiment_metadata: pd.Series) -> tuple[str, str]:
+    """Build DANDI asset paths from experiment metadata.
+
+    Asset paths follow the pattern:
+        sub-{specimen_id}/sub-{specimen_id}_ses-{id}_{stim_name}_ophys.nwb (raw)
+        sub-{specimen_id}/sub-{specimen_id}_ses-{id}_{stim_name}_behavior+image+ophys.nwb (processed)
+
+    Where stim_name is "StimA", "StimB", "StimC", or "StimC2" based on stimulus_name.
+
+    Args:
+        experiment_metadata: A row from the ophys experiment metadata DataFrame.
+
+    Returns:
+        Tuple of (processed_asset_path, raw_asset_path)
+    """
+    specimen_id = experiment_metadata['specimen_id']
+    experiment_id = experiment_metadata['id']
+    stimulus_name = experiment_metadata['stimulus_name']
+
+    stim_suffix = STIMULUS_NAME_TO_SUFFIX.get(stimulus_name)
+    if stim_suffix is None:
+        raise ValueError(f"Unknown stimulus_name: {stimulus_name}")
+
+    subject_dir = f"sub-{specimen_id}"
+    base_name = f"sub-{specimen_id}_ses-{experiment_id}-{stim_suffix}"
+
+    processed_asset_path = f"{subject_dir}/{base_name}_behavior+image+ophys.nwb"
+    raw_asset_path = f"{subject_dir}/{base_name}_ophys.nwb"
+
+    return (processed_asset_path, raw_asset_path)
+
+
+def download_visual_coding_ophys_files_from_dandi(
+    processed_asset_path: str,
+    raw_asset_path: str,
+    scratch_dir_path: Path
+) -> tuple[Path, Path]:
     """Download Visual Coding Ophys NWB files from DANDI.
-    
+
     Both the NWB file containing metadata and processed 2p data, and
     the NWB file containing raw 2p data are downloaded.
 
     Args:
-        processed_file_name: Base name of the processed NWB file to download.
+        processed_asset_path: DANDI asset path for the processed NWB file.
+        raw_asset_path: DANDI asset path for the raw NWB file.
         scratch_dir_path: Directory to download the files to.
 
     Returns:
         Tuple of Paths: (processed_file_path, raw_file_path)
     """
-    # Parse subject ID directory name from file name
-    subject_dir = processed_file_name.split('_')[0]
-
-    # Get raw 2p file name
-    raw_file_name = processed_file_name.replace("behavior+image+ophys", "ophys")
-
     from dandi.dandiapi import DandiAPIClient
+
+    processed_file_name = Path(processed_asset_path).name
+    raw_file_name = Path(raw_asset_path).name
 
     with DandiAPIClient() as client:
         dandiset = client.get_dandiset(DANDISET_ID, DANDISET_VERSION)
 
         # Download processed file
-        asset = dandiset.get_asset_by_path(f"{subject_dir}/{processed_file_name}")
+        asset = dandiset.get_asset_by_path(processed_asset_path)
         if not asset:
-            raise RuntimeError(f"No asset found for processed ophys file {processed_file_name} in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}")
+            raise RuntimeError(
+                f"No asset found for processed ophys file {processed_asset_path} "
+                f"in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}"
+            )
         processed_download_path = scratch_dir_path / processed_file_name
         print(f"Downloading processed file to {processed_download_path} ...")
         asset.download(filepath=processed_download_path)
 
         # Download raw file
-        asset = dandiset.get_asset_by_path(f"{subject_dir}/{raw_file_name}")
+        asset = dandiset.get_asset_by_path(raw_asset_path)
         if not asset:
-            raise RuntimeError(f"No asset found for raw ophys file {raw_file_name} in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}")
+            raise RuntimeError(
+                f"No asset found for raw ophys file {raw_asset_path} "
+                f"in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}"
+            )
         raw_download_path = scratch_dir_path / raw_file_name
         print(f"Downloading raw file to {raw_download_path} ...")
         asset.download(filepath=raw_download_path)
@@ -155,10 +206,12 @@ def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> No
 def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
     """Convert NWB HDF5 file to Zarr.
 
-    Downloads the necessary NWB files from DANDI, modifies the NWBFile object
+    Reads the input file from INPUT_FILE_DIR (a file named with a row index),
+    uses that index to look up the experiment in the ophys experiment metadata,
+    downloads the necessary NWB files from DANDI, modifies the NWBFile object
     to update subject ID and stimulus template images, adds raw 2p data as
     acquisition, and exports to Zarr format.
-    
+
     Args:
         results_dir: Directory to save the converted Zarr file.
         scratch_dir: Directory to download the NWB files to.
@@ -166,27 +219,55 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     Returns:
         Path to the converted Zarr file.
     """
-    ophys_experiment_metadata = pd.read_json(OPHYS_EXPERIMENT_METADATA_FILE)
+    # Confirm there is exactly one input file in the input directory
+    input_files = list(INPUT_FILE_DIR.iterdir())
+    if len(input_files) != 1:
+        raise RuntimeError(
+            f"Expected exactly one input file in {INPUT_FILE_DIR}, "
+            f"found {len(input_files)} files."
+        )
+    input_file = input_files[0]
 
-    # Confirm there is only one placeholder file in the input directory
-    placeholder_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
-    if len(placeholder_files) != 1:
-        raise RuntimeError(f"Expected exactly one NWB placeholder file in {INPUT_FILE_DIR}, found {len(placeholder_files)} files.")
-    processed_file_name = placeholder_files[0]
+    # Parse row index from filename
+    row_index = int(input_file.name)
+    print(f"Processing row index {row_index} ...")
 
+    # Download ophys experiment metadata from S3
+    print("Downloading ophys experiment metadata from S3 ...")
+    b = q3.Bucket(S3_BUCKET)
+    json_download_path = scratch_dir / "ophys_experiments.json"
+    b.fetch(S3_METADATA_PATH, json_download_path.as_posix())
+    ophys_experiment_metadata = pd.read_json(json_download_path)
+
+    # Get the row at the specified index
+    if row_index < 0 or row_index >= len(ophys_experiment_metadata):
+        raise RuntimeError(
+            f"Row index {row_index} out of range. "
+            f"Metadata has {len(ophys_experiment_metadata)} rows (0-{len(ophys_experiment_metadata)-1})."
+        )
+    experiment_row = ophys_experiment_metadata.iloc[row_index]
+    experiment_id = experiment_row['id']
+    print(f"Experiment ID: {experiment_id}, stimulus_name: {experiment_row['stimulus_name']}")
+
+    # Build DANDI asset paths from metadata
+    processed_asset_path, raw_asset_path = get_dandi_asset_paths(experiment_row)
+    print(f"Processed asset path: {processed_asset_path}")
+    print(f"Raw asset path: {raw_asset_path}")
+
+    # Download files from DANDI
     processed_file_path, raw_file_path = download_visual_coding_ophys_files_from_dandi(
-        processed_file_name=processed_file_name.name, 
-        scratch_dir_path=scratch_dir
+        processed_asset_path=processed_asset_path,
+        raw_asset_path=raw_asset_path,
+        scratch_dir_path=scratch_dir,
     )
 
     with NWBHDF5IO(processed_file_path, 'r') as processed_io:
         base_nwbfile = processed_io.read()
 
-        # Get experiment metadata for this file
-        experiment_id = base_nwbfile.session_id.split('-')[0]
-        match = ophys_experiment_metadata[ophys_experiment_metadata['id'] == int(experiment_id)]
+        # Use the experiment metadata row we already have
+        match = ophys_experiment_metadata[ophys_experiment_metadata['id'] == experiment_id]
         if match.empty:
-            raise RuntimeError(f"No matching metadata found for experiment_id {experiment_id}, file {processed_file_path}")
+            raise RuntimeError(f"No matching metadata found for experiment_id {experiment_id}")
 
         # Change subject ID to external donor name from metadata
         old_subject_id = base_nwbfile.subject.subject_id
