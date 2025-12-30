@@ -2,16 +2,12 @@
 	"version": 1,
 	"attached_datasets": [
 		{
-			"id": "40e727b1-0ebc-4308-902a-167bb19dd118",
-			"mount": "visual-coding-ophys-placeholders_1"
+			"id": "7d60ccb6-9572-43cb-98ee-d83755edeb9a",
+			"mount": "visual-coding-ophys-inputs"
 		},
 		{
-			"id": "95dc955b-e621-4be6-a5c2-f0500e767b73",
-			"mount": "visual-coding-ephys-placeholders"
-		},
-		{
-			"id": "c7c58d00-e169-4bd5-899a-29fed8743d8c",
-			"mount": "visual-behavior-ephys-placeholders"
+			"id": "7fd81399-7941-47c9-87f0-debc1bb94e74",
+			"mount": "visual-behavior-ophys-inputs"
 		}
 	]
 }
