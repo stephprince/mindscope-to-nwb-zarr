@@ -151,9 +151,8 @@ def download_visual_behavior_ephys_session_files(
         raise RuntimeError(f"Base session file not found in S3: {base_s3_path}")
 
     base_download_path = scratch_dir / base_filename
-    if not base_download_path.exists():  # TODO remove after testing
-        print(f"Downloading base session file to {base_download_path} ...")
-        b.fetch(base_s3_path, base_download_path.as_posix())
+    print(f"Downloading base session file to {base_download_path} ...")
+    b.fetch(base_s3_path, base_download_path.as_posix())
 
     # Download probe files (only for behavior_ephys sessions)
     probe_download_paths = []
@@ -163,9 +162,8 @@ def download_visual_behavior_ephys_session_files(
         for probe_s3_path in sorted(probe_files):
             probe_filename = Path(probe_s3_path).name
             probe_download_path = scratch_dir / probe_filename
-            if not probe_download_path.exists():  # TODO remove after testing
-                print(f"Downloading probe file to {probe_download_path} ...")
-                b.fetch(probe_s3_path, probe_download_path.as_posix())
+            print(f"Downloading probe file to {probe_download_path} ...")
+            b.fetch(probe_s3_path, probe_download_path.as_posix())
             probe_download_paths.append(probe_download_path)
 
     return base_download_path, probe_download_paths

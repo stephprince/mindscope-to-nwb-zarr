@@ -46,7 +46,7 @@ EcephysSpecimen = get_class('EcephysSpecimen', 'ndx-aibs-ecephys')
 # EcephysSpecimen "strain" field is not populated, leading to a MissingRequiredBuildWarning.
 # To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
 # by getting the "strain" value from the builder "strain" attribute.
-@register_map(EcephysSpecimen)  # TODO does this work?
+@register_map(EcephysSpecimen)
 class CustomEcephysSpecimenMapper(ObjectMapper):
     """Instruct the object mapper for EcephysSpecimen to get strain (str) from builder
     when constructing the object from the EcephysSpecimen builder read from a file.
@@ -119,9 +119,8 @@ def download_visual_coding_ephys_session_files(session_id: int, scratch_dir: Pat
         raise RuntimeError(f"Base session file not found in S3: {base_s3_path}")
 
     base_download_path = scratch_dir / base_filename
-    if not base_download_path.exists():  # TODO remove after testing
-        print(f"Downloading base session file to {base_download_path} ...")
-        b.fetch(base_s3_path, base_download_path.as_posix())
+    print(f"Downloading base session file to {base_download_path} ...")
+    b.fetch(base_s3_path, base_download_path.as_posix())
 
     # Download probe LFP files
     probe_files = [f for f in nwb_files if 'probe_' in Path(f).name and '_lfp.nwb' in f]
@@ -130,9 +129,8 @@ def download_visual_coding_ephys_session_files(session_id: int, scratch_dir: Pat
     for probe_s3_path in sorted(probe_files):
         probe_filename = Path(probe_s3_path).name
         probe_download_path = scratch_dir / probe_filename
-        if not probe_download_path.exists():  # TODO remove after testing
-            print(f"Downloading probe file to {probe_download_path} ...")
-            b.fetch(probe_s3_path, probe_download_path.as_posix())
+        print(f"Downloading probe file to {probe_download_path} ...")
+        b.fetch(probe_s3_path, probe_download_path.as_posix())
         probe_download_paths.append(probe_download_path)
 
     return base_download_path, probe_download_paths

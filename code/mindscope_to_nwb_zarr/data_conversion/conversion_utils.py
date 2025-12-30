@@ -318,8 +318,8 @@ def add_missing_descriptions(nwbfile: NWBFile) -> None:
         }
 
         for col_name in nwbfile.units.colnames:
-            if (nwbfile.units[col_name].description is None or \
-                nwbfile.units[col_name].description == "no description" and \
+            if ((nwbfile.units[col_name].description is None or
+                 nwbfile.units[col_name].description == "no description") and
                 col_name in unit_column_descriptions):
                 nwbfile.units[col_name].fields['description'] = unit_column_descriptions[col_name]
 
