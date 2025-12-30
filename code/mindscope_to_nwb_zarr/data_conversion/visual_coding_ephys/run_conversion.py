@@ -16,7 +16,8 @@ Session structure:
 from pathlib import Path
 import warnings
 
-from pynwb import NWBHDF5IO, load_namespaces
+from pynwb import get_class, load_namespaces, NWBHDF5IO, register_map
+from hdmf.build import ObjectMapper
 from hdmf_zarr.nwb import NWBZarrIO
 import quilt3 as q3
 
@@ -34,6 +35,26 @@ S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"
 
 # Load NWB extensions used by Visual Coding Ephys files
 load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
+EcephysSpecimen = get_class('EcephysSpecimen', 'ndx-aibs-ecephys')
+
+# The NWB extension ndx-aibs-ecephys 0.2.0 specifies a required "strain" text attribute in
+# the new data type EcephysSpecimen which extends the NWB core data type Subject.
+# However, since the time that the extension was created, the NWB core Subject data type
+# has added an optional "strain" dataset. As a result, when reading the NWB file, the
+# EcephysSpecimen "strain" field is not populated, leading to a MissingRequiredBuildWarning.
+# To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
+# by getting the "strain" value from the builder "strain" attribute.
+@register_map(EcephysSpecimen)  # TODO does this work?
+class CustomEcephysSpecimenMapper(ObjectMapper):
+    """Instruct the object mapper for EcephysSpecimen to get strain (str) from builder
+    when constructing the object from the EcephysSpecimen builder read from a file.
+    """
+
+    @ObjectMapper.constructor_arg("strain")
+    def strain_carg(self, builder, manager):
+        strain_value = builder.get('strain')
+        assert isinstance(strain_value, str)
+        return strain_value
 
 
 def _open_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
@@ -138,11 +159,6 @@ def convert_session_to_zarr(
     with _open_nwb_hdf5(base_hdf5_path, 'r') as read_io:
         nwbfile = read_io.read()
 
-        # Set strain to unknown (required field)
-        # TODO set to actual strain if known
-        nwbfile.subject.strain = "unknown"
-        nwbfile.set_modified()
-
         # Open and read all probe files
         probe_ios = [_open_nwb_hdf5(f, 'r', manager=read_io.manager) for f in probe_hdf5_paths]
         try:
@@ -165,6 +181,17 @@ def convert_session_to_zarr(
             # Fix VectorIndex dtypes to be uint64
             print("Fixing VectorIndex dtypes ...")
             fix_vector_index_dtypes(nwbfile)
+
+            # NOTE: The original NWB HDF5 files for Visual Coding - Neuropixels use NWB schema 2.2.0
+            # where the "filtering" column (VectorData dataset) of the electrodes table is specified
+            # as a float32 dtype. However, the dataset in the file contains string values. This means
+            # the original NWB HDF5 file is invalid and the current pynwb validator raises
+            # this as a validation error. The earlier version of the validator did not catch this 
+            # validation error. In NWB schema 2.4.0, the "filtering" column was 
+            # updated to be a variable-length string dtype. When exporting the original NWB file to 
+            # Zarr using NWBZarrIO and PyNWB 3.1.2 which uses NWB schema 2.9.0, the "filtering" 
+            # column is read as a string dataset and written to Zarr as a string dataset without error
+            # or loss of data, so no special handling is needed here.
 
             # Export to Zarr
             print(f"Exporting to Zarr file {zarr_path} ...")

@@ -191,11 +191,6 @@ def convert_session_to_zarr(
     with _open_nwb_hdf5(base_hdf5_path, 'r') as read_io:
         nwbfile = read_io.read()
 
-        # Set strain to unknown (required field)
-        # TODO set to actual strain if known
-        nwbfile.subject.strain = "unknown"
-        nwbfile.set_modified()
-
         # Open and read all probe files
         probe_ios = [_open_nwb_hdf5(f, 'r', manager=read_io.manager) for f in probe_hdf5_paths]
         try:
