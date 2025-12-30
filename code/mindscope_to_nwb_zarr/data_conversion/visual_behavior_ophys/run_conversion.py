@@ -12,7 +12,10 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ophys"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ophys-inputs"
+
+S3_BUCKET = "s3://visual-behavior-ophys-data"
+S3_DATA_PATH = "visual-behavior-ophys"
 
 MULTIPLANE_PROJECT_CODES = {"VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d"}
 
@@ -214,199 +217,171 @@ def combine_multiplane_nwb_to_zarr(
     for io in plane_ios:
         io.close()
 
-def download_visual_behavior_ophys_file_from_s3(filename: str, scratch_dir: Path) -> Path:
-    """Download a Visual Behavior Ophys NWB file from S3.
+def download_ophys_experiment_from_s3(ophys_experiment_id: int, scratch_dir: Path) -> Path:
+    """Download a Visual Behavior Ophys experiment NWB file from S3.
 
     Args:
-        filename: Name of the NWB file to download.
+        ophys_experiment_id: The ophys experiment ID.
         scratch_dir: Directory to download the file to.
 
     Returns:
         Path to the downloaded file.
     """
-    b = q3.Bucket("s3://visual-behavior-ophys-data")
-
-    if filename.startswith("behavior_ophys_experiment_"):
-        s3_path = f"visual-behavior-ophys/behavior_ophys_experiments/{filename}"
-    else:
-        raise ValueError(f"Unknown file type: {filename}")
-
-    download_path = (scratch_dir / filename).as_posix()
-    print(f"Downloading {filename} from S3 to {download_path} ...")
-    b.fetch(s3_path, download_path)
+    b = q3.Bucket(S3_BUCKET)
+    filename = f"behavior_ophys_experiment_{ophys_experiment_id}.nwb"
+    s3_path = f"{S3_DATA_PATH}/behavior_ophys_experiments/{filename}"
+    download_path = scratch_dir / filename
+    print(f"Downloading {filename} from S3 ...")
+    b.fetch(s3_path, download_path.as_posix())
     return download_path
 
 
-def get_session_info_from_input_file(input_filename: str, behavior_session_table: pd.DataFrame) -> dict:
-    """Determine session type and related info from an input NWB filename.
+def download_behavior_session_from_s3(behavior_session_id: int, scratch_dir: Path) -> Path:
+    """Download a Visual Behavior behavior-only session NWB file from S3.
 
     Args:
-        input_filename: Name of the input NWB file (without path).
-        behavior_session_table: DataFrame containing behavior session metadata.
+        behavior_session_id: The behavior session ID.
+        scratch_dir: Directory to download the file to.
+
+    Returns:
+        Path to the downloaded file.
+    """
+    b = q3.Bucket(S3_BUCKET)
+    filename = f"behavior_session_{behavior_session_id}.nwb"
+    s3_path = f"{S3_DATA_PATH}/behavior_sessions/{filename}"
+    download_path = scratch_dir / filename
+    print(f"Downloading {filename} from S3 ...")
+    b.fetch(s3_path, download_path.as_posix())
+    return download_path
+
+
+def get_session_info_from_row(row: pd.Series) -> dict:
+    """Determine session type and related info from a behavior session table row.
+
+    Args:
+        row: A row from the behavior session table DataFrame.
 
     Returns:
         Dict with keys:
-            - session_type: "behavior", "single_plane_ophys", "first_multiplane", or "additional_multiplane"
+            - session_type: "behavior", "single_plane_ophys", or "multiplane"
             - behavior_session_id: The behavior session ID
-            - ophys_experiment_id: Single ID (for ophys sessions) or None (for behavior-only)
-            - all_ophys_experiment_ids: List of all ophys experiment IDs (for multiplane) or None
-            - additional_filenames: List of additional filenames to download (for first_multiplane)
+            - all_ophys_experiment_ids: List of all ophys experiment IDs (for ophys sessions) or None
     """
-    # Parse the input filename to determine session type
-    if input_filename.startswith("behavior_session_"):
+    behavior_session_id = int(row['behavior_session_id'])
+
+    if pd.isna(row['ophys_experiment_id']):
         # Behavior-only session
-        behavior_session_id = int(input_filename.replace("behavior_session_", "").replace(".nwb", ""))
         return {
             "session_type": "behavior",
             "behavior_session_id": behavior_session_id,
-            "ophys_experiment_id": None,
             "all_ophys_experiment_ids": None,
-            "additional_filenames": [],
         }
 
-    elif input_filename.startswith("behavior_ophys_experiment_"):
-        # Ophys session - need to determine if single-plane or multiplane
-        ophys_experiment_id = int(input_filename.replace("behavior_ophys_experiment_", "").replace(".nwb", ""))
+    # Parse the list of ophys_experiment_ids from the string format "[123, 456, 789]"
+    ids_str = str(row['ophys_experiment_id']).strip('[]').strip()
+    if not ids_str:
+        raise RuntimeError(f"Empty ophys_experiment_id for behavior_session_id {behavior_session_id}")
+    all_ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
 
-        # Find the row in behavior_session_table that contains this ophys_experiment_id
-        matching_row = None
-        for idx, row in behavior_session_table.iterrows():
-            if pd.isna(row['ophys_experiment_id']):
-                continue
+    project_code = row['project_code']
 
-            # Parse the list of ophys_experiment_ids from the string format "[123, 456, 789]"
-            ids_str = str(row['ophys_experiment_id']).strip('[]').strip()
-            if not ids_str:
-                continue
-            ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
-
-            if ophys_experiment_id in ophys_exp_ids:
-                matching_row = row
-                all_ophys_exp_ids = ophys_exp_ids
-                break
-
-        if matching_row is None:
-            raise RuntimeError(f"Could not find ophys_experiment_id {ophys_experiment_id} in behavior_session_table")
-
-        behavior_session_id = matching_row['behavior_session_id']
-        project_code = matching_row['project_code']
-
-        if project_code in MULTIPLANE_PROJECT_CODES:
-            # Multiplane session - check if this is the first plane
-            if ophys_experiment_id == all_ophys_exp_ids[0]:
-                # First plane of multiplane session - need to download additional planes
-                additional_filenames = [
-                    f"behavior_ophys_experiment_{exp_id}.nwb"
-                    for exp_id in all_ophys_exp_ids[1:]  # Skip first, we already have it
-                ]
-                return {
-                    "session_type": "first_multiplane",
-                    "behavior_session_id": behavior_session_id,
-                    "ophys_experiment_id": ophys_experiment_id,
-                    "all_ophys_experiment_ids": all_ophys_exp_ids,
-                    "additional_filenames": additional_filenames,
-                }
-            else:
-                # Additional plane of multiplane session - skip
-                return {
-                    "session_type": "additional_multiplane",
-                    "behavior_session_id": behavior_session_id,
-                    "ophys_experiment_id": ophys_experiment_id,
-                    "all_ophys_experiment_ids": all_ophys_exp_ids,
-                    "additional_filenames": [],
-                }
-        else:
-            # Single-plane ophys session
-            return {
-                "session_type": "single_plane_ophys",
-                "behavior_session_id": behavior_session_id,
-                "ophys_experiment_id": ophys_experiment_id,
-                "all_ophys_experiment_ids": None,
-                "additional_filenames": [],
-            }
-
+    if project_code in MULTIPLANE_PROJECT_CODES:
+        # Multiplane session
+        return {
+            "session_type": "multiplane",
+            "behavior_session_id": behavior_session_id,
+            "all_ophys_experiment_ids": all_ophys_exp_ids,
+        }
     else:
-        raise ValueError(f"Unknown input filename format: {input_filename}")
+        # Single-plane ophys session
+        return {
+            "session_type": "single_plane_ophys",
+            "behavior_session_id": behavior_session_id,
+            "all_ophys_experiment_ids": all_ophys_exp_ids,
+        }
 
 
-def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
+def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
     """Convert NWB HDF5 file to Zarr.
 
-    Reads the input NWB file from INPUT_FILE_DIR, determines the session type
-    (behavior-only, single-plane ophys, or multiplane ophys), and converts
-    accordingly. For multiplane sessions, only the first plane triggers
-    conversion (downloading additional planes from S3); additional planes
-    are skipped.
+    Reads the input placeholder file from INPUT_FILE_DIR (a file named with a row index),
+    uses that index to look up the session in the behavior session table, determines
+    the session type (behavior-only, single-plane ophys, or multiplane ophys),
+    downloads the actual NWB files from S3, and converts accordingly.
 
     Args:
         results_dir: Directory to save the converted Zarr file.
-        scratch_dir: Directory to download additional NWB files to (for multiplane).
+        scratch_dir: Directory to download NWB files to.
 
     Returns:
-        Path to the converted Zarr file, or None if the file was skipped
-        (additional plane of multiplane session or no NWB files in the input directory).
+        Path to the converted Zarr file.
     """
-    # Confirm there is only one input file in the input directory
-    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
-    if not input_files:
-        return None
-    elif len(input_files) > 1:
+    # Confirm there is exactly one input file in the input directory
+    input_files = list(INPUT_FILE_DIR.iterdir())
+    if len(input_files) != 1:
         raise RuntimeError(
-            f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
+            f"Expected exactly one input file in {INPUT_FILE_DIR}, "
             f"found {len(input_files)} files."
         )
     input_file = input_files[0]
 
+    # Parse row index from filename
+    row_index = int(input_file.name)
+    print(f"Processing row index {row_index} ...")
+
     # Download behavior session table metadata
     print("Downloading behavior session table metadata from S3 ...")
-    b = q3.Bucket("s3://visual-behavior-ophys-data")
-    session_metadata_path = "visual-behavior-ophys/project_metadata/behavior_session_table.csv"
-    download_path = (scratch_dir / "behavior_session_table.csv").as_posix()
-    b.fetch(session_metadata_path, download_path)
-    behavior_session_table = pd.read_csv(download_path)
+    b = q3.Bucket(S3_BUCKET)
+    session_metadata_path = f"{S3_DATA_PATH}/project_metadata/behavior_session_table.csv"
+    csv_download_path = scratch_dir / "behavior_session_table.csv"
+    b.fetch(session_metadata_path, csv_download_path.as_posix())
+    behavior_session_table = pd.read_csv(csv_download_path)
 
-    # Determine session type and get list of additional files to download
-    session_info = get_session_info_from_input_file(
-        input_filename=input_file.name,
-        behavior_session_table=behavior_session_table,
-    )
-
-    session_type = session_info["session_type"]
-
-    # Skip additional planes of multiplane sessions
-    if session_type == "additional_multiplane":
-        print(
-            f"Skipping {input_file.name} - additional plane of multiplane session. "
-            f"Will be processed with first plane (ophys_experiment_id={session_info['all_ophys_experiment_ids'][0]})."
+    # Get the row at the specified index
+    if row_index < 0 or row_index >= len(behavior_session_table):
+        raise RuntimeError(
+            f"Row index {row_index} out of range. "
+            f"Table has {len(behavior_session_table)} rows (0-{len(behavior_session_table)-1})."
         )
-        return None
+    row = behavior_session_table.iloc[row_index]
+
+    # Determine session type from the row
+    session_info = get_session_info_from_row(row)
+    session_type = session_info["session_type"]
+    behavior_session_id = session_info["behavior_session_id"]
+
+    print(f"Session type: {session_type}, behavior_session_id: {behavior_session_id}")
 
     if session_type == "behavior":
-        # Behavior-only session
-        zarr_filename = input_file.stem + ".nwb.zarr"
-        zarr_path = results_dir / zarr_filename
-        print(f"Converting behavior-only session to {zarr_path} ...")
-        convert_behavior_or_single_plane_nwb_to_zarr(input_file, zarr_path)
+        # Behavior-only session - download from S3
+        hdf5_path = download_behavior_session_from_s3(behavior_session_id, scratch_dir)
 
-    elif session_type == "single_plane_ophys":
-        # Single-plane ophys session
-        zarr_filename = input_file.stem + ".nwb.zarr"
-        zarr_path = results_dir / zarr_filename
-        print(f"Converting single-plane ophys session to {zarr_path} ...")
-        convert_behavior_or_single_plane_nwb_to_zarr(input_file, zarr_path)
-
-    elif session_type == "first_multiplane":
-        # First plane of multiplane session - download additional planes and combine
-        additional_files = [
-            download_visual_behavior_ophys_file_from_s3(filename, scratch_dir)
-            for filename in session_info["additional_filenames"]
-        ]
-
-        behavior_session_id = session_info["behavior_session_id"]
         zarr_filename = f"behavior_session_{behavior_session_id}.nwb.zarr"
         zarr_path = results_dir / zarr_filename
-        print(f"Converting multiplane session ({len(additional_files) + 1} planes) to {zarr_path} ...")
-        combine_multiplane_nwb_to_zarr(input_file, additional_files, zarr_path)
+        print(f"Converting behavior-only session to {zarr_path} ...")
+        convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path, zarr_path)
+
+    elif session_type == "single_plane_ophys":
+        # Single-plane ophys session - download from S3
+        ophys_experiment_id = session_info["all_ophys_experiment_ids"][0]
+        hdf5_path = download_ophys_experiment_from_s3(ophys_experiment_id, scratch_dir)
+
+        zarr_filename = f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
+        zarr_path = results_dir / zarr_filename
+        print(f"Converting single-plane ophys session to {zarr_path} ...")
+        convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path, zarr_path)
+
+    elif session_type == "multiplane":
+        # Multiplane session - download all planes and combine
+        all_hdf5_paths = [
+            download_ophys_experiment_from_s3(exp_id, scratch_dir)
+            for exp_id in session_info["all_ophys_experiment_ids"]
+        ]
+
+        zarr_filename = f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
+        zarr_path = results_dir / zarr_filename
+        print(f"Converting multiplane session ({len(all_hdf5_paths)} planes) to {zarr_path} ...")
+        combine_multiplane_nwb_to_zarr(all_hdf5_paths[0], all_hdf5_paths[1:], zarr_path)
 
     else:
         raise RuntimeError(f"Unexpected session type: {session_type}")
