@@ -3,19 +3,15 @@
 	"attached_datasets": [
 		{
 			"id": "40e727b1-0ebc-4308-902a-167bb19dd118",
-			"mount": "visual-coding-ophys"
+			"mount": "visual-coding-ophys-placeholders_1"
 		},
 		{
 			"id": "95dc955b-e621-4be6-a5c2-f0500e767b73",
-			"mount": "visual-coding-ephys"
+			"mount": "visual-coding-ephys-placeholders"
 		},
 		{
-			"id": "a63a5366-59e9-4ace-9b1d-d3d0b72a264a",
-			"mount": "allen-brain-observatory"
-		},
-		{
-			"id": "d6805a10-89fc-4b22-a9b3-99ce5a44756b",
-			"mount": "visual-behavior-neuropixels"
+			"id": "c7c58d00-e169-4bd5-899a-29fed8743d8c",
+			"mount": "visual-behavior-ephys-placeholders"
 		}
 	]
 }
