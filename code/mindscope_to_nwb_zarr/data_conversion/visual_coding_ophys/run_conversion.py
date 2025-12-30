@@ -304,16 +304,12 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
                     # so we cannot have too many chunks per Zarr array or else
                     # we get a 503 Slow Down error from S3 and a Code Ocean
                     # pipeline task failure.
-                    # Here we use chunks of (75, 512, 512) which results in
+                    # Here we use chunks of (75, 512, X) which results in
                     # about 1500-1700 chunks for a typical raw 2p dataset with
                     # 110,000-120,000 frames.
-                    assert acq_data.data.shape[1:] == (512, 512), (
-                        "Expected raw acquisition data shape to have spatial "
-                        f"dimensions (512, 512), found {acq_data.data.shape[1:]}"
-                    )
                     acq_data.fields["data"] = ZarrDataIO(
                         data=data_iterator,
-                        chunks=[75, 512, 512],
+                        chunks=[75, acq_data.data.shape[1], acq_data.data.shape[2]],
                     )
                 base_nwbfile.add_acquisition(acq_data)
 
