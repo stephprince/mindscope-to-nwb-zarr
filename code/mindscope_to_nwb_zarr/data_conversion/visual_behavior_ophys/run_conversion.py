@@ -1,3 +1,21 @@
+"""Visual Behavior 2-photon (ophys) NWB HDF5 to Zarr conversion.
+
+This module converts Visual Behavior 2-photon NWB HDF5 files to Zarr format.
+Sessions can be behavior-only, single-plane ophys, or multiplane ophys.
+Multiplane sessions have multiple NWB files that are combined into a single
+Zarr output file.
+
+Source data is located in S3 at:
+    s3://visual-behavior-ophys-data/visual-behavior-ophys/
+
+Session structure:
+    behavior_ophys_experiments/{ophys_experiment_id}/
+        behavior_ophys_experiment_{ophys_experiment_id}.nwb  - Ophys session file
+
+    behavior_sessions/{behavior_session_id}/
+        behavior_session_{behavior_session_id}.nwb           - Behavior-only session file
+"""
+
 from pathlib import Path
 import warnings
 

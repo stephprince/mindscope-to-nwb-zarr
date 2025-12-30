@@ -8,6 +8,7 @@ There are 58 sessions in total. Each session has one base NWB file (`session_{se
 
 ### Changes made when migrating from HDF5 to Zarr
 - Updated to use NWB Schema version 2.9.0 from version 2.2.2 and HDMF Common Schema version 1.8.0 from version 1.1.3.
+- Used new versions of the ndx-aibs-ecephys (0.3.0) NWB extension, defined in this repository, to comply with the latest NWB schema.
 - Combined probe files containing LFP + CSD data into single NWB file
 - Added missing experiment description if needed
 - Added description to several objects in the file

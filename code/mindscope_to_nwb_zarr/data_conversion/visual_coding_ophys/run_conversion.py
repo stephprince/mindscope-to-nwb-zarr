@@ -1,11 +1,26 @@
+"""Visual Coding 2-photon (ophys) NWB HDF5 to Zarr conversion.
+
+This module converts Visual Coding 2-photon NWB HDF5 files to Zarr format.
+Each session has two NWB files: one with metadata and processed 2p data, and
+one with raw 2p imaging data. Both are combined into a single Zarr output file.
+
+Source data is downloaded from DANDI Archive:
+    dandiset 000728, version 0.240827.1809
+
+Session structure (on DANDI):
+    sub-{specimen_id}/
+        sub-{specimen_id}_ses-{experiment_id}-{StimX}_behavior+image+ophys.nwb  - Processed data
+        sub-{specimen_id}_ses-{experiment_id}-{StimX}_ophys.nwb                 - Raw 2p data
+"""
+
 from pathlib import Path
 
+from hdmf_zarr import ZarrDataIO
+from hdmf_zarr.nwb import NWBZarrIO
+import pandas as pd
 from pynwb import NWBHDF5IO, NWBFile, get_class, load_namespaces
 from pynwb.base import ImageReferences
 from pynwb.image import GrayscaleImage, Images
-from hdmf_zarr.nwb import NWBZarrIO
-from hdmf_zarr import ZarrDataIO
-import pandas as pd
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
@@ -261,7 +276,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         scratch_dir_path=scratch_dir,
     )
 
-    with NWBHDF5IO(processed_file_path, 'r') as processed_io:
+    with NWBHDF5IO(str(processed_file_path), 'r') as processed_io:
         base_nwbfile = processed_io.read()
 
         # Change subject ID to external donor name from metadata

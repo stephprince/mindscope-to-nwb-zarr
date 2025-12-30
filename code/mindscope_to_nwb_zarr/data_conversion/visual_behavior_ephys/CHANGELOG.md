@@ -9,7 +9,7 @@ There are 3424 sessions in total based on behavior_sessions.csv. Sessions can be
 ### Changes made when migrating from HDF5 to Zarr
 
 - Updated to use latest NWB schema version 2.9.0 from version 2.6.0-alpha.
-- Used new versions of ndx-aibs-stimulus-template (0.2.0) and ndx-ellipse-eye-tracking (0.2.0) NWB extensions, defined in this repository, to follow best practices for storing stimulus template data and custom eye tracking data.
+- Used new versions of ndx-aibs-ecephys (0.3.0), ndx-aibs-stimulus-template (0.2.0) and ndx-ellipse-eye-tracking (0.2.0) NWB extensions, defined in this repository, to comply with the latest NWB schema and follow best practices for storing stimulus template data and custom eye tracking data.
 - Combined probe files containing LFP + CSD data into single NWB file.
 - Converted `StimulusTemplate` stimulus templates which had `NaN` timestamps to be stored as `WarpedStimulusTemplateImage` objects in an `Images` container to follow best practices for storing stimulus template data.
   - Added unwarped images as `GrayscaleImage` objects in a separate `Images` container.
