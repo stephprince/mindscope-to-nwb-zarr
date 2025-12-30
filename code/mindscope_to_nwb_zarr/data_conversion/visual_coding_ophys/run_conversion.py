@@ -264,20 +264,15 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     with NWBHDF5IO(processed_file_path, 'r') as processed_io:
         base_nwbfile = processed_io.read()
 
-        # Use the experiment metadata row we already have
-        match = ophys_experiment_metadata[ophys_experiment_metadata['id'] == experiment_id]
-        if match.empty:
-            raise RuntimeError(f"No matching metadata found for experiment_id {experiment_id}")
-
         # Change subject ID to external donor name from metadata
         old_subject_id = base_nwbfile.subject.subject_id
-        new_subject_id = match['specimen'].item()['donor']['external_donor_name']
+        new_subject_id = experiment_row['specimen']['donor']['external_donor_name']
         # WARNING: This approach modifies an attribute that should not be 
         # able to be reset. Validation should always be performed afterwards.
         base_nwbfile.subject.fields['subject_id'] = new_subject_id
 
         # Add ophys experiment metadata to NWB file via extension
-        metadata = OphysExperimentMetadata(name="ophys_experiment_metadata", ophys_experiment_metadata=match.to_json())
+        metadata = OphysExperimentMetadata(name="ophys_experiment_metadata", ophys_experiment_metadata=experiment_row.to_json())
         base_nwbfile.add_lab_meta_data(metadata)
 
         # Change stimulus_template to Image objects in Images container
@@ -286,6 +281,9 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         # Add raw 2p data as acquisition
         with NWBHDF5IO(raw_file_path, 'r', manager=processed_io.manager) as raw_io:
             raw_nwbfile = raw_io.read()
+            assert 'MotionCorrectedTwoPhotonSeries' in raw_nwbfile.acquisition, (
+                "Expected 'MotionCorrectedTwoPhotonSeries' in raw NWB file acquisition"
+            )
             for acq_data in raw_nwbfile.acquisition.values():
                 acq_data.reset_parent()
                 if acq_data.name == "MotionCorrectedTwoPhotonSeries":
