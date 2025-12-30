@@ -1,5 +1,9 @@
 ## Visual Behavior - 2p
 
+### Source NWB HDF5 files
+
+The source HDF5-based NWB files for Visual Behavior - 2p data can be found in the S3 bucket `s3://visual-behavior-ophys-data` under the paths `visual-behavior-ophys/behavior_ophys_experiments` and `visual-behavior-ophys/behavior_sessions`. The experiment metadata in `visual-behavior-ophys/project_metadata/behavior_session_table.csv` was used to obtain additional metadata for the conversion.
+
 ### Changes made when migrating from HDF5 to Zarr
 
 - Updated to use latest NWB schema version 2.9.0 from version 2.6.0-alpha.

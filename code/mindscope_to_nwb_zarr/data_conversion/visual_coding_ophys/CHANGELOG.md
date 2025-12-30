@@ -1,6 +1,6 @@
 ## Visual Coding Ophys Conversion Changelog
 
-### Source HDF5 files
+### Source NWB HDF5 files
 
 HDF5-based NWB 2.0 files were sourced from the DANDI Archive dandiset 000728, version 0.240827.1809 (https://dandiarchive.org/dandiset/000728/0.240827.1809).
 

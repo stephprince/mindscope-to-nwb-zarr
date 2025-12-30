@@ -185,37 +185,37 @@ def combine_multiplane_nwb_to_zarr(
     all_hdf5_paths = [base_hdf5_path] + additional_hdf5_paths
 
     print(f"Reading base NWB file {base_hdf5_path} ...")
-    base_io = _open_nwb_hdf5(base_hdf5_path, 'r')
-    base_nwbfile = base_io.read()
+    with _open_nwb_hdf5(base_hdf5_path, 'r') as base_io:
+        base_nwbfile = base_io.read()
 
-    print(f"Reading {len(additional_hdf5_paths)} additional plane NWB files ...")
-    additional_ios = [
-        _open_nwb_hdf5(p, 'r', manager=base_io.manager)
-        for p in additional_hdf5_paths
-    ]
-    plane_ios = [base_io] + additional_ios
-    plane_nwbfiles = [base_nwbfile] + [io.read() for io in additional_ios]
+        print(f"Reading {len(additional_hdf5_paths)} additional plane NWB files ...")
+        additional_ios = [
+            _open_nwb_hdf5(p, 'r', manager=base_io.manager)
+            for p in additional_hdf5_paths
+        ]
+        try:
+            plane_nwbfiles = [base_nwbfile] + [io.read() for io in additional_ios]
 
-    print("Combining multiplane info ...")
-    combined_nwbfile = combine_multiplane_info(plane_nwbfiles, all_hdf5_paths)
+            print("Combining multiplane info ...")
+            combined_nwbfile = combine_multiplane_info(plane_nwbfiles, all_hdf5_paths)
 
-    # Set session_id so that naming on DANDI is more similar to original NWB files
-    combined_nwbfile.session_id = combined_nwbfile.identifier
+            # Set session_id so that naming on DANDI is more similar to original NWB files
+            combined_nwbfile.session_id = combined_nwbfile.identifier
 
-    # Change stimulus_template to Image objects in Images container
-    convert_visual_behavior_stimulus_template_to_images(combined_nwbfile)
+            # Change stimulus_template to Image objects in Images container
+            convert_visual_behavior_stimulus_template_to_images(combined_nwbfile)
 
-    # Add missing experiment description field (from technical white paper)
-    add_missing_descriptions(combined_nwbfile)
+            # Add missing experiment description field (from technical white paper)
+            add_missing_descriptions(combined_nwbfile)
 
-    # Export the combined NWB file to Zarr (link_data=False copies all data)
-    print(f"Exporting to Zarr file {zarr_path} ...")
-    with NWBZarrIO(str(zarr_path), mode='w') as export_io:
-        export_io.export(src_io=base_io, nwbfile=combined_nwbfile, write_args=dict(link_data=False))
-
-    # Close all IOs after export is complete
-    for io in plane_ios:
-        io.close()
+            # Export the combined NWB file to Zarr (link_data=False copies all data)
+            print(f"Exporting to Zarr file {zarr_path} ...")
+            with NWBZarrIO(str(zarr_path), mode='w') as export_io:
+                export_io.export(src_io=base_io, nwbfile=combined_nwbfile, write_args=dict(link_data=False))
+        finally:
+            # Close all additional IOs
+            for io in additional_ios:
+                io.close()
 
 def download_ophys_experiment_from_s3(ophys_experiment_id: int, scratch_dir: Path) -> Path:
     """Download a Visual Behavior Ophys experiment NWB file from S3.
