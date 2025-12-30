@@ -19,8 +19,9 @@ Session structure:
 from pathlib import Path
 import warnings
 
-from pynwb import NWBFile, NWBHDF5IO, load_namespaces
 from hdmf_zarr.nwb import NWBZarrIO
+import pandas as pd
+from pynwb import NWBFile, NWBHDF5IO, load_namespaces
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
@@ -31,10 +32,12 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ephys-placeholders"
+INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ephys-inputs"
 
 S3_BUCKET = "s3://visual-behavior-neuropixels-data"
 S3_DATA_PATH = "visual-behavior-neuropixels"
+S3_BEHAVIOR_SESSIONS_CSV = f"{S3_DATA_PATH}/project_metadata/behavior_sessions.csv"
+S3_ECEPHYS_SESSIONS_CSV = f"{S3_DATA_PATH}/project_metadata/ecephys_sessions.csv"
 
 # Load NWB extensions used by Visual Behavior Ephys files
 load_namespaces(str(root_dir / "ndx-aibs-stimulus-template/ndx-aibs-stimulus-template.namespace.yaml"))
@@ -223,55 +226,79 @@ def convert_session_to_zarr(
                 probe_io.close()
 
 
-def convert_visual_behavior_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
+def convert_visual_behavior_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
     """Convert NWB HDF5 file to Zarr.
 
-    Reads the input placeholder file from INPUT_FILE_DIR, downloads the actual
-    NWB files from S3, and converts to Zarr format.
+    Reads the input file from INPUT_FILE_DIR (a file named with a row index),
+    uses that index to look up the session in the behavior_sessions.csv table
+    from S3, queries ecephys_sessions.csv to determine if ecephys data exists,
+    downloads the actual NWB files from S3, and converts to Zarr format.
 
     Args:
         results_dir: Directory to save the converted Zarr file.
         scratch_dir: Directory to download NWB files to.
 
     Returns:
-        Path to the converted Zarr file, or None if no input files found.
+        Path to the converted Zarr file.
     """
-    # Confirm there is only one input file in the input directory
-    input_files = list(sorted(INPUT_FILE_DIR.glob("*.nwb")))
-    if not input_files:
-        print(f"No NWB files found in {INPUT_FILE_DIR}")
-        return None
-    elif len(input_files) > 1:
-        # TODO uncomment after testing
-        pass
-        # raise RuntimeError(
-        #     f"Expected exactly one NWB file in {INPUT_FILE_DIR}, "
-        #     f"found {len(input_files)} files."
-        # )
-    input_file = input_files[-1]
-
-    # Parse session ID and type from filename
-    # Patterns: ecephys_session_{session_id}.nwb or behavior_session_{session_id}.nwb
-    filename_stem = input_file.stem
-    if filename_stem.startswith("ecephys_session_"):
-        session_id = int(filename_stem.replace("ecephys_session_", ""))
-        session_type = "behavior_ephys"
-        zarr_filename = f"ecephys_session_{session_id}.nwb.zarr"
-    elif filename_stem.startswith("behavior_session_"):
-        session_id = int(filename_stem.replace("behavior_session_", ""))
-        session_type = "behavior"
-        zarr_filename = f"behavior_session_{session_id}.nwb.zarr"
-    else:
-        raise ValueError(
-            f"Unexpected filename format: {input_file.name}. "
-            f"Expected ecephys_session_{{session_id}}.nwb or behavior_session_{{session_id}}.nwb"
+    # Confirm there is exactly one input file in the input directory
+    input_files = list(INPUT_FILE_DIR.iterdir())
+    if len(input_files) != 1:
+        raise RuntimeError(
+            f"Expected exactly one input file in {INPUT_FILE_DIR}, "
+            f"found {len(input_files)} files."
         )
+    input_file = input_files[0]
 
-    print(f"Processing {session_type} session {session_id} ...")
+    # Parse row index from filename
+    row_index = int(input_file.name)
+    print(f"Processing row index {row_index} ...")
+
+    # Download session metadata from S3
+    print("Downloading behavior_sessions.csv from S3 ...")
+    b = q3.Bucket(S3_BUCKET)
+    behavior_csv_path = scratch_dir / "behavior_sessions.csv"
+    b.fetch(S3_BEHAVIOR_SESSIONS_CSV, behavior_csv_path.as_posix())
+    behavior_sessions_df = pd.read_csv(behavior_csv_path)
+
+    # Get the row at the specified index
+    if row_index < 0 or row_index >= len(behavior_sessions_df):
+        raise RuntimeError(
+            f"Row index {row_index} out of range. "
+            f"Table has {len(behavior_sessions_df)} rows (0-{len(behavior_sessions_df)-1})."
+        )
+    session_row = behavior_sessions_df.iloc[row_index]
+    behavior_session_id = int(session_row['behavior_session_id'])
+    print(f"Behavior session ID: {behavior_session_id}")
+
+    # Download ecephys_sessions.csv to check if this is a behavior+ephys session
+    print("Downloading ecephys_sessions.csv from S3 ...")
+    ecephys_csv_path = scratch_dir / "ecephys_sessions.csv"
+    b.fetch(S3_ECEPHYS_SESSIONS_CSV, ecephys_csv_path.as_posix())
+    ecephys_sessions_df = pd.read_csv(ecephys_csv_path)
+
+    # Check if this behavior session has associated ecephys data
+    ecephys_match = ecephys_sessions_df[
+        ecephys_sessions_df['behavior_session_id'] == behavior_session_id
+    ]
+
+    if len(ecephys_match) > 0:
+        # This is a behavior+ephys session
+        ecephys_session_id = int(ecephys_match.iloc[0]['ecephys_session_id'])
+        session_type = "behavior_ephys"
+        zarr_filename = f"ecephys_session_{ecephys_session_id}.nwb.zarr"
+        download_session_id = ecephys_session_id
+        print(f"Found ecephys session ID: {ecephys_session_id} (behavior+ephys session)")
+    else:
+        # This is a behavior-only session
+        session_type = "behavior"
+        zarr_filename = f"behavior_session_{behavior_session_id}.nwb.zarr"
+        download_session_id = behavior_session_id
+        print(f"No ecephys data found (behavior-only session)")
 
     # Download session files from S3
     base_file_path, probe_file_paths = download_visual_behavior_ephys_session_files(
-        session_id=session_id,
+        session_id=download_session_id,
         session_type=session_type,
         scratch_dir=scratch_dir,
     )

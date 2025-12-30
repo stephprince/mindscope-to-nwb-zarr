@@ -75,7 +75,7 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
 - Rename/reorganize processing modules to be more conventional:
    - optotagging -> ogen
    - current_source_density -> ecephys
-
+- Convert and add raw highpass data to the NWB file from the S3 bucket.
 
 ### Visual Coding Ephys
 - Add stimulus template data for natural scenes, natural movies, and natural movie shuffled stimuli
@@ -85,7 +85,7 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
 - Times in the "intervals/invalid_times" table are not in increasing order and should be to conform with NWB best practices.
 - The raw LFP data is stored with gzip level 9 compression, which has a high compression ratio but is very slow to write and read. Consider using a faster compression algorithm or lower compression level, like Blosc-zstd level 5.
 
-### AIND Metadata Extraction 
+## AIND Metadata Extraction 
 - Look into the subject DOB, age, and related procedures for the Visual Coding Neuropixels dataset. For example, looking at specimen ID 699733581 / mouse ID 386129, from the subject metadata we get a DOB of 2018-03-02 and from the procedures metadata we get a perfusion recorded on 2018-06-28. However, the NWB file/allensdk metadata says the data acquisition date is 2019-01-19T08:54:18Z and the age is 118D (which matches the date of the perfusion, but does not match the data of data acquisition for that animal’s supposed DOB). 
 - Look into missing anesthesia duration information for some procedures.
 - Look into missing maternal/paternal genotype breeding info for some subjects.
