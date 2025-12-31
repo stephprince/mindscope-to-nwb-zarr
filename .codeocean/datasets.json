@@ -10,12 +10,24 @@
 			"mount": "visual-behavior-ophys-inputs"
 		},
 		{
+			"id": "a63a5366-59e9-4ace-9b1d-d3d0b72a264a",
+			"mount": "allen-brain-observatory"
+		},
+		{
+			"id": "cab43d4e-e1dd-437b-9c37-544f8911c4d9",
+			"mount": "visual-behavior-ophys"
+		},
+		{
 			"id": "ce969f4d-2762-48b1-b246-80e45460e21e",
 			"mount": "visual-coding-ephys-inputs"
 		},
 		{
 			"id": "cfea6dbb-6f78-4ea4-a065-c05e57deae54",
 			"mount": "visual-behavior-ephys-inputs"
+		},
+		{
+			"id": "d6805a10-89fc-4b22-a9b3-99ce5a44756b",
+			"mount": "visual-behavior-neuropixels"
 		}
 	]
 }
