@@ -13,7 +13,7 @@ from aind_data_schema.core.data_description import Funding, DataDescription
 from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
 
-def generate_data_description(nwbfile: NWBFile, session_info: pd.DataFrame) -> DataDescription:
+def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> DataDescription:
     """Create the DataDescription object
     our data always contains planar optical physiology and behavior videos
     """

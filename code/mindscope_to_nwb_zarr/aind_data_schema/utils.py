@@ -19,11 +19,11 @@ from datetime import datetime, timezone, timedelta
 from pynwb import NWBFile
 
 
-def get_subject_id(nwbfile: NWBFile, session_info: pd.DataFrame = None) -> str:
+def get_subject_id(nwbfile: NWBFile, session_info: pd.Series = None) -> str:
     """Get the subject ID from the NWB file, cross-checked with the session info. e.g., "457841".
     """
     if session_info is not None:
-        assert session_info['mouse_id'].values[0] == int(nwbfile.subject.subject_id), "subject_id mismatch occurred"
+        assert session_info['mouse_id'] == int(nwbfile.subject.subject_id), "subject_id mismatch occurred"
     return nwbfile.subject.subject_id
 
 
@@ -45,13 +45,13 @@ def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
     return date_of_birth
 
 
-def get_session_start_time(nwbfile: NWBFile, session_info: pd.DataFrame) -> datetime:
-    """Get the session start time from the NWB file, cross-checked with the session info. 
+def get_session_start_time(nwbfile: NWBFile, session_info: pd.Series) -> datetime:
+    """Get the session start time from the NWB file, cross-checked with the session info.
     e.g., datetime object for 2018-08-24T14:51:25.667000+00:00
     """
-    session_time = datetime.fromisoformat(session_info['date_of_acquisition'].values[0])
+    session_time = datetime.fromisoformat(session_info['date_of_acquisition'])
     session_time_utc = session_time.astimezone(timezone.utc).replace(microsecond=0)
-    nwb_time_utc = nwbfile.session_start_time.astimezone(timezone.utc).replace(microsecond=0)   
+    nwb_time_utc = nwbfile.session_start_time.astimezone(timezone.utc).replace(microsecond=0)
 
     if session_time_utc != nwb_time_utc:
         warnings.warn(
@@ -62,10 +62,10 @@ def get_session_start_time(nwbfile: NWBFile, session_info: pd.DataFrame) -> date
     return nwbfile.session_start_time
 
 
-def get_instrument_id(nwbfile: NWBFile, session_info) -> str:
+def get_instrument_id(nwbfile: NWBFile, session_info: pd.Series) -> str:
     """Get the instrument ID from the NWB file, cross-checked with the session info. e.g. "BEH.F-Box1"."""
     instrument = next(iter(nwbfile.devices))
-    assert session_info['equipment_name'].values[0] == instrument, "instrument_id mismatch occurred"
+    assert session_info['equipment_name'] == instrument, "instrument_id mismatch occurred"
     return instrument
 
 
@@ -86,12 +86,12 @@ def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
     return None
 
 
-def get_curriculum_status(session_info):
+def get_curriculum_status(session_info: pd.Series):
     # NOTE - nwbfile.lab_meta_data['task_parameters'] also has several task parameters for behavior files that might be useful to record
     keys = ["experience_level", "image_set", "session_number", "prior_exposures_to_image_set",
             "prior_exposures_to_omissions", "prior_exposures_to_session_type"]
-    curriculum_dict = {k: session_info[k].values[0] for k in keys if k in session_info.columns}
-    
+    curriculum_dict = {k: session_info[k] for k in keys if k in session_info.index}
+
     return json.dumps(curriculum_dict, cls=NumpyJsonEncoder)
 
 
@@ -286,7 +286,7 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
 
 
 def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, intervals_table: pd.DataFrame,
-                                         nwbfile: NWBFile, session_info: pd.DataFrame = None) -> StimulusEpoch:
+                                         nwbfile: NWBFile, session_info: pd.Series = None) -> StimulusEpoch:
     """Convert intervals table to a StimulusEpoch object.
 
     Parameters
@@ -325,7 +325,7 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
         notes=None,
         active_devices=["None"],
         performance_metrics=None,  # TODO - see if these are accessible anywhere?
-        training_protocol_name=session_info["session_type"].values[0] if session_info is not None else None,  # e.g., "TRAINING_0_gratings_autorewards_15min"
+        training_protocol_name=session_info["session_type"] if session_info is not None else None,  # e.g., "TRAINING_0_gratings_autorewards_15min"
         curriculum_status=get_curriculum_status(session_info) if session_info is not None else None,
     )
 

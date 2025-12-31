@@ -47,7 +47,7 @@ BEHAVIOR_SESSION_TABLE_CSV_PATH = "C:/Users/Ryan/Documents/mindscope-to-nwb-zarr
 behavior_session_table = pd.read_csv(BEHAVIOR_SESSION_TABLE_CSV_PATH)
 
 
-def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.DataFrame) -> VisualStimulation:
+def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.Series) -> VisualStimulation:
     """Extract visual stimulation information from NWB file"""
     stimulus_parameters = {
         # TODO update for different stages
@@ -70,7 +70,7 @@ def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.DataFrame) -> Visu
             stimulus_parameters[key] = value.tolist()
 
     visual_stimulation = VisualStimulation(
-        stimulus_name=session_info["image_set"].values[0], # e.g., "gratings" or "images_A"
+        stimulus_name=session_info["image_set"],  # e.g., "gratings" or "images_A"
         stimulus_parameters=stimulus_parameters,
         stimulus_template_name=nwbfile.stimulus_template["grating"].control_description[:].tolist(),
         notes=None,
@@ -155,13 +155,13 @@ def generate_acquisition_json(file_path: str) -> Acquisition:
                 notes=None,
                 active_devices=list(),
                 configurations=list(), # TODO - think the options provided do not apply, except maybe labor configurations
-                training_protocol_name=session_info["session_type"].values[0],  # e.g., "TRAINING_0_gratings_autorewards_15min"
+                training_protocol_name=session_info["session_type"],  # e.g., "TRAINING_0_gratings_autorewards_15min"
                 curriculum_status=serialized_dict(
-                    behavior_type=session_info["behavior_type"].values[0],  # e.g., "active_behavior"
-                    experience_level=session_info["experience_level"].values[0],  # e.g., "Training"
-                    prior_exposures_to_image_set=session_info["prior_exposures_to_image_set"].values[0],  # e.g., nan
-                    prior_exposures_to_omissions=session_info["prior_exposures_to_omissions"].values[0],  # e.g., 0
-                    prior_exposures_to_session_type=session_info["prior_exposures_to_session_type"].values[0],  # e.g., 0
+                    behavior_type=session_info["behavior_type"],  # e.g., "active_behavior"
+                    experience_level=session_info["experience_level"],  # e.g., "Training"
+                    prior_exposures_to_image_set=session_info["prior_exposures_to_image_set"],  # e.g., nan
+                    prior_exposures_to_omissions=session_info["prior_exposures_to_omissions"],  # e.g., 0
+                    prior_exposures_to_session_type=session_info["prior_exposures_to_session_type"],  # e.g., 0
                 )
             ),
         ], 

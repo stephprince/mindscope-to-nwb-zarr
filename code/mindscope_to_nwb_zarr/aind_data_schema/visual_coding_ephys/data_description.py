@@ -14,7 +14,7 @@ from aind_data_schema.core.data_description import Funding, DataDescription
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
 
 
-def generate_data_description(nwbfile: NWBFile, session_info: pd.DataFrame) -> DataDescription:
+def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> DataDescription:
     """
     Generate a DataDescription model from an NWB file and session metadata.
 
@@ -22,8 +22,8 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.DataFrame) -> D
     ----------
     nwbfile : NWBFile
         NWB file containing data description information
-    session_info : pd.DataFrame
-        Session metadata information
+    session_info : pd.Series
+        Session metadata row
 
     Returns
     -------

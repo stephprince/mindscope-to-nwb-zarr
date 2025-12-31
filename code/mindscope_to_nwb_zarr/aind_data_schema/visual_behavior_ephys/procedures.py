@@ -48,7 +48,7 @@ def _fix_procedures_validation_issues(subject_procedures: list) -> list:
     return subject_procedures
 
 
-def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.DataFrame, api_host: Optional[str] = None) -> Optional[Procedures]:
+def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.Series, api_host: Optional[str] = None) -> Optional[Procedures]:
     """
     Fetch procedures metadata from AIND metadata service API
 
@@ -56,8 +56,8 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: 
     ----------
     nwbfile : NWBFile
         The NWB file containing subject information to extract subject ID
-    session_info : pd.DataFrame
-        DataFrame containing session information to extract subject ID
+    session_info : pd.Series
+        Series containing session information to extract subject ID
     api_host : str, optional
         The API host URL. Defaults to "http://aind-metadata-service"
 

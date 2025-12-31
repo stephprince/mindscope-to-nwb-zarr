@@ -19,7 +19,7 @@ from urllib3.exceptions import HTTPError as Urllib3HTTPError
 import json
 
 
-def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.DataFrame, api_host: Optional[str] = None) -> Optional[Subject]:
+def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.Series, api_host: Optional[str] = None) -> Optional[Subject]:
     """
     Fetch subject metadata from AIND metadata service API
 
@@ -27,8 +27,8 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
     ----------
     nwbfile : NWBFile
         The NWB file containing subject information for validation
-    session_info : pd.DataFrame
-        DataFrame containing session information to extract subject ID
+    session_info : pd.Series
+        Series containing session information to extract subject ID
     api_host : str, optional
         The API host URL. Defaults to "http://aind-metadata-service"
 

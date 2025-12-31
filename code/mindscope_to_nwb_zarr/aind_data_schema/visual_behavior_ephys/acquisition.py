@@ -40,7 +40,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
 )
 
 
-def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.DataFrame) -> list[StimulusEpoch]:
+def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[StimulusEpoch]:
     """
     Extract stimulus epochs from NWB file intervals tables.
 
@@ -48,8 +48,8 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.DataFrame) -> list
     ----------
     nwbfile : NWBFile
         NWB file containing intervals tables
-    session_info : pd.DataFrame
-        Session metadata information
+    session_info : pd.Series
+        Session metadata row
 
     Returns
     -------
@@ -126,7 +126,7 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.DataFrame) -> list
     return stimulation_epochs
 
 
-def generate_acquisition(nwbfile: NWBFile, session_info: pd.DataFrame) -> Acquisition:
+def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisition:
     """
     Generate an Acquisition model from an NWB file and session metadata.
 
@@ -134,8 +134,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.DataFrame) -> Acquis
     ----------
     nwbfile : NWBFile
         NWB file containing acquisition data
-    session_info : pd.DataFrame
-        Session metadata information
+    session_info : pd.Series
+        Session metadata row
 
     Returns
     -------
