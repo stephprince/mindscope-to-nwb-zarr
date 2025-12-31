@@ -75,7 +75,7 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
     imaging_plane = next(iter(nwbfile.imaging_planes.values()))
 
     assert imaging_plane.name == "imaging_plane_1"
-    assert imaging_plane.indicator == "GCaMP6f"
+    assert imaging_plane.indicator in ("GCaMP6f", "GCaMP6s")
     assert imaging_plane.excitation_lambda == 910
     assert imaging_plane.location is not None
     assert imaging_plane.description is not None

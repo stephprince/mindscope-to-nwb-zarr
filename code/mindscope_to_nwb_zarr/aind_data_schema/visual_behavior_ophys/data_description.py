@@ -35,7 +35,7 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
             "Two-photon calcium imaging data from the Allen Brain Observatory "
             "Visual Behavior project. Mice were trained to perform a visual "
             "change detection task where they learned to lick in response to "
-            "changes in natural scene images. GCaMP6f-expressing neurons were "
+            "changes in natural scene images. GCaMP6-expressing neurons were "
             "imaged in visual cortex (VISp, VISl, VISal, VISpm, VISam) and "
             "higher visual areas across multiple sessions, enabling tracking "
             "of individual neurons over days to weeks. The dataset includes "
