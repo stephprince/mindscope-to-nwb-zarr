@@ -46,7 +46,7 @@ def run():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--results_dir", type=str, default="../results/")
-    parser.add_argument("--metadata", action="store_true", help=(
+    parser.add_argument("--metadata", type=str, choices=["True", "False"], default="False", help=(
         "Generate session metadata for all files in data directory and do NOT generate Zarr files"
     ))
 
@@ -55,7 +55,7 @@ def run():
     results_dir = Path(args.results_dir)
 
     # Handle metadata generation mode
-    if args.metadata:
+    if args.metadata == "True":
         generate_metadata_for_dataset(dataset, data_folder, results_dir)
         return
 
