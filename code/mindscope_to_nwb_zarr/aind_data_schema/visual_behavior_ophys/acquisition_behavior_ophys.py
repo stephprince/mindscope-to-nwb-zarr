@@ -477,15 +477,16 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                         exposure_time_unit=TimeUnit.MS,
                         trigger_type=TriggerType.INTERNAL,
                     ),
-                    LickSpoutConfig(  # Lick spout is specific to the rig
-                        device_name="Lick_Spout_1",  # placeholder
-                        solution=Liquid.WATER,
-                        solution_valence=Valence.POSITIVE,
-                        volume=get_individual_reward_volume(nwbfile),
-                        volume_unit=VolumeUnit.ML,
-                        relative_position=["Anterior"],
-                        notes="",  # TODO - write that reward volume was both x and y
-                    )
+                    # TODO: Some sessions have no rewards
+                    # LickSpoutConfig(  # Lick spout is specific to the rig
+                    #     device_name="Lick_Spout_1",  # placeholder
+                    #     solution=Liquid.WATER,
+                    #     solution_valence=Valence.POSITIVE,
+                    #     volume=get_individual_reward_volume(nwbfile),
+                    #     volume_unit=VolumeUnit.ML,
+                    #     relative_position=["Anterior"],
+                    #     notes="",  # TODO - write that reward volume was both x and y
+                    # )
                 ],
             ),
         ],

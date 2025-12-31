@@ -126,14 +126,15 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                     "Lick_Spout_1",  # placeholder
                 ],
                 configurations=[
-                    LickSpoutConfig(  # Lick spout is specific to the rig
-                        device_name="Lick_Spout_1",  # placeholder
-                        solution=Liquid.WATER,
-                        solution_valence=Valence.POSITIVE,
-                        volume=get_individual_reward_volume(nwbfile), # TODO - what to do if multiple? this does happen
-                        volume_unit=VolumeUnit.ML,
-                        relative_position=["Anterior"], # TODO - what is the correct information here
-                    )
+                    # TODO: some sessions have no rewards
+                    # LickSpoutConfig(  # Lick spout is specific to the rig
+                    #     device_name="Lick_Spout_1",  # placeholder
+                    #     solution=Liquid.WATER,
+                    #     solution_valence=Valence.POSITIVE,
+                    #     volume=get_individual_reward_volume(nwbfile),
+                    #     volume_unit=VolumeUnit.ML,
+                    #     relative_position=["Anterior"], # TODO - what is the correct information here
+                    # )
                 ],
             ),
         ],
