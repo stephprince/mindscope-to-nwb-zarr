@@ -90,7 +90,7 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
     assert imaging_plane.optical_channel[0].emission_lambda == 520  # nm
 
     # NOTE: for multi-plane sessions, the imaging plane in each NWB file has a different description
-    imaging_plane_description_pattern = "\((\d+), (\d+)\) field of view in (\w+) at depth (\d+) um"
+    imaging_plane_description_pattern = r"\((\d+), (\d+)\) field of view in (\w+) at depth (\d+) um"
     imaging_plane_description_re_match = re.search(imaging_plane_description_pattern, imaging_plane.description)
     assert imaging_plane_description_re_match, f"Imaging plane description does not match expected pattern: {imaging_plane.description}"
 
@@ -138,7 +138,7 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
     assert ophys_behavior_metadata.equipment_name == device.name
 
     if is_single_plane:
-        assert re.match("CAM2P\.\d", session_info["equipment_name"])
+        assert re.match(r"CAM2P\.\d", session_info["equipment_name"])
     else:
         assert session_info["equipment_name"] == "MESO.1"
     assert session_info["equipment_name"] == device.name
