@@ -99,18 +99,31 @@ We can visualize the [maximum projection](maximum_projection) for each session a
 
 ```{code-cell} ipython3
 # Get max projections from each session
-mp_a = nwb_a.processing["ophys"]["SummaryImages"].images["max_projection"].data[:]
-mp_b = nwb_b.processing["ophys"]["SummaryImages"].images["max_projection"].data[:]
-mp_c = nwb_c.processing["ophys"]["SummaryImages"].images["max_projection"].data[:]
+mp_a = nwb_a.processing["ophys"]["SummaryImages"].images["maximum_intensity_projection"].data[:]
+mp_b = nwb_b.processing["ophys"]["SummaryImages"].images["maximum_intensity_projection"].data[:]
+mp_c = nwb_c.processing["ophys"]["SummaryImages"].images["maximum_intensity_projection"].data[:]
 
 # Get ROI masks from each session
 plane_seg_a = nwb_a.processing["ophys"]["ImageSegmentation"]["PlaneSegmentation"]
 plane_seg_b = nwb_b.processing["ophys"]["ImageSegmentation"]["PlaneSegmentation"]
 plane_seg_c = nwb_c.processing["ophys"]["ImageSegmentation"]["PlaneSegmentation"]
 
-rois_a = np.array([plane_seg_a["image_mask"][i] for i in range(len(cell_ids_a))])
-rois_b = np.array([plane_seg_b["image_mask"][i] for i in range(len(cell_ids_b))])
-rois_c = np.array([plane_seg_c["image_mask"][i] for i in range(len(cell_ids_c))])
+# Convert sparse pixel_mask to dense image masks for visualization
+image_height, image_width = 512, 512
+
+def pixel_mask_to_image_mask(pixel_mask, height, width):
+    """Convert sparse pixel_mask to dense image mask."""
+    mask = np.zeros((height, width), dtype=np.float32)
+    for x, y, weight in pixel_mask:
+        mask[int(y), int(x)] = weight
+    return mask
+
+rois_a = np.array([pixel_mask_to_image_mask(plane_seg_a["pixel_mask"][i], image_height, image_width)
+                   for i in range(len(cell_ids_a))])
+rois_b = np.array([pixel_mask_to_image_mask(plane_seg_b["pixel_mask"][i], image_height, image_width)
+                   for i in range(len(cell_ids_b))])
+rois_c = np.array([pixel_mask_to_image_mask(plane_seg_c["pixel_mask"][i], image_height, image_width)
+                   for i in range(len(cell_ids_c))])
 
 fig = plt.figure(figsize=(12,5))
 ax1 = plt.subplot(131)

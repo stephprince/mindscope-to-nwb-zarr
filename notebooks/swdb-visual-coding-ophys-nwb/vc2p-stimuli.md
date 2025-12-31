@@ -38,9 +38,9 @@ nwb_paths = {
 # Mapping from stimulus name to session type
 stimulus_to_session = {
     'drifting_gratings': 'StimA',
-    'natural_movie_one': 'StimA',  # Also in StimB and StimC
+    'natural_movie_one': 'StimB',  # Also in StimA and StimC
     'natural_movie_three': 'StimA',
-    'spontaneous': 'StimA',  # Also in StimB and StimC
+    'spontaneous': 'StimC',  # Also in StimA and StimB
     'static_gratings': 'StimB',
     'natural_scenes': 'StimB',
     'natural_movie_two': 'StimB',
@@ -104,7 +104,9 @@ drifting_gratings_table = drifting_gratings_table.rename(columns={
 # Add start and end frame indices using the DfOverF timestamps
 dff_timestamps = get_dff_timestamps_for_stimulus('drifting_gratings')
 drifting_gratings_table['start'] = np.searchsorted(dff_timestamps, drifting_gratings_table['start_time'])
-drifting_gratings_table['end'] = np.searchsorted(dff_timestamps, drifting_gratings_table['stop_time'])
+# End is inclusive (last frame of trial), matching AllenSDK convention
+# TODO: Some of the end times are still off by one from the previous frame timestamps from the AllenSDK
+drifting_gratings_table['end'] = np.searchsorted(dff_timestamps, drifting_gratings_table['stop_time']) - 1
 
 drifting_gratings_table.head(n=10)
 ```
@@ -153,6 +155,7 @@ What is the duration of a trial?
 plt.figure(figsize=(6,3))
 durations = drifting_gratings_table.end - drifting_gratings_table.start
 plt.hist(durations);
+# TODO: The previous notebook shows some jitter in durations where about 200 have duration 59 frames
 ```
 
 Most trials have a duration of 60 imaging frames. As the two photon microscope we use has a frame rate of 30Hz this is 2 seconds. But you can see that there is some jitter across trials as to the precise duration.
@@ -164,6 +167,7 @@ intervals = np.empty((100))
 for i in range(100):
     intervals[i] = drifting_gratings_table.start.iloc[i+1] - drifting_gratings_table.end.iloc[i]
 plt.hist(intervals);
+# TODO: Note that the original figure incorrectly plotted intervals
 ```
 
 ## Static gratings
@@ -189,9 +193,11 @@ static_gratings_table = static_gratings_table.rename(columns={
 # Add start and end frame indices using the DfOverF timestamps
 dff_timestamps = get_dff_timestamps_for_stimulus('static_gratings')
 static_gratings_table['start'] = np.searchsorted(dff_timestamps, static_gratings_table['start_time'])
-static_gratings_table['end'] = np.searchsorted(dff_timestamps, static_gratings_table['stop_time'])
+# End is inclusive (last frame of trial), matching AllenSDK convention
+static_gratings_table['end'] = np.searchsorted(dff_timestamps, static_gratings_table['stop_time']) - 1
 
 static_gratings_table.head(n=10)
+# TODO: There should be at least 192 trials, not just 3. The NWB files on DANDI have only 3 for both StimA and StimB. Also the original table does not have a blank_sweep column.
 ```
 
 start
@@ -282,8 +288,10 @@ natural_scenes_table = pd.DataFrame({
 # Add start and end frame indices using the DfOverF timestamps
 dff_timestamps = get_dff_timestamps_for_stimulus('natural_scenes')
 natural_scenes_table['start'] = np.searchsorted(dff_timestamps, natural_scenes.timestamps[:])
-# Each stimulus is followed immediately by the next, so end = next start (or last frame for final trial)
-natural_scenes_table['end'] = np.append(natural_scenes_table['start'].values[1:], len(dff_timestamps))
+# Compute end times from consecutive start times, then convert to frame indices
+# End is inclusive (last frame of trial), matching AllenSDK convention
+stop_times = np.append(natural_scenes.timestamps[1:], dff_timestamps[-1])
+natural_scenes_table['end'] = np.searchsorted(dff_timestamps, stop_times) - 1
 
 natural_scenes_table.head(n=10)
 ```
@@ -305,6 +313,7 @@ How many blank sweep trials are there?
 
 ```{code-cell} ipython3
 len(natural_scenes_table[natural_scenes_table.frame==-1])
+# TODO: The original notebook shows 50 blank sweeps but the NWB 2.0 files on DANDI have 0 with frame==-1.
 ```
 
 How many trials are there of any one image?
@@ -364,10 +373,13 @@ natural_movie_table['repeat'] = natural_movie_table.index // frames_per_repeat
 # Add start and end frame indices using the DfOverF timestamps
 dff_timestamps = get_dff_timestamps_for_stimulus('natural_movie_one')
 natural_movie_table['start'] = np.searchsorted(dff_timestamps, natural_movie_one.timestamps[:])
-# Each frame is followed immediately by the next, so end = next start (or last frame for final trial)
-natural_movie_table['end'] = np.append(natural_movie_table['start'].values[1:], len(dff_timestamps))
+# Compute end times from consecutive start times, then convert to frame indices
+# End is inclusive (last frame of trial), matching AllenSDK convention
+stop_times = np.append(natural_movie_one.timestamps[1:], dff_timestamps[-1])
+natural_movie_table['end'] = np.searchsorted(dff_timestamps, stop_times) - 1
 
 natural_movie_table.head(n=10)
+# TODO Which file was used out of the three? The original notebook start starts with 70307
 ```
 
 start
@@ -430,8 +442,11 @@ lsn_table = pd.DataFrame({
 # Add start and end frame indices using the DfOverF timestamps
 dff_timestamps = get_dff_timestamps_for_stimulus('locally_sparse_noise')
 lsn_table['start'] = np.searchsorted(dff_timestamps, lsn.timestamps[:])
-# Each stimulus is followed immediately by the next, so end = next start (or last frame for final trial)
-lsn_table['end'] = np.append(lsn_table['start'].values[1:], len(dff_timestamps))
+# Compute end times from consecutive start times, then convert to frame indices
+# End is inclusive (last frame of trial), matching AllenSDK convention
+# TODO: Some of the end times are still off by one from the previous frame timestamps from the AllenSDK
+stop_times = np.append(lsn.timestamps[1:], dff_timestamps[-1])
+lsn_table['end'] = np.searchsorted(dff_timestamps, stop_times) - 1
 
 lsn_table.head(n=10)
 ```
@@ -451,6 +466,7 @@ What is the duration of a trial?
 plt.figure(figsize=(6,3))
 durations = lsn_table.end - lsn_table.start
 plt.hist(durations);
+# One of the lsn_table.end is way off to make the histogram skewed.
 ```
 
 The locally sparse noise stimuli have the same temporal structure as the natural scenes and static gratings. Each image is presented for 0.25s (~7 frames) and is followed immediately by the next image.
@@ -481,7 +497,8 @@ spont_table = nwb.stimulus["spontaneous_stimulus"].to_dataframe()
 # Add start and end frame indices using the DfOverF timestamps
 dff_timestamps = get_dff_timestamps_for_stimulus('spontaneous')
 spont_table['start'] = np.searchsorted(dff_timestamps, spont_table['start_time'])
-spont_table['end'] = np.searchsorted(dff_timestamps, spont_table['stop_time'])
+# End is inclusive (last frame of epoch), matching AllenSDK convention
+spont_table['end'] = np.searchsorted(dff_timestamps, spont_table['stop_time']) - 1
 
 spont_table
 ```

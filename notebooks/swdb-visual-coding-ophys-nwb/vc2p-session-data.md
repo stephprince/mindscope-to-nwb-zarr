@@ -36,9 +36,9 @@ nwb_paths = {
 # Mapping from stimulus name to session type
 stimulus_to_session = {
     'drifting_gratings': 'StimA',
-    'natural_movie_one': 'StimA',  # Also in StimB and StimC
+    'natural_movie_one': 'StimB',  # Also in StimA and StimC
     'natural_movie_three': 'StimA',
-    'spontaneous': 'StimA',  # Also in StimB and StimC
+    'spontaneous': 'StimC',  # Also in StimA and StimB
     'static_gratings': 'StimB',
     'natural_scenes': 'StimB',
     'natural_movie_two': 'StimB',
@@ -89,7 +89,7 @@ This is the projection of the full motion corrected movie. It shows all of the c
 ```{code-cell} ipython3
 # Summary images are stored in the ophys processing module
 summary_images = nwb.processing["ophys"]["SummaryImages"]
-max_projection = summary_images.images["max_projection"].data[:]
+max_projection = summary_images.images["maximum_intensity_projection"].data[:]
 ```
 
 ```{code-cell} ipython3
@@ -106,14 +106,24 @@ plt.axis('off')
 # ROI masks are stored in the PlaneSegmentation table
 plane_seg = nwb.processing["ophys"]["ImageSegmentation"]["PlaneSegmentation"]
 
-# Get image masks - each row is one ROI
-# The masks are stored as a ragged array, so we need to reconstruct them
-image_masks = plane_seg["image_mask"]
-
-# Get the image dimensions from the first mask
-# Reconstruct as a 3D array (n_rois, height, width)
+# Get pixel masks - stored as sparse format (list of [x, y, weight] for each ROI)
+# We need to convert to dense image masks for visualization
 n_rois = len(plane_seg.id[:])
-rois = np.array([image_masks[i] for i in range(n_rois)])
+
+# Get image dimensions from the imaging plane
+image_height = plane_seg.imaging_plane.grid_spacing_unit  # This won't work, need actual dims
+# The image dimensions are typically 512x512 for this dataset
+image_height, image_width = 512, 512
+
+def pixel_mask_to_image_mask(pixel_mask, height, width):
+    """Convert sparse pixel_mask to dense image mask."""
+    mask = np.zeros((height, width), dtype=np.float32)
+    for x, y, weight in pixel_mask:
+        mask[int(y), int(x)] = weight
+    return mask
+
+rois = np.array([pixel_mask_to_image_mask(plane_seg["pixel_mask"][i], image_height, image_width)
+                 for i in range(n_rois)])
 ```
 
 What is the shape of this array? How many neurons are in this experiment?

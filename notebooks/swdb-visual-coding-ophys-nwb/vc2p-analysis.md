@@ -82,7 +82,10 @@ stim_table = pd.DataFrame({
     'frame': natural_scenes.data[:],
 })
 stim_table['start'] = np.searchsorted(timestamps, natural_scenes.timestamps[:])
-stim_table['end'] = np.append(stim_table['start'].values[1:], len(timestamps))
+# Compute end times from consecutive start times, then convert to frame indices
+# End is inclusive (last frame of trial), matching AllenSDK convention
+stop_times = np.append(natural_scenes.timestamps[1:], timestamps[-1])
+stim_table['end'] = np.searchsorted(timestamps, stop_times) - 1
 
 # Calculate stimulus timing parameters
 sweeplength = stim_table.end.iloc[1] - stim_table.start.iloc[1]

@@ -89,8 +89,10 @@ stim_table = pd.DataFrame({
 
 # Add start and end frame indices using the DfOverF timestamps
 stim_table['start'] = np.searchsorted(ts, natural_scenes.timestamps[:])
-# Each stimulus is followed immediately by the next, so end = next start (or last frame for final trial)
-stim_table['end'] = np.append(stim_table['start'].values[1:], len(ts))
+# Compute end times from consecutive start times, then convert to frame indices
+# End is inclusive (last frame of trial), matching AllenSDK convention
+stop_times = np.append(natural_scenes.timestamps[1:], ts[-1])
+stim_table['end'] = np.searchsorted(ts, stop_times) - 1
 
 stim_table.head(n=10)
 ```
