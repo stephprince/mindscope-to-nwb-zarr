@@ -160,6 +160,7 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
                     # 6 probes, each targets a cortical visual area (e.g. VISp, VISl, VISal, VISrl, VISam, VISpm)
                     # would list that specific area as the primary targeted structure
                     # should be the same for every experiment, most files should have majority of one
+                    # TODO: some sessions, e.g., 737581020 and 743475441 have a probe with no targeted structures in the above 6 visual areas. VISmma is listed but not in CCFv3. @Saskia to decide how to handle this case because this field is required.
                     primary_targeted_structure=targeted_structure[0],
                     other_targeted_structure=list(set(all_structures) - set(targeted_structure)), # TODO - currently listing all other structures that are hit but might want to not list everything
                     atlas_coordinate=AtlasCoordinate(
@@ -173,8 +174,13 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
                 )
             )
 
-    if len(set(all_targeted_structures)) != len(all_targeted_structures):
-        warnings.warn(f"Multiple probes targeting same brain structure found: {all_targeted_structures}")
+    # In visual coding ephys, multiple probes sometimes target the same structure, e.g.:
+    # session 746083955 (row 9): Multiple probes targeting same brain structure found: VISpm, VISpm, VISp, VISl, VISal, VISrl.
+    # session 751348571 (row 12): Multiple probes targeting same brain structure found: VISam, VISpm, VISp, VISl, VISrl, VISrl.
+    # session 754829445 (row 14): Multiple probes targeting same brain structure found: VISam, VISpm, VISp, VISl, VISrl, VISp.
+    # so commenting out this warning for now. @Saskia to verify this is expected behavior.
+    # if len(set(all_targeted_structures)) != len(all_targeted_structures):
+    #     warnings.warn(f"Multiple probes targeting same brain structure found: {all_targeted_structures}")
 
     return probe_configs
 
