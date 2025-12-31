@@ -379,7 +379,6 @@ stop_times = np.append(natural_movie_one.timestamps[1:], dff_timestamps[-1])
 natural_movie_table['end'] = np.searchsorted(dff_timestamps, stop_times) - 1
 
 natural_movie_table.head(n=10)
-# TODO Which file was used out of the three? The original notebook start starts with 70307
 ```
 
 start
