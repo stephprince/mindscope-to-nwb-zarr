@@ -76,15 +76,16 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
             stimulation_epochs.append(stim_epoch)
 
             passive_intervals = intervals_table.to_dataframe().query('active == False')
-            stimulus_name = "Change detection - Passive replay"
-            stim_epoch = convert_intervals_to_stimulus_epochs(
-                stimulus_name=stimulus_name,
-                table_key=table_key,
-                intervals_table=passive_intervals,
-                nwbfile=nwbfile,
-                session_info=session_info,
-            )
-            stimulation_epochs.append(stim_epoch)
+            if len(passive_intervals) > 0:
+                stimulus_name = "Change detection - Passive replay"
+                stim_epoch = convert_intervals_to_stimulus_epochs(
+                    stimulus_name=stimulus_name,
+                    table_key=table_key,
+                    intervals_table=passive_intervals,
+                    nwbfile=nwbfile,
+                    session_info=session_info,
+                )
+                stimulation_epochs.append(stim_epoch)
         else:
             # Convert table key to formatted stimulus name
             stimulus_name = table_key.replace('_', ' ').title()
