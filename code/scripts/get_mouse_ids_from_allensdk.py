@@ -62,7 +62,7 @@ subject_mapping = (pd.DataFrame(full_session_table['specimen'].tolist())[['donor
                    .set_index('donor_id')
                    .to_dict()['external_specimen_name'])
 
-with open(Path("data/visual_coding_ephys_subject_mapping.json"), 'w') as f:
+with open(Path("reference/visual_coding_ephys_subject_mapping.json"), 'w') as f:
     json.dump(subject_mapping, f, indent=2)
 
 # Download Visual Coding - Optophysiology data to local cache

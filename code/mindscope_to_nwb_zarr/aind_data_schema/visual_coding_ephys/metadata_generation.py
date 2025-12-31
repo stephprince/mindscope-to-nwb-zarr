@@ -11,8 +11,11 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import f
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.procedures import fetch_procedures_from_aind_metadata_service
 
 # Path to session metadata CSV files from the data folder
-SESSIONS_CSV_PATH = "visual-coding-neuropixels/ecephys-cache/sessions.csv"
+SESSIONS_CSV_PATH = "allen-brain-observatory/visual-coding-neuropixels/ecephys-cache/sessions.csv"
 
+# Path to subject mapping JSON file relative to code directory
+CODE_DIR = Path(__file__).parent.parent.parent.parent
+SUBJECT_MAPPING_PATH = CODE_DIR / "reference" / "visual_coding_ephys_subject_mapping.json"
 
 
 def load_session_info(session_id: int, data_dir: Path) -> pd.DataFrame:
@@ -40,7 +43,7 @@ def load_session_info(session_id: int, data_dir: Path) -> pd.DataFrame:
     return session_info
 
 
-def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Path, output_dir: Path, subject_mapping_path: Path) -> None:
+def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Path, output_dir: Path) -> None:
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -54,8 +57,6 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Pa
         Path to data directory containing metadata CSV files
     output_dir : Path
         Path to directory to save output JSON files
-    subject_mapping_path : Path
-        Path to JSON file containing subject ID mapping
     """
     # Load allen sdk session info
     session_info = load_session_info(session_id, data_dir)
@@ -69,9 +70,9 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Pa
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)
-    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info, subject_mapping_path=subject_mapping_path)
+    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info, subject_mapping_path=SUBJECT_MAPPING_PATH)
     acquisition = generate_acquisition(nwbfile, session_info)
-    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, subject_mapping_path=subject_mapping_path)
+    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, subject_mapping_path=SUBJECT_MAPPING_PATH)
     #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
     metadata_models = [data_description, subject, acquisition, procedures]  # add instrument when available
     
@@ -104,10 +105,7 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
     mounted_data_path = data_dir / "allen-brain-observatory" / "visual-coding-neuropixels" / "ecephys-cache"
 
     # Load sessions table
-    sessions_df = pd.read_csv(mounted_data_path / "sessions.csv")
-
-    # Subject mapping path
-    subject_mapping_path = data_dir / "visual_coding_ephys_subject_mapping.json"
+    sessions_df = pd.read_csv(data_dir / SESSIONS_CSV_PATH)
 
     print(f"Found {len(sessions_df)} sessions")
 
@@ -129,39 +127,13 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
             generate_session_metadata(
                 nwb_file_path=nwb_file_path,
                 session_id=session_id,
-                data_dir=data_dir / "allen-brain-observatory",
+                data_dir=data_dir,
                 output_dir=output_dir,
-                subject_mapping_path=subject_mapping_path,
             )
         except Exception as e:
             print(f"Error generating metadata for session {session_id}: {e}")
             continue
-        
+
         break  # TODO - remove after testing
 
     print("\nDone generating metadata!")
-
-
-if __name__ == "__main__":
-    repo_root = Path(__file__).parent.parent.parent.parent.parent
-    output_dir = repo_root / "data/schema/ephys_visual_coding/"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    subject_mapping_path = repo_root / "data/visual_coding_ephys_subject_mapping.json"
-
-    # Define sessions to process
-    # TODO - create list of all session ids and corresponding nwb file paths
-    sessions = [
-        (715093703, repo_root / "data/allen-brain-observatory/visual-coding-neuropixels/ecephys-cache/session_715093703/session_715093703.nwb"),
-    ]
-
-    # Process each session
-    for session_id, nwb_file_path in sessions:
-        print(f"\nProcessing session {session_id}...")
-        generate_session_metadata(
-            nwb_file_path=nwb_file_path,
-            session_id=session_id,
-            data_dir=data_dir,
-            output_dir=output_dir,
-            subject_mapping_path=subject_mapping_path
-        )
-    print("\nDone!")
