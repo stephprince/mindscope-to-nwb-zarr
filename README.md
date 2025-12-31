@@ -15,7 +15,7 @@ This repository is set up as a Code Ocean capsule to convert Mindscope NWB files
 
 ```bash
 cd code
-uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>"
+uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>" --metadata False
 ```
 
 **Parameters:**
@@ -105,6 +105,17 @@ mindscope-to-nwb-zarr/
 └── environment/                          # Code Ocean environment
 ```
 
+
+## Utility Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/compare_hdf5_zarr.py` | Validate conversion by comparing HDF5 vs Zarr contents |
+| `scripts/get_mouse_ids_from_allensdk.py` | Download mouse ID metadata from AllensSDK |
+| `scripts/metadata_from_allensdk.py` | Extract metadata directly from AllensSDK |
+| `scripts/nwb_cached_specs_to_json.py` | Export NWB specification metadata to JSON |
+
+
 ## Conversion Process
 
 Each conversion:
@@ -118,19 +129,33 @@ Each conversion:
 
 ### Key Transformations
 
-- **Stimulus Templates**: Converted from deprecated NWB 1.x format to modern `Images` containers with `GrayscaleImage` and `WarpedStimulusTemplateImage` objects
-- **Multi-file Merging**: Probe LFP files and multi-plane ophys files are combined into single NWB files
-- **Data Chunking**: Visual Coding Ophys raw imaging data is rechunked to (75, 512, width) for cloud optimization
+**All Datasets:**
+- **Schema and Extension Updates**: Updated NWB schema to 2.9.0 and made minor improvements to internal NWB extensions to address compatibility issues
+- **Stimulus Templates**: Converted from deprecated `StimulusTemplate`/`ImageSeries` to modern `Images` containers with `GrayscaleImage` and `WarpedStimulusTemplateImage` objects, and updated `IndexSeries` references to use `indexed_images` instead of `indexed_timeseries`
+- **Missing Descriptions**: Added descriptions for unit metrics, trials table columns, stimulus presentation columns, and optogenetic stimulation tables based on technical white papers
+- **VectorIndex Dtypes**: Fixed VectorIndex columns to use `uint64` dtype per NWB spec
 
+**Visual Coding Ophys:**
+- Combined processed NWB file (metadata + processed 2p data) with raw NWB file (raw 2p imaging) into single Zarr output
+- Changed subject ID to external donor name from metadata
+- Converted natural movie `ImageSeries` templates to `Images` containers with `GrayscaleImage` frames
+- Added `order_of_images` to existing `Images` containers (natural scenes, locally sparse noise)
+- Rechunked raw 2p imaging data to (75, 512, width) to reduce chunk count for cloud storage limits
 
-## Utility Scripts
+**Visual Behavior Ophys:**
+- Combined multiplane sessions (multiple single-plane NWB files) into single Zarr output with renamed imaging planes (`imaging_plane_1`, `imaging_plane_2`, etc.) and processing modules (`ophys_plane_1`, `ophys_plane_2`, etc.)
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/compare_hdf5_zarr.py` | Validate conversion by comparing HDF5 vs Zarr contents |
-| `scripts/get_mouse_ids_from_allensdk.py` | Download mouse ID metadata from AllensSDK |
-| `scripts/metadata_from_allensdk.py` | Extract metadata directly from AllensSDK |
-| `scripts/nwb_cached_specs_to_json.py` | Export NWB specification metadata to JSON |
+**Visual Coding Ephys:**
+- Combined base session NWB file with multiple probe LFP files into single Zarr output
+- Rechunked LFP data to (500,000, 8) with gzip level 9 compression (~10 MB chunks) to reduce chunk count
+- Added CSD data from probe files with unique names (`probe_{id}_ecephys_csd`)
+
+**Visual Behavior Ephys:**
+- Combined base session NWB file with multiple probe files into single Zarr output
+- Rechunked LFP data to (500,000, 8) with gzip level 9 compression
+- Added units table description noting all units are returned (unlike Visual Coding which filtered noise units)
+
+See the changelog files in each dataset's `data_conversion` folder for full details.
 
 
 ## Recommended Future Improvements for Conversion from HDF5 to Zarr
