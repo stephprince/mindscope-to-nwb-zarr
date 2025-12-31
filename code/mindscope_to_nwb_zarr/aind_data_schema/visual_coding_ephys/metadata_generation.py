@@ -135,6 +135,4 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
             print(f"Error generating metadata for session {session_id}: {e}")
             continue
 
-        break  # TODO - remove after testing
-
     print("\nDone generating metadata!")
