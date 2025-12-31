@@ -97,7 +97,7 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
     # NOTE: This is not always (512, 512) as described in the white paper
     imaging_plane_dimensions = [int(imaging_plane_description_re_match.group(1)), int(imaging_plane_description_re_match.group(2))]
     if is_single_plane:
-        assert imaging_plane_dimensions not in ([447, 512], [512, 512]), f"Unexpected imaging plane dimensions for single-plane NWB file: {imaging_plane_dimensions}"
+        assert imaging_plane_dimensions in ([447, 512], [512, 512]), f"Unexpected imaging plane dimensions for single-plane NWB file: {imaging_plane_dimensions}"
     else:
         assert imaging_plane_dimensions == [512, 512], f"Unexpected imaging plane dimensions for multi-plane NWB file: {imaging_plane_dimensions}"
 
