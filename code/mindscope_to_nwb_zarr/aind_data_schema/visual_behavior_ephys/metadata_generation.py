@@ -77,9 +77,10 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
     # Save the metadata files
     Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)
     for model in metadata_models:
-        serialized = model.model_dump_json()
-        deserialized = model.model_validate_json(serialized)
-        deserialized.write_standard_file(output_directory=output_dir / data_description.name)
+        if model is not None:
+            serialized = model.model_dump_json()
+            deserialized = model.model_validate_json(serialized)
+            deserialized.write_standard_file(output_directory=output_dir / data_description.name)
 
 
 def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
