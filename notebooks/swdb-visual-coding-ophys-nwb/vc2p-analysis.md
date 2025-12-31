@@ -55,7 +55,7 @@ nwb = io.read()
 # Get the required data from the NWB file:
 
 # Get corrected fluorescence traces (used for sweep_response computation)
-fluor_series = nwb.processing["ophys"]["Fluorescence"]["DemixedTraces"]
+fluor_series = nwb.processing["ophys"]["Fluorescence"]["Demixed"]
 timestamps = fluor_series.timestamps[:]
 celltraces = fluor_series.data[:].T  # Shape: (n_cells, n_timepoints)
 numbercells = celltraces.shape[0]
@@ -65,9 +65,23 @@ acquisition_rate = 1 / (timestamps[1] - timestamps[0])
 dff_series = nwb.processing["ophys"]["DfOverF"]["DfOverF"]
 dfftraces = dff_series.data[:].T  # Shape: (n_cells, n_timepoints)
 
-# Get running speed
+# Get running speed and align to fluorescence timestamps
 running_speed_series = nwb.processing["behavior"]["BehavioralTimeSeries"]['running_speed']
-dxcm = running_speed_series.data[:]
+dxcm_raw = running_speed_series.data[:]
+dxtime = running_speed_series.timestamps[:]
+
+# Align running speed to fluorescence timestamps (following AllenSDK's align_running_speed)
+def align_running_speed(dxcm, dxtime, timestamps):
+    """Align running speed to fluorescence timestamps by padding with NaNs."""
+    if dxtime[0] != timestamps[0]:
+        start_idx = np.searchsorted(timestamps, dxtime[0])
+        dxcm = np.concatenate([np.full(start_idx, np.nan), dxcm])
+    end_adjust = len(timestamps) - len(dxcm)
+    if end_adjust > 0:
+        dxcm = np.concatenate([dxcm, np.full(end_adjust, np.nan)])
+    return dxcm
+
+dxcm = align_running_speed(dxcm_raw, dxtime, timestamps)
 
 print(f"Number of cells: {numbercells}")
 print(f"Acquisition rate: {acquisition_rate:.2f} Hz")

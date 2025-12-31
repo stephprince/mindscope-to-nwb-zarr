@@ -228,6 +228,7 @@ How similar are these mean responses?
 
 ```{code-cell} ipython3
 import scipy.stats as st
+# TODO scipy needs to be installed to run this cell
 r,p = st.pearsonr(nm_a.mean(axis=1), nm_b.mean(axis=1))
 print("AB Correlation = ", str(r))
 

@@ -227,7 +227,7 @@ Several stimuli are shown during each imaging session, interleaved with each oth
 
 ```{code-cell} ipython3
 import pandas as pd
-from pynwb import TimeIntervals
+from pynwb.epoch import TimeIntervals
 
 # Build stimulus epoch table from the stimulus intervals
 stim_epochs = []
@@ -286,13 +286,26 @@ for c, stim_name in enumerate(stim_epoch.stimulus.unique()):
 
 (running_speed)=
 ## Running speed
-The running speed of the animal on the rotating disk during the entire session. This has been temporally aligned to the two photon imaging, which means that this trace has the same length as dff (etc). This also means that the same stimulus start and end information indexes directly into this running speed trace.
+The running speed of the animal on the rotating disk during the entire session. The running speed data may not cover the full fluorescence recording, so we align it to the fluorescence timestamps by padding with NaNs where needed. After alignment, the running speed trace has the same length as dff (etc), and the same stimulus start and end information indexes directly into this running speed trace.
 
 ```{code-cell} ipython3
 # Running speed is stored in the behavior processing module
 running_speed_series = nwb.processing["behavior"]["BehavioralTimeSeries"]['running_speed']
-dxcm = running_speed_series.data[:]
+dxcm_raw = running_speed_series.data[:]
 running_timestamps = running_speed_series.timestamps[:]
+
+# Align running speed to fluorescence timestamps (following AllenSDK's align_running_speed)
+def align_running_speed(dxcm, dxtime, timestamps):
+    """Align running speed to fluorescence timestamps by padding with NaNs."""
+    if dxtime[0] != timestamps[0]:
+        start_idx = np.searchsorted(timestamps, dxtime[0])
+        dxcm = np.concatenate([np.full(start_idx, np.nan), dxcm])
+    end_adjust = len(timestamps) - len(dxcm)
+    if end_adjust > 0:
+        dxcm = np.concatenate([dxcm, np.full(end_adjust, np.nan)])
+    return dxcm
+
+dxcm = align_running_speed(dxcm_raw, running_timestamps, ts)
 
 print("length of dff: ", str(dff.shape[1]))
 print("length of running speed: ", str(len(dxcm)))

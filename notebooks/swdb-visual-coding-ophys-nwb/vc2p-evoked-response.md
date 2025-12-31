@@ -141,7 +141,25 @@ Let's get the running speed of the mouse:
 ```{code-cell} ipython3
 # Running speed is stored in the behavior processing module
 running_speed_series = nwb.processing["behavior"]["BehavioralTimeSeries"]['running_speed']
-dxcm = running_speed_series.data[:]
+dxcm_raw = running_speed_series.data[:]
+dxtime = running_speed_series.timestamps[:]
+
+# Align running speed to fluorescence timestamps (following AllenSDK's align_running_speed)
+# Running speed may not cover the full fluorescence recording, so we pad with NaNs
+def align_running_speed(dxcm, dxtime, timestamps):
+    """Align running speed to fluorescence timestamps by padding with NaNs."""
+    # Find where running speed starts relative to fluorescence timestamps
+    if dxtime[0] != timestamps[0]:
+        start_idx = np.searchsorted(timestamps, dxtime[0])
+        dxcm = np.concatenate([np.full(start_idx, np.nan), dxcm])
+        dxtime = np.concatenate([timestamps[:start_idx], dxtime])
+    # Pad end if needed
+    end_adjust = len(timestamps) - len(dxcm)
+    if end_adjust > 0:
+        dxcm = np.concatenate([dxcm, np.full(end_adjust, np.nan)])
+    return dxcm
+
+dxcm = align_running_speed(dxcm_raw, dxtime, ts)
 
 plt.plot(ts, dxcm)
 plt.xlabel("Time (s)")
