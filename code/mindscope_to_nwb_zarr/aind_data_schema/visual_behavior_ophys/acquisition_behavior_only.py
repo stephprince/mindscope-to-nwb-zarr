@@ -138,7 +138,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
             ),
         ],
         # TODO - handle different stimulus sets for the different training stages
-        stimulus_epochs=[    
+        stimulus_epochs=[
             StimulusEpoch(
                 # in the test file, the trial start time is before the stimulus epoch start time
                 # but the trial end time is before the stimulus epoch end time
@@ -146,11 +146,11 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 # and whichever is latest for stimulus end time
                 # TODO: confirm this strategy is OK
                 stimulus_start_time=nwbfile.session_start_time + timedelta(seconds=min(
-                    nwbfile.intervals['grating_presentations']['start_time'][0], 
+                    nwbfile.intervals['grating_presentations']['start_time'][0] if 'grating_presentations' in nwbfile.intervals else nwbfile.trials['start_time'][0],
                     nwbfile.trials['start_time'][0]
                 )),
                 stimulus_end_time=nwbfile.session_start_time + timedelta(seconds=max(
-                    nwbfile.intervals['grating_presentations']['stop_time'][-1], 
+                    nwbfile.intervals['grating_presentations']['stop_time'][-1] if 'grating_presentations' in nwbfile.intervals else nwbfile.trials['stop_time'][-1],
                     nwbfile.trials['stop_time'][-1]
                 )),
                 stimulus_name="Change detection natural images",
