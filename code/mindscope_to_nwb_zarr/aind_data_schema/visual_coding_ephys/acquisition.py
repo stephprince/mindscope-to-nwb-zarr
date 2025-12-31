@@ -117,7 +117,6 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.DataFrame) -> Acquis
     Acquisition
         AIND Acquisition data model populated with data from the NWB file
     """
-    breakpoint()
     acquisition = Acquisition(
         subject_id=nwbfile.subject.subject_id,
         acquisition_start_time=nwbfile.session_start_time,
