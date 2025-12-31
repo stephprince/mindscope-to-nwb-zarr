@@ -15,7 +15,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id, get_sub
 # Import the metadata service client
 import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
-from urllib3.exceptions import NameResolutionError
+from urllib3.exceptions import HTTPError as Urllib3HTTPError
 import json
 
 
@@ -61,7 +61,7 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
             # Extract raw data for validation (convert to dict if needed)
             raw_data = subject_response.model_dump() if hasattr(subject_response, 'model_dump') else subject_response
             subject = subject_response
-        except NameResolutionError as e:
+        except Urllib3HTTPError as e:
             warnings.warn(f"Warning: Could not connect to AIND metadata service at {api_host}: {e}")
             return None
         except ApiException as e:
