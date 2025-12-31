@@ -14,6 +14,7 @@ Session structure (on DANDI):
 """
 
 from pathlib import Path
+import re
 
 from hdmf_zarr import ZarrDataIO
 from hdmf_zarr.nwb import NWBZarrIO
@@ -128,6 +129,53 @@ def download_visual_coding_ophys_files_from_dandi(
         asset.download(filepath=raw_download_path)
 
     return (processed_download_path, raw_download_path)
+
+
+def add_order_of_images_to_existing_images_containers(nwbfile: NWBFile) -> None:
+    """Add order_of_images to existing Images containers that don't have it.
+
+    Some stimulus templates (e.g., natural_scenes_template, locally_sparse_noise_template)
+    are already stored as Images containers but may be missing the order_of_images field.
+    This function adds order_of_images based on sorting image names by the numeric suffix.
+
+    For example, images named "NaturalScene1", "NaturalScene2", ..., "NaturalScene117"
+    will be ordered numerically (1, 2, ..., 117).
+
+    Args:
+        nwbfile: The NWBFile object to modify.
+    Returns:
+        None. The NWBFile is modified in place.
+    """
+    for template_name, stimulus_template in nwbfile.stimulus_template.items():
+        # Only process Images containers
+        if not isinstance(stimulus_template, Images):
+            continue
+
+        # Skip if order_of_images already exists
+        if stimulus_template.order_of_images is not None:
+            continue
+
+        print(f"Adding order_of_images to {template_name} ...")
+
+        # Get all image names and sort by numeric suffix
+        image_names = list(stimulus_template.images.keys())
+
+        def extract_number(name: str) -> int:
+            """Extract the numeric suffix from an image name."""
+            match = re.search(r'(\d+)$', name)
+            if match:
+                return int(match.group(1))
+            return 0
+
+        # Sort image names by their numeric suffix
+        sorted_names = sorted(image_names, key=extract_number)
+
+        # Create ordered list of image references
+        ordered_images = [stimulus_template.images[name] for name in sorted_names]
+
+        # Add order_of_images to the Images container
+        order_of_images = ImageReferences(name="order_of_images", data=ordered_images)
+        stimulus_template.order_of_images = order_of_images
 
 
 def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> None:
@@ -292,6 +340,10 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
 
         # Change stimulus_template to Image objects in Images container
         convert_natural_movie_template_imageseries_to_images(base_nwbfile)
+
+        # Add order_of_images to existing Images containers that don't have it
+        # (e.g., natural_scenes_template, locally_sparse_noise_template)
+        add_order_of_images_to_existing_images_containers(base_nwbfile)
 
         # Add raw 2p data as acquisition
         with NWBHDF5IO(raw_file_path, 'r', manager=processed_io.manager) as raw_io:
