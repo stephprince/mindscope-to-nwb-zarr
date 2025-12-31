@@ -63,10 +63,16 @@ def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.Series) -> VisualS
         if isinstance(value, (np.integer, np.floating, np.ndarray)):
             stimulus_parameters[key] = value.tolist()
 
+    # Get stimulus template names if available
+    # TODO confirm other stimulus types
+    stimulus_template_name = []
+    if "grating" in nwbfile.stimulus_template:
+        stimulus_template_name = nwbfile.stimulus_template["grating"].control_description[:].tolist()
+
     visual_stimulation = VisualStimulation(
         stimulus_name=session_info["image_set"],  # e.g., "gratings" or "images_A"
         stimulus_parameters=stimulus_parameters,
-        stimulus_template_name=nwbfile.stimulus_template["grating"].control_description[:].tolist(),
+        stimulus_template_name=stimulus_template_name,
         notes=None,
     )
     return visual_stimulation
