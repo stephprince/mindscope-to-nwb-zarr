@@ -25,9 +25,9 @@ from hdmf_zarr import NWBZarrIO
 # NWB file paths for each session type
 # TODO: Update these paths to the published Zarr file locations
 nwb_paths = {
-    'StimA': 'C:/Users/Ryan/results/sub-222426_ses-501704220-StimA_behavior+image+ophys.nwb',
-    'StimB': 'C:/Users/Ryan/results/sub-222426_ses-501559087-StimB_behavior+image+ophys.nwb',
-    'StimC': 'C:/Users/Ryan/results/sub-222426_ses-501474098-StimC_behavior+image+ophys.nwb',
+    'StimA': 'C:/Users/Ryan/results/visual-coding-ophys/sub-222426_ses-501704220-StimA_behavior+image+ophys.nwb.zarr',
+    'StimB': 'C:/Users/Ryan/results/visual-coding-ophys/sub-222426_ses-501559087-StimB_behavior+image+ophys.nwb.zarr',
+    'StimC': 'C:/Users/Ryan/results/visual-coding-ophys/sub-222426_ses-501474098-StimC_behavior+image+ophys.nwb.zarr',
 }
 
 # Load the StimB session which contains natural_scenes
