@@ -12,7 +12,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id
 
 import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
-
+from urllib3.exceptions import NameResolutionError
 
 def _fix_procedures_validation_issues(subject_procedures: list) -> list:
     """
@@ -90,6 +90,9 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, api_host: Opti
         try:
             procedures_response = api_instance.get_procedures(subject_id=subject_id)
             procedures = Procedures(**procedures_response)
+        except NameResolutionError as e:
+            warnings.warn(f"Warning: Could not connect to AIND metadata service at {api_host}: {e}")
+            return None
         except ApiException as e:
             # If validation fails, try to get the raw response
             warnings.warn(f"Warning: Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
