@@ -2,53 +2,135 @@
 
 This repository is set up as a Code Ocean capsule to convert Mindscope NWB files from the HDF5 format to Zarr format, extract AIND Metadata JSON files, and document changes made during the conversion process.
 
-## Running on Code Ocean as a Capsule 
+## Supported Datasets
 
-The Code Ocean capsule is set up with an App Builder with a single input parameter:
-- `dataset`: One of: "Visual Behavior Neuropixels", "Visual Behavior 2p", "Visual Coding Neuropixels", "Visual Coding 2p". This parameter selects which dataset to convert.
+| Dataset | Data Source | Conversion Time |
+|---------|-------------|-----------------|
+| Visual Behavior Ephys | S3: `visual-behavior-neuropixels-data` | ~11 min/session |
+| Visual Behavior Ophys | S3: `visual-behavior-ophys-data` | ~15-30 sec/session |
+| Visual Coding Ephys | S3: `allen-brain-observatory` | ~35 min/session |
+| Visual Coding Ophys | DANDI (dandiset 000728) | ~30-48 min/session |
 
-Sync the capsule with the GitHub repository, make sure the appropriate data assets have been attached to the capsule, enter the desired dataset option in the App Builder tab, and click "Run with parameters".
-
-## Batch Conversion using Code Ocean Pipelines
-
-### Visual Behavior Ophys
-
-The current pipeline relies on the fact that the only NWB files in the Code Ocean visual-behavior-ophys data asset are the NWB files to be converted. This is because the "Map Paths" configuration from the data asset to the capsule is set to "**" which maps all files in the data asset to the capsule (non-NWB files will trigger tasks but the conversion script will skip them). It would be really nice to be able to specify a file extension filter when mapping paths from a data asset to a capsule in Code Ocean pipelines or to combine multiple directories from a data asset into a single directory in the capsule.
-
-### Visual Coding Ophys
-
-This conversion is run in a Code Ocean pipeline to parallelize over the 1518 sessions. Because the latest HDF5-based NWB 2.0 files exist on DANDI, the conversion pipeline downloads the necessary files from DANDI for each session and performs the conversion.
-
-To run this pipeline, we need a Code Ocean data asset with one input file for each of the 1518 sessions. We will first create a Code Ocean data asset with placeholder NWB files, one per session, that tells the conversion scripts which DANDI assets to download. If this Code Ocean data asset already exists, you can skip this step.
+## Running Locally
 
 ```bash
 cd code
-uv run python ./scripts/create_viscod_ophys_placeholder_files.py
+uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>"
 ```
 
-This will create 1518 empty (0 B) NWB files in the `data/visual-coding-ophys` directory.
+**Parameters:**
+- `--dataset`: One of: `"Visual Behavior Ephys"`, `"Visual Behavior Ophys"`, `"Visual Coding Ephys"`, `"Visual Coding Ophys"` (case-insensitive)
+- `--results_dir`: Path to output folder for converted Zarr files and metadata (default: `../results/`)
+- `--metadata`: Set to `True` to generate only AIND metadata JSON files (no Zarr conversion)
 
-Then, create a new Code Ocean data asset using the web interface by dragging and dropping the selection of 1518 empty NWB files from the `data/visual-coding-ophys` directory and fill out the rest of the form to create the data asset.
-- Source Data Name: Visual Coding Ophys NWB HDF5 to Zarr Input
-- Folder Name: data/visual-coding-ophys
-- Description: Placeholder NWB HDF5 files for Visual Coding Ophys sessions to indicate which DANDI assets to download for conversion to Zarr format.
-- Tags: Allen Brain Observatory
-- Leave the rest blank
+**Example:**
+```bash
+cd code
+uv run python run_capsule.py --dataset "Visual Coding Ophys" --results_dir "./results"
+```
 
-Then, go to the [Allen Brain Observatory Visual Coding 2p NWB HDF5 to Zarr](https://codeocean.allenneuraldynamics.org/capsule/9983566/tree) pipeline, add the new data asset to the `data` directory, and add the new data asset as an input to the pipeline. Map the paths from the data asset to the capsule (`data/visual-coding-ophys` to `capsule/data/visual-coding-ophys`), configure the capsule with the correct parameter (`--dataset Visual Coding 2p`), and connect and map the capsule to the results bucket (defaults should be fine). Finally, run the pipeline. It will take several minutes to load pipeline monitoring before starting tasks.
+**Notes:**
+- This command will create a virtual environment in `code/.venv` and a `uv.lock` file if they don't exist.
+- Windows has a 260-character path limit which may cause issues with Zarr's nested directory structure. Enable long paths in Windows or use a shorter results path.
+- Most datasets require S3 access to the source data. Visual Coding Ophys streams directly from DANDI.
 
-If time permits, it may be more efficient to transfer the data directly from DANDI's S3 storage to Code Ocean's S3 storage instead of downloading to the capsule via HTTP.
+## Running on Code Ocean
 
-## Testing Locally
+### As a Capsule
 
-1. `cd code`
-2. `uv run python run_capsule.py --dataset <dataset_name> --results <results_folder>`
-  - `<dataset_name>`: One of: "Visual Behavior Neuropixels", "Visual Behavior 2p", "Visual Coding Neuropixels", "Visual Coding 2p"
-  - `<results_folder>`: Path to a local folder where converted Zarr files and metadata will be saved. 
-    - Note: By default, Windows has a maximum path length of 260 characters, which may cause issues when working with Zarr stores due to their nested directory structure. If you encounter path length issues, consider enabling long paths in Windows or changing the results folder to a location with a shorter path.
-  - This command will create a virtual environment in the `code/.venv` directory and a `uv.lock` file if these do not already exist.
+The Code Ocean capsule uses an App Builder with these parameters:
+- `dataset`: Selects which dataset to convert
+- `metadata`: Set to `True` for metadata-only generation
 
-Note: Local testing requires access to the Mindscope NWB HDF5 files, which are not included in this repository. These files can be downloaded from the Allen Institute's data portal and must be placed in the appropriate directory structure under `data/`.
+Sync the capsule with the GitHub repository, attach the appropriate data assets, configure parameters in the App Builder tab, and click "Run with parameters".
+
+### AIND Metadata Extraction in a Capsule
+
+To extract only AIND metadata JSON files without Zarr conversion, set the `metadata` parameter to `True` in the App Builder tab before running the capsule. This will use the mounted data assets as input and output metadata files to the results folder, and the run does not require paralellization in a capsule, though some datasets take longer to extract. Note that this will skip the Zarr conversion step.
+
+### Batch Conversion using Pipelines
+
+Each dataset has a `create_inputs.py` module that generates numbered input files for pipeline parallelization.
+
+1. **Generate input files locally:**
+   ```bash
+   cd code
+   uv run python -m mindscope_to_nwb_zarr.data_conversion.<dataset_module>.create_inputs
+   ```
+   Where `<dataset_module>` is one of: `visual_behavior_ephys`, `visual_behavior_ophys`, `visual_coding_ephys`, `visual_coding_ophys`
+
+2. **Create a Code Ocean data asset** with the generated input files
+
+3. **Create a pipeline:**
+   - Add the capsule
+   - Map paths from the data asset to the capsule
+   - Connect to a results bucket
+   - Set parameter: `--dataset "<dataset_name>"`
+
+4. **Run the pipeline**
+
+
+## Project Structure
+
+```
+mindscope-to-nwb-zarr/
+├── code/
+│   ├── run_capsule.py                    # Main entry point
+│   ├── mindscope_to_nwb_zarr/
+│   │   ├── data_conversion/              # HDF5 to Zarr conversion
+│   │   │   ├── conversion_utils.py       # Shared utilities
+│   │   │   ├── create_input_utils.py     # Pipeline input file generation
+│   │   │   ├── visual_behavior_ephys/
+│   │   │   │   ├── run_conversion.py     # Main conversion function
+│   │   │   │   └── create_inputs.py      # Pipeline input generation
+│   │   │   ├── visual_behavior_ophys/
+│   │   │   ├── visual_coding_ephys/
+│   │   │   └── visual_coding_ophys/
+│   │   ├── aind_data_schema/             # AIND metadata JSON extraction
+│   │   │   ├── utils.py                  # Shared metadata utilities
+│   │   │   ├── stimuli.py                # Stimulus metadata helpers
+│   │   │   ├── visual_behavior_ephys/
+│   │   │   │   ├── metadata_generation.py  # Main entry point
+│   │   │   │   ├── acquisition.py        # Acquisition metadata
+│   │   │   │   ├── data_description.py   # Data description metadata
+│   │   │   │   ├── procedures.py         # Procedures metadata
+│   │   │   │   └── subject.py            # Subject metadata
+│   │   │   ├── visual_behavior_ophys/
+│   │   │   ├── visual_coding_ephys/
+│   │   │   └── visual_coding_ophys/
+│   │   └── pynwb_utils.py                # NWB utilities
+│   └── scripts/                          # Utility scripts
+├── data/                                 # Input files (git-ignored)
+├── notebooks/                            # Usage examples
+└── environment/                          # Code Ocean environment
+```
+
+## Conversion Process
+
+Each conversion:
+1. Reads source HDF5 NWB file(s) with `NWBHDF5IO`
+2. Applies dataset-specific transformations:
+   - Converts deprecated `StimulusTemplate` to `Images` containers
+   - Adds missing descriptions from technical white papers
+   - Combines multi-probe/multi-plane files where applicable
+3. Writes to Zarr format with `NWBZarrIO`
+4. Validates output with nwbinspector (generates `.inspector_report.txt`)
+
+### Key Transformations
+
+- **Stimulus Templates**: Converted from deprecated NWB 1.x format to modern `Images` containers with `GrayscaleImage` and `WarpedStimulusTemplateImage` objects
+- **Multi-file Merging**: Probe LFP files and multi-plane ophys files are combined into single NWB files
+- **Data Chunking**: Visual Coding Ophys raw imaging data is rechunked to (75, 512, width) for cloud optimization
+
+
+## Utility Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/compare_hdf5_zarr.py` | Validate conversion by comparing HDF5 vs Zarr contents |
+| `scripts/get_mouse_ids_from_allensdk.py` | Download mouse ID metadata from AllensSDK |
+| `scripts/metadata_from_allensdk.py` | Extract metadata directly from AllensSDK |
+| `scripts/nwb_cached_specs_to_json.py` | Export NWB specification metadata to JSON |
 
 
 ## Recommended Future Improvements for Conversion from HDF5 to Zarr
