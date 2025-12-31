@@ -1,9 +1,9 @@
-"""Generates an example JSON file for visual behavior ephys acquisition"""
+"""Generates acquisition metadata for visual behavior ophys behavior-only sessions"""
 
 from datetime import timedelta
-from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from pynwb import NWBFile
 
 from aind_data_schema.components.identifiers import Code
@@ -26,11 +26,9 @@ from aind_data_schema_models.units import VolumeUnit, MassUnit
 from aind_data_schema_models.stimulus_modality import StimulusModality
 from aind_data_schema_models.modalities import Modality
 
-import pandas as pd
-from pynwb import read_nwb
 from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_start_time,
-    get_data_stream_end_time, 
+    get_data_stream_end_time,
     get_modalities
 )
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
@@ -39,12 +37,8 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_instrument_id,
     get_total_reward_volume,
     get_individual_reward_volume,
-    serialized_dict,
+    get_curriculum_status,
 )
-
-
-BEHAVIOR_SESSION_TABLE_CSV_PATH = "C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/visual_behavior_ophys_metadata/behavior_session_table.csv"
-behavior_session_table = pd.read_csv(BEHAVIOR_SESSION_TABLE_CSV_PATH)
 
 
 def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.Series) -> VisualStimulation:
@@ -78,13 +72,22 @@ def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.Series) -> VisualS
     return visual_stimulation
 
 
-def generate_acquisition_json(file_path: str) -> Acquisition:
-    """Generate Acquisition JSON for a behavior-only visual behavior ophys session from NWB file"""
-    nwbfile = read_nwb(file_path)
-    behavior_session_id = int(nwbfile.identifier)
-    session_info = behavior_session_table.query("mouse_id == @subject_id and behavior_session_id == @behavior_session_id")
-    assert len(session_info) == 1, "Expected exactly one matching session info entry"
+def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisition:
+    """
+    Generate an Acquisition model from an NWB file and session metadata.
 
+    Parameters
+    ----------
+    nwbfile : NWBFile
+        NWB file containing acquisition data
+    session_info : pd.Series
+        Session metadata row from the behavior session table
+
+    Returns
+    -------
+    Acquisition
+        AIND Acquisition data model populated with data from the NWB file
+    """
     # this script is for behavior only files for the visual behavior ophys experiments
     assert get_modalities(nwbfile) == [Modality.BEHAVIOR]
 
@@ -156,13 +159,7 @@ def generate_acquisition_json(file_path: str) -> Acquisition:
                 active_devices=list(),
                 configurations=list(), # TODO - think the options provided do not apply, except maybe labor configurations
                 training_protocol_name=session_info["session_type"],  # e.g., "TRAINING_0_gratings_autorewards_15min"
-                curriculum_status=serialized_dict(
-                    behavior_type=session_info["behavior_type"],  # e.g., "active_behavior"
-                    experience_level=session_info["experience_level"],  # e.g., "Training"
-                    prior_exposures_to_image_set=session_info["prior_exposures_to_image_set"],  # e.g., nan
-                    prior_exposures_to_omissions=session_info["prior_exposures_to_omissions"],  # e.g., 0
-                    prior_exposures_to_session_type=session_info["prior_exposures_to_session_type"],  # e.g., 0
-                )
+                curriculum_status=get_curriculum_status(session_info)
             ),
         ], 
         # manipulations=None, # TODO - think this is None (seems to be injections)
@@ -177,23 +174,3 @@ def generate_acquisition_json(file_path: str) -> Acquisition:
         ),
     )
     return acquisition
-
-
-if __name__ == "__main__":
-    # example file for initial debugging
-    # TODO - replace with more general ingestion/generation script
-    subject_id = 403491
-    nwbfile_session_id = "20180824T145125"  # example stage 0
-    nwbfile_session_id = "20180827T141750"  # example stage 1
-
-    file_path = f"C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-{nwbfile_session_id}_image.nwb"
-
-    acquisition = generate_acquisition_json(file_path)
-
-    file_path_stem = Path(file_path).stem
-    acquisition_json_path = f"vis_beh_ophys_{file_path_stem}_"
-    print(acquisition_json_path)
-
-    serialized = acquisition.model_dump_json()
-    deserialized = Acquisition.model_validate_json(serialized)
-    deserialized.write_standard_file(prefix=acquisition_json_path)

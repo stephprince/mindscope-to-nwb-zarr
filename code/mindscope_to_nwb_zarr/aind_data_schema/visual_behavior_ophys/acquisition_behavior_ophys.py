@@ -1,11 +1,10 @@
-"""Generates an example JSON file for visual behavior behavior-ophys acquisition"""
+"""Generates acquisition metadata for visual behavior ophys behavior+ophys sessions"""
 
-import glob
-from pathlib import Path
 import re
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from pynwb import NWBFile
 from pynwb.ophys import ImagingPlane
 
@@ -34,12 +33,11 @@ from aind_data_schema.components.coordinates import (
 )
 from aind_data_schema_models.units import SizeUnit, VolumeUnit, FrequencyUnit, MassUnit, PowerUnit, TimeUnit
 from aind_data_schema_models.brain_atlas import CCFv3
+from aind_data_schema_models.modalities import Modality
 
-import pandas as pd
-from pynwb import read_nwb
 from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_start_time,
-    get_data_stream_end_time, 
+    get_data_stream_end_time,
     get_modalities
 )
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
@@ -51,11 +49,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
 )
 
 
-OPHYS_EXPERIMENT_TABLE_CSV_PATH = "C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/visual_behavior_ophys_metadata/ophys_experiment_table.csv"
-ophys_experiment_table = pd.read_csv(OPHYS_EXPERIMENT_TABLE_CSV_PATH)
-
-
-def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_plane: bool) -> dict[str, Any]:
+def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_single_plane: bool) -> dict[str, Any]:
     """Check and process the imaging plane from an NWB file and extract metadata that changes across planes.
 
     Check that the imaging plane matches expected values for visual behavior behavior-ophys sessions,
@@ -63,6 +57,7 @@ def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_pla
 
     Args:
         nwbfile: The NWB file to process.
+        session_info: Session metadata row from the session table.
         is_single_plane: Whether the NWB file is from a single-plane ophys session.
 
     Returns:
@@ -73,20 +68,11 @@ def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_pla
             imaging_plane_targeted_structure_str: The targeted brain structure as a string.
             imaging_plane_depth: The depth of the imaging plane.
     """
-    nwbfile_plane = read_nwb(file_path)
-    ophys_experiment_id_plane = int(nwbfile_plane.identifier)  # e.g., 788490510, which corresponds to behavior_session_id 788017709, ophys_session_id 787661032, ophys_container_id 782536745
-    session_info_plane = ophys_experiment_table.query("mouse_id == @subject_id_int and ophys_experiment_id == @ophys_experiment_id_plane")
-    assert len(session_info_plane) == 1, (
-        "Expected exactly one matching ophys experiment table entry "
-        f"for mouse_id=={subject_id_int} and ophys_experiment_id=={ophys_experiment_id_plane}, "
-        f"instead found {len(session_info_plane)}"
-    )
+    assert len(nwbfile.devices) == 1
+    device = next(iter(nwbfile.devices.values()))
 
-    assert len(nwbfile_plane.devices) == 1
-    device = next(iter(nwbfile_plane.devices.values()))
-
-    assert len(nwbfile_plane.imaging_planes) == 1, "Expected one plane per NWB file"
-    imaging_plane = next(iter(nwbfile_plane.imaging_planes.values()))
+    assert len(nwbfile.imaging_planes) == 1, "Expected one plane per NWB file"
+    imaging_plane = next(iter(nwbfile.imaging_planes.values()))
 
     assert imaging_plane.name == "imaging_plane_1"
     assert imaging_plane.indicator == "GCaMP6f"
@@ -122,9 +108,9 @@ def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_pla
     assert imaging_plane.location == imaging_plane_targeted_structure_str
 
     # Check that the plane-specific metadata in each NWB file matches the expected values
-    # from elsewhere in the NWB file and from ophys_experiment_table.csv
+    # from elsewhere in the NWB file and from session_info
     # TODO: Store all of these values in the Acquisition JSON? or elsewhere??
-    ophys_behavior_metadata_plane = nwbfile_plane.lab_meta_data["metadata"]  # neurodata_type: OphysBehaviorMetadata
+    ophys_behavior_metadata = nwbfile.lab_meta_data["metadata"]  # neurodata_type: OphysBehaviorMetadata
     # Example values from a single-plane NWB file:
     # behavior_session_uuid	"bdc41492-1797-4c91-81ba-18fc0a25d238"
     # equipment_name	"CAM2P.5"
@@ -141,56 +127,56 @@ def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_pla
     # stimulus_frame_rate	60
     # targeted_imaging_depth	375
 
-    # TODO For visual coding, a container is all the data collected from the same FoV. 
+    # TODO For visual coding, a container is all the data collected from the same FoV.
     # Current schema - no concept of a "session" but useful to maintain this information for continuity
     # Put in notes in data description field. Same for container id
-    # There is "tags" field in the data description. Use that for container id. 
+    # There is "tags" field in the data description. Use that for container id.
 
     # For Visual Behavior
     # Put experiment ID in the data stream notes for now
 
-    assert ophys_behavior_metadata_plane.equipment_name == device.name
+    assert ophys_behavior_metadata.equipment_name == device.name
 
     if is_single_plane:
-        assert re.match("CAM2P\.\d", session_info_plane["equipment_name"].values[0])
+        assert re.match("CAM2P\.\d", session_info["equipment_name"])
     else:
-        assert session_info_plane["equipment_name"].values[0] == "MESO.1"
-    assert session_info_plane["equipment_name"].values[0] == device.name
+        assert session_info["equipment_name"] == "MESO.1"
+    assert session_info["equipment_name"] == device.name
 
     assert [
-        ophys_behavior_metadata_plane.field_of_view_width, 
-        ophys_behavior_metadata_plane.field_of_view_height
+        ophys_behavior_metadata.field_of_view_width,
+        ophys_behavior_metadata.field_of_view_height
     ] == imaging_plane_dimensions
 
-    assert ophys_behavior_metadata_plane.imaging_depth == imaging_plane_depth
-    assert imaging_plane_depth == session_info_plane["imaging_depth"].values[0]
+    assert ophys_behavior_metadata.imaging_depth == imaging_plane_depth
+    assert imaging_plane_depth == session_info["imaging_depth"]
 
     if is_single_plane:
-        assert ophys_behavior_metadata_plane.imaging_plane_group == -1
-        assert ophys_behavior_metadata_plane.imaging_plane_group_count == 0
-        assert np.isnan(session_info_plane["imaging_plane_group"].values[0])
+        assert ophys_behavior_metadata.imaging_plane_group == -1
+        assert ophys_behavior_metadata.imaging_plane_group_count == 0
+        assert np.isnan(session_info["imaging_plane_group"])
     else:
         # the imaging_plane_group (0-indexed) is used to group coupled planes together
-        assert ophys_behavior_metadata_plane.imaging_plane_group >= 0
-        assert ophys_behavior_metadata_plane.imaging_plane_group_count == 4
-        assert session_info_plane["imaging_plane_group"].values[0] == ophys_behavior_metadata_plane.imaging_plane_group
+        assert ophys_behavior_metadata.imaging_plane_group >= 0
+        assert ophys_behavior_metadata.imaging_plane_group_count == 4
+        assert session_info["imaging_plane_group"] == ophys_behavior_metadata.imaging_plane_group
 
-    assert ophys_behavior_metadata_plane.ophys_container_id == session_info_plane["ophys_container_id"].values[0]
-    assert ophys_behavior_metadata_plane.ophys_experiment_id == session_info_plane["ophys_experiment_id"].values[0]
-    assert ophys_behavior_metadata_plane.ophys_session_id == session_info_plane["ophys_session_id"].values[0]
+    assert ophys_behavior_metadata.ophys_container_id == session_info["ophys_container_id"]
+    assert ophys_behavior_metadata.ophys_experiment_id == session_info["ophys_experiment_id"]
+    assert ophys_behavior_metadata.ophys_session_id == session_info["ophys_session_id"]
     if is_single_plane:
-        assert ophys_behavior_metadata_plane.project_code in ("VisualBehavior", "VisualBehaviorTask1B")
+        assert ophys_behavior_metadata.project_code in ("VisualBehavior", "VisualBehaviorTask1B")
     else:
-        assert ophys_behavior_metadata_plane.project_code in ("VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d")
-    assert ophys_behavior_metadata_plane.project_code == session_info_plane["project_code"].values[0]
-    assert ophys_behavior_metadata_plane.session_type == session_info_plane["session_type"].values[0]
+        assert ophys_behavior_metadata.project_code in ("VisualBehaviorMultiscope", "VisualBehaviorMultiscope4areasx2d")
+    assert ophys_behavior_metadata.project_code == session_info["project_code"]
+    assert ophys_behavior_metadata.session_type == session_info["session_type"]
 
-    assert ophys_behavior_metadata_plane.stimulus_frame_rate == 60
+    assert ophys_behavior_metadata.stimulus_frame_rate == 60
 
-    assert ophys_behavior_metadata_plane.targeted_imaging_depth == session_info_plane["targeted_imaging_depth"].values[0]
+    assert ophys_behavior_metadata.targeted_imaging_depth == session_info["targeted_imaging_depth"]
 
     # also cross-check other values from the NWB file with the session info
-    assert imaging_plane_targeted_structure_str == session_info_plane["targeted_structure"].values[0]
+    assert imaging_plane_targeted_structure_str == session_info["targeted_structure"]
 
     return dict(
         device=device,
@@ -199,7 +185,7 @@ def process_nwb_imaging_plane(file_path: str, subject_id_int: int, is_single_pla
         imaging_plane_targeted_structure=imaging_plane_targeted_structure,
         imaging_plane_targeted_structure_str=imaging_plane_targeted_structure_str,
         imaging_plane_depth=imaging_plane_depth,
-        imaging_plane_group=int(ophys_behavior_metadata_plane.imaging_plane_group) if not is_single_plane else None,
+        imaging_plane_group=int(ophys_behavior_metadata.imaging_plane_group) if not is_single_plane else None,
     )
 
 
@@ -386,28 +372,32 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
     return create_imaging_config(microscope_name, imaging_plane, imaging_plane_dimensions, planes)
 
 
-def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_paths: list[str]) -> Acquisition:
-    """Generates an example JSON file for visual behavior behavior-ophys acquisition"""
+def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]) -> Acquisition:
+    """
+    Generate an Acquisition model from NWB file(s) and session metadata.
 
-    if len(plane_nwb_file_paths) == 1:
-        is_single_plane = True
-    else:
-        is_single_plane = False
+    Parameters
+    ----------
+    nwbfiles : list[NWBFile]
+        List of NWB files containing acquisition data. For single-plane sessions,
+        this list contains one file. For multiplane sessions, this list contains
+        one file per imaging plane.
+    session_infos : list[pd.Series]
+        List of session metadata rows from the session table, one per NWB file.
 
-    # Most fields will be set based on the first plane's NWB file (they should be the same across plane files)
-    # with plane-specific fields handled as needed
-    nwbfile = read_nwb(plane_nwb_file_paths[0])
-    subject_id_int = int(subject_id)
-    ophys_experiment_id = int(nwbfile.identifier)  # e.g., 788490510, which corresponds to behavior_session_id 788017709, ophys_session_id 787661032, ophys_container_id 782536745
-    session_info = ophys_experiment_table.query("mouse_id == @subject_id_int and ophys_experiment_id == @ophys_experiment_id")
-    assert len(session_info) == 1, (
-        "Expected exactly one matching ophys experiment table entry "
-        f"for mouse_id=={subject_id_int} and ophys_experiment_id=={ophys_experiment_id}, "
-        f"instead found {len(session_info)}"
-    )
+    Returns
+    -------
+    Acquisition
+        AIND Acquisition data model populated with data from the NWB file(s)
+    """
+    assert len(nwbfiles) == len(session_infos), "Must have one session_info per NWB file"
+    assert len(nwbfiles) >= 1, "Must have at least one NWB file"
+
+    # Use first NWB file for shared metadata (behavior data is the same across all planes)
+    nwbfile = nwbfiles[0]
+    session_info = session_infos[0]
 
     # this script is for behavior + ophys sessions for the visual behavior ophys project
-    from aind_data_schema_models.modalities import Modality
     assert set(get_modalities(nwbfile)) == set([Modality.POPHYS, Modality.BEHAVIOR])
 
     assert len(nwbfile.devices) == 1
@@ -416,25 +406,29 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
     # TODO the microscope name will need to match the device name defined in the instrument file
     microscope_name = device.name  # such as CAM2P.3 or MESO.1
 
-    if is_single_plane:
+    # Determine if single-plane or multi-plane based on device
+    if re.match(r"CAM2P\.\d", device.name):
         # single-plane ophys sessions use the Scientifica rig
-        assert re.match("CAM2P\.\d", device.name)
+        assert len(nwbfiles) == 1, "Single-plane sessions should have exactly one NWB file"
+        is_single_plane = True
         assert device.description == "Allen Brain Observatory - Scientifica 2P Rig"
         assert device.manufacturer == "Scientifica"
-        imaging_plane_info = process_nwb_imaging_plane(plane_nwb_file_paths[0], subject_id_int, is_single_plane)
+        imaging_plane_info = process_nwb_imaging_plane(nwbfile, session_info, is_single_plane)
         imaging_config = get_single_plane_imaging_config(device.name, imaging_plane_info)
-    else:
+    elif device.name == "MESO.1":
         # multi-plane ophys sessions use the Mesoscope rig
-        assert device.name == "MESO.1"
+        is_single_plane = False
         assert device.description == "Allen Brain Observatory - Mesoscope 2P Rig"
         assert device.manufacturer is None
 
-        # cross-check with custom metadata object in each NWB file
-        imaging_plane_info_all = list()
-        for file_path in plane_nwb_file_paths:
-            imaging_plane_info = process_nwb_imaging_plane(file_path, subject_id_int, is_single_plane)
+        # Process all plane NWB files
+        imaging_plane_info_all = []
+        for nwbfile_plane, session_info_plane in zip(nwbfiles, session_infos):
+            imaging_plane_info = process_nwb_imaging_plane(nwbfile_plane, session_info_plane, is_single_plane)
             imaging_plane_info_all.append(imaging_plane_info)
         imaging_config = get_multiplane_imaging_config(device.name, imaging_plane_info_all)
+    else:
+        raise ValueError(f"Unknown device: {device.name}")
 
     acquisition = Acquisition(
         subject_id=get_subject_id(nwbfile, session_info=session_info),
@@ -512,32 +506,3 @@ def generate_acquisition_json(subject_id: str, session_id: str, plane_nwb_file_p
     )
 
     return acquisition
-
-
-if __name__ == "__main__":
-    # example file for initial debugging
-    # TODO - replace with more general ingestion/generation script
-    subject_id = "403491"
-    nwbfile_session_id = "20181129T093257"  # example behavior+ophys file for VisualBehavior project (single plane)
-    
-    subject_id = "457841"
-    nwbfile_session_id = "20190920T095938"  # example behavior+ophys file for VisualBehaviorMultiscope project (7 imaging planes)
-
-    subject_id = "499478"
-    nwbfile_session_id = "20200218T091535"  # example behavior+ophys file for VisualBehaviorMultiscope4areasx2d project (7 imaging planes)
-
-    # each nwb file represents one plane of a multi plane ophys session
-    file_paths = glob.glob(f"C:/Users/Ryan/Documents/mindscope-to-nwb-zarr/data/sub-{subject_id}_ses-{nwbfile_session_id}*_image+ophys.nwb")
-    print(f"Found {len(file_paths)} NWB file(s) for subject {subject_id}, session {nwbfile_session_id}")
-    assert len(file_paths) >= 1, "Expected at least one NWB file for the specified subject and session"
-
-    acquisition = generate_acquisition_json(subject_id, nwbfile_session_id, file_paths)
-
-    file_path_stem = Path(file_paths[0]).stem
-    file_path_stem = re.sub(r"_obj-\d+", "", file_path_stem)
-    acquisition_json_path = f"vis_beh_ophys_{file_path_stem}_acquisition"
-    print(acquisition_json_path)
-
-    serialized = acquisition.model_dump_json()
-    deserialized = Acquisition.model_validate_json(serialized)
-    deserialized.write_standard_file(prefix=acquisition_json_path)
