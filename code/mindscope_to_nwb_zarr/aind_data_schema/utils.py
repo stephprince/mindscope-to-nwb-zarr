@@ -80,7 +80,7 @@ def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
         volumes = nwbfile.intervals['trials'].to_dataframe()['reward_volume'].unique()
         volumes = volumes[volumes > 0]
         if len(volumes) > 1:
-            warnings.warn(f"Multiple non-zero reward volumes found: {volumes}. Using the largest one.")
+            warnings.warn(f"Multiple non-zero reward volumes found: {volumes}. Using the largest one: {volumes.max()}.")
         return float(volumes.max())
     
     return None
