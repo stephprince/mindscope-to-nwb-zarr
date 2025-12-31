@@ -9,7 +9,7 @@ jupytext:
 kernelspec:
   display_name: Python 3
   language: python
-  name: allensdk
+  name: swdb
 ---
 ```{code-cell} ipython3
 import numpy as np
@@ -18,9 +18,25 @@ import matplotlib.pyplot as plt
 %matplotlib inline
 ```
 ```{code-cell} ipython3
-from allensdk.core.brain_observatory_cache import BrainObservatoryCache
-manifest_file = '../../../data/allen-brain-observatory/visual-coding-2p/manifest.json'
-boc = BrainObservatoryCache(manifest_file=manifest_file)
+# from allensdk.core.brain_observatory_cache import BrainObservatoryCache
+# manifest_file = '../../../data/allen-brain-observatory/visual-coding-2p/manifest.json'
+# boc = BrainObservatoryCache(manifest_file=manifest_file)
+```
+
+```{code-cell} ipython3
+from hdmf_zarr import NWBZarrIO
+
+# NWB file paths for each session type
+# TODO: Update these paths to the published Zarr file locations
+nwb_paths = {
+    'StimA': 'C:/Users/Ryan/results/sub-222426_ses-501704220-StimA_behavior+image+ophys.nwb',
+    'StimB': 'C:/Users/Ryan/results/sub-222426_ses-501559087-StimB_behavior+image+ophys.nwb',
+    'StimC': 'C:/Users/Ryan/results/sub-222426_ses-501474098-StimC_behavior+image+ophys.nwb',
+}
+
+# Load the StimB session which contains natural_scenes
+io = NWBZarrIO(nwb_paths['StimB'], 'r')
+nwb = io.read()
 ```
 
 # Exercise: Evoked response
@@ -28,22 +44,32 @@ boc = BrainObservatoryCache(manifest_file=manifest_file)
 We want to put these different pieces of data together. Here will will find the preferred image for a neuron - the image among the natural scenes that drives the largest mean response - and see how that response is modulated by the mouse's running activity.
 
 ```{code-cell} ipython3
-cell_specimen_id = 517474020
-session_id = boc.get_ophys_experiments(cell_specimen_ids=[cell_specimen_id], stimuli=['natural_scenes'])[0]['id']
-data_set = boc.get_ophys_experiment_data(ophys_experiment_id=session_id)
+# cell_specimen_id = 517474020
+# session_id = boc.get_ophys_experiments(cell_specimen_ids=[cell_specimen_id], stimuli=['natural_scenes'])[0]['id']
+# data_set = boc.get_ophys_experiment_data(ophys_experiment_id=session_id)
 ```
 
-Let's get the cell index for this cell specimen id:
+Let's get a cell index for this exercise. We'll use the first cell in the session:
 
 ```{code-cell} ipython3
-cell_index = data_set.get_cell_specimen_indices([cell_specimen_id])[0]
+# Get cell IDs from the PlaneSegmentation table
+plane_seg = nwb.processing["ophys"]["ImageSegmentation"]["PlaneSegmentation"]
+cell_ids = plane_seg.id[:]
+
+# Use the first cell for this exercise
+cell_index = 0
+cell_specimen_id = cell_ids[cell_index]
+print("Cell specimen ID: ", str(cell_specimen_id))
 print("Cell index: ", str(cell_index))
 ```
 
 Let's start with the DF/F traces:
 
 ```{code-cell} ipython3
-ts, dff = data_set.get_dff_traces()
+# Get DfOverF traces
+dff_series = nwb.processing["ophys"]["DfOverF"]["DfOverF"]
+dff = dff_series.data[:].T  # Transpose to get (n_cells, n_timepoints)
+ts = dff_series.timestamps[:]
 
 plt.plot(ts, dff[cell_index,:])
 plt.xlabel("Time (s)")
@@ -53,7 +79,19 @@ plt.ylabel("DF/F (%)")
 Let's get the stimulus table for the natural scenes:
 
 ```{code-cell} ipython3
-stim_table = data_set.get_stimulus_table('natural_scenes')
+# Natural scenes stimulus information is stored as an NWB IndexSeries
+natural_scenes = nwb.stimulus["natural_scenes_stimulus"]
+
+# Create a DataFrame similar to the AllenSDK format
+stim_table = pd.DataFrame({
+    'frame': natural_scenes.data[:],
+})
+
+# Add start and end frame indices using the DfOverF timestamps
+stim_table['start'] = np.searchsorted(ts, natural_scenes.timestamps[:])
+# Each stimulus is followed immediately by the next, so end = next start (or last frame for final trial)
+stim_table['end'] = np.append(stim_table['start'].values[1:], len(ts))
+
 stim_table.head(n=10)
 ```
 
@@ -87,8 +125,10 @@ Which image is the preferred image?
 preferred_image = np.argmax(image_response) - 1
 print(preferred_image)
 
-natural_scene_template = data_set.get_stimulus_template('natural_scenes')
-plt.imshow(natural_scene_template[preferred_image,:,:], cmap='gray')
+# Get the natural scenes template from the IndexSeries
+natural_scene_template = natural_scenes.indexed_images
+image = natural_scene_template.order_of_images[preferred_image]
+plt.imshow(image.data[:], cmap='gray')
 plt.axis('off');
 ```
 
@@ -97,7 +137,9 @@ plt.axis('off');
 Let's get the running speed of the mouse:
 
 ```{code-cell} ipython3
-dxcm, _ = data_set.get_running_speed()
+# Running speed is stored in the behavior processing module
+running_speed_series = nwb.processing["behavior"]["BehavioralTimeSeries"]['running_speed']
+dxcm = running_speed_series.data[:]
 
 plt.plot(ts, dxcm)
 plt.xlabel("Time (s)")

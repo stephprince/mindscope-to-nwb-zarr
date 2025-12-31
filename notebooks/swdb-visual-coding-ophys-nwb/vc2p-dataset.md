@@ -9,7 +9,7 @@ jupytext:
 kernelspec:
   display_name: Python 3
   language: python
-  name: allensdk
+  name: swdb
 ---
 ```{code-cell} ipython3
 import pandas as pd
