@@ -1,7 +1,7 @@
 [project]
 name = "mindscope-to-nwb-zarr"
 version = "0.1.0"
-description = "Add your description here"
+description = "Convert Mindscope NWB files from the HDF5 format to Zarr format and extract AIND Metadata JSON files"
 readme = "../README.md"
 
 # These are set up to correspond with the Code Ocean capsule configuration
@@ -33,6 +33,9 @@ version-file = "mindscope_to_nwb_zarr/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mindscope_to_nwb_zarr"]
+
+[tool.uv.sources]
+hdmf-zarr = { git = "https://github.com/hdmf-dev/hdmf-zarr", rev = "a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b" }
 
 # [tool.uv.sources]
 # allensdk = { git = "https://github.com/rly/AllenSDK.git", rev = "a1d68976874097bdcb9b3321eda539538b24bb8b" }

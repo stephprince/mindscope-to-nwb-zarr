@@ -552,8 +552,8 @@ wheels = [
 
 [[package]]
 name = "hdmf-zarr"
-version = "0.12.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.12.1.dev8+ga8ce49065"
+source = { git = "https://github.com/hdmf-dev/hdmf-zarr?rev=a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b#a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b" }
 dependencies = [
     { name = "hdmf" },
     { name = "numcodecs" },
@@ -561,10 +561,6 @@ dependencies = [
     { name = "pynwb" },
     { name = "threadpoolctl" },
     { name = "zarr" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/56/707bafae46727e0d69030fac436b96fb4ea8fefc693e661474ed45d12987/hdmf_zarr-0.12.0.tar.gz", hash = "sha256:9fa413fcddfc12e825b99f06ebdbc35439c6fad9f00a44936961b9ffd684e0c0", size = 3106640, upload-time = "2025-10-08T18:27:38.921Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/74/eeff5039149201bead00c27fab2ddf071899307bd578c3eabcd069ba4eba/hdmf_zarr-0.12.0-py3-none-any.whl", hash = "sha256:aaf866122799f547b9594f54fe906e2ffc4e8b9fe1928bf15a037dfcc864c98b", size = 33787, upload-time = "2025-10-08T18:27:37.44Z" },
 ]
 
 [[package]]
@@ -796,7 +792,7 @@ requires-dist = [
     { name = "aind-metadata-service-client", specifier = "==2.6.0" },
     { name = "dandi", specifier = "==0.74.0" },
     { name = "hdmf", specifier = "==4.2.0" },
-    { name = "hdmf-zarr", specifier = "==0.12.0" },
+    { name = "hdmf-zarr", git = "https://github.com/hdmf-dev/hdmf-zarr?rev=a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b" },
     { name = "nwbinspector", specifier = "==0.6.5" },
     { name = "pynwb", specifier = "==3.1.3" },
     { name = "quilt3", specifier = "==7.1.0" },

@@ -66,7 +66,7 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
    - running -> behavior
    - stimulus -> behavior (?)
 - Consider reorganizing eye tracking rig metadata to be under the `general` group or a subtype of `Device` instead of under a processing module.
-- Evaluate the efficiency and usability of storing many image objects in the Images container in Zarr vs storing them as a stacked array.
+- Work with the NWB team to evaluate the efficiency and usability of storing many image objects in the Images container (e.g., natural movies, locally sparse noise) in Zarr vs storing them as a stacked array. This is particularly slow on write.
 - Add explicit link from stimulus presentation and trials tables to the stimulus template images in the new `Images` container instead of relying on name/indices matching.
 
 ### Visual Behavior Ophys
@@ -87,6 +87,9 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
 - Remove the "imp" column from the electrodes table which contains all NaN values.
 - Times in the "intervals/invalid_times" table are not in increasing order and should be to conform with NWB best practices.
 - The raw LFP data is stored with gzip level 9 compression, which has a high compression ratio but is very slow to write and read. Consider using a faster compression algorithm or lower compression level, like Blosc-zstd level 5.
+
+### Visual Coding Ophys
+- Consider adding `start_frame` and `end_frame` columns to the stimulus presentation tables to directly index into the 2p imaging frames, to match how the AllenSDK represented these tables. Otherwise, users will need to use `np.searchsorted` on the `start_time` and `stop_time` timestamps to get these indices.
 
 ## AIND Metadata Extraction
 
