@@ -1,5 +1,6 @@
 """Script to generate AIND data schema JSON files for visual coding ephys dataset"""
 
+import traceback
 import pandas as pd
 
 from pathlib import Path
@@ -18,32 +19,7 @@ CODE_DIR = Path(__file__).parent.parent.parent.parent
 SUBJECT_MAPPING_PATH = CODE_DIR / "reference" / "visual_coding_ephys_subject_mapping.json"
 
 
-def load_session_info(session_id: int, data_dir: Path) -> pd.DataFrame:
-    """
-    Load session metadata from CSV file.
-
-    Parameters
-    ----------
-    session_id : int
-        Session ID
-    data_dir : Path
-        Path to data directory containing metadata CSV files
-
-    Returns
-    -------
-    pd.DataFrame
-        Session metadata for the specified session
-    """
-    sessions_table = pd.read_csv(data_dir / SESSIONS_CSV_PATH)
-    session_info = sessions_table.query("id == @session_id")
-
-    if len(session_info) == 0:
-        raise ValueError(f"Session ID {session_id} not found in sessions.csv")
-
-    return session_info
-
-
-def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Path, output_dir: Path) -> None:
+def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path) -> None:
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -51,22 +27,17 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Pa
     ----------
     nwb_file_path : Path
         Path to the NWB file
-    session_id : int
-        Session ID for naming output files
-    data_dir : Path
-        Path to data directory containing metadata CSV files
+    session_info : pd.Series
+        Session metadata row from the session table
     output_dir : Path
         Path to directory to save output JSON files
     """
-    # Load allen sdk session info
-    session_info = load_session_info(session_id, data_dir)
-
     # Read NWB file
     nwbfile = read_nwb(nwb_file_path)
 
     # Validate that session type matches metadata
-    assert nwbfile.stimulus_notes == session_info['session_type'].values[0], \
-        f"Session type mismatch: {nwbfile.stimulus_notes} != {session_info['session_type'].values[0]}"
+    assert nwbfile.stimulus_notes == session_info['session_type'], \
+        f"Session type mismatch: {nwbfile.stimulus_notes} != {session_info['session_type']}"
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)
@@ -127,12 +98,12 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
         try:
             generate_session_metadata(
                 nwb_file_path=nwb_file_path,
-                session_id=session_id,
-                data_dir=data_dir,
+                session_info=session_row,
                 output_dir=output_dir,
             )
         except Exception as e:
             print(f"Error generating metadata for session {session_id}: {e}")
+            traceback.print_exc()
             continue
 
     print("\nDone generating metadata!")

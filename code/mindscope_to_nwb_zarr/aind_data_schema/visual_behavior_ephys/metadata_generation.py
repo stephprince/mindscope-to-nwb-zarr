@@ -1,6 +1,6 @@
 """Script to generate AIND data schema JSON files for visual behavior neuropixels dataset"""
 
-import warnings
+import traceback
 import pandas as pd
 
 from pathlib import Path
@@ -12,36 +12,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.procedures import fetch_procedures_from_aind_metadata_service
 
 
-def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
-    """
-    Load session metadata from CSV files.
-
-    Parameters
-    ----------
-    session_id : int
-        Session ID
-    cache_dir : Path
-        Path to directory containing metadata CSV files
-
-    Returns
-    -------
-    pd.DataFrame
-        Session metadata for the specified subject and session
-    """
-    ephys_session_table = pd.read_csv(cache_dir / "ecephys_sessions.csv")
-    behavior_session_table = pd.read_csv(cache_dir / "behavior_sessions.csv")
-
-    session_info = ephys_session_table.query("ecephys_session_id == @session_id")
-    behavior_session_info = behavior_session_table.query("behavior_session_id == @session_id")
-
-    if len(session_info) == 0 and len(behavior_session_info) == 1:
-        warnings.warn("Session info only found for behavioral data - defaulting to behavior only session")
-        session_info = behavior_session_info
-
-    return session_info
-
-
-def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: Path, output_dir: Path):
+def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path):
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -49,22 +20,17 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
     ----------
     nwb_file_path : Path
         Path to the NWB file
-    session_id : int
-        Session ID for naming output files
-    cache_dir : Path
-        Path to directory containing metadata CSV files
+    session_info : pd.Series
+        Session metadata row from the session table
     output_dir : Path
         Path to directory to save output JSON files
     """
-    # Load allen sdk session info
-    session_info = load_session_info(session_id, cache_dir)
-
     # Read NWB file
     nwbfile = read_nwb(nwb_file_path)
 
     # Validate that session description matches metadata
-    assert nwbfile.session_description == session_info['session_type'].values[0], \
-        f"Session description mismatch: {nwbfile.session_description} != {session_info['session_type'].values[0]}"
+    assert nwbfile.session_description == session_info['session_type'], \
+        f"Session description mismatch: {nwbfile.session_description} != {session_info['session_type']}"
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)
@@ -110,8 +76,8 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
 
     print(f"Found {len(behavior_sessions_df)} behavior sessions")
 
-    for row_index, session_row in behavior_sessions_df.iterrows():
-        behavior_session_id = int(session_row['behavior_session_id'])
+    for row_index, behavior_session_row in behavior_sessions_df.iterrows():
+        behavior_session_id = int(behavior_session_row['behavior_session_id'])
         print(f"\nProcessing behavior session {behavior_session_id} (row {row_index}) ...")
 
         # Check if this behavior session has associated ecephys data
@@ -123,11 +89,11 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
             ecephys_session_id = int(ecephys_match.iloc[0]['ecephys_session_id'])
             session_dir = mounted_data_path / "behavior_ecephys_sessions" / str(ecephys_session_id)
             nwb_filename = f"ecephys_session_{ecephys_session_id}.nwb"
-            session_id = ecephys_session_id
+            session_info = ecephys_match.iloc[0]
         else:
             session_dir = mounted_data_path / "behavior_only_sessions" / str(behavior_session_id)
             nwb_filename = f"behavior_session_{behavior_session_id}.nwb"
-            session_id = behavior_session_id
+            session_info = behavior_session_row
 
         nwb_file_path = session_dir / nwb_filename
         if not nwb_file_path.exists():
@@ -138,12 +104,12 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
         try:
             generate_session_metadata(
                 nwb_file_path=nwb_file_path,
-                session_id=session_id,
-                cache_dir=cache_dir,
+                session_info=session_info,
                 output_dir=output_dir,
             )
         except Exception as e:
-            print(f"Error generating metadata for session {session_id}: {e}")
+            print(f"Error generating metadata for session {behavior_session_id}: {e}")
+            traceback.print_exc()
             continue
 
     print("\nDone generating metadata!")
