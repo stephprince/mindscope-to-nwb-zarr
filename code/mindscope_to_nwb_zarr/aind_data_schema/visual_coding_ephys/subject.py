@@ -1,4 +1,4 @@
-"""Generates an example JSON file for visual behavior ephys subject"""
+"""Generates an example JSON file for visual coding ephys subject"""
 
 import pandas as pd
 import warnings
@@ -98,7 +98,7 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
             assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
                 f"Sex mismatch between NWB file ({nwbfile.subject.sex}) and metadata service ({raw_data['subject_details']['sex']})"
 
-            # downgrade to warning for mismatch due to DOB issue
+            # NOTE: Some files have unexplained DOB mismatch. @saskia. Downgrading mismatch check to a warning for now
             if get_subject_date_of_birth(nwbfile).strftime("%Y-%m-%d") != raw_data['subject_details']['date_of_birth']:
                 warnings.warn(f"Date of birth mismatch between NWB file ({get_subject_date_of_birth(nwbfile)}) and metadata service ({raw_data['subject_details']['date_of_birth']})")
 

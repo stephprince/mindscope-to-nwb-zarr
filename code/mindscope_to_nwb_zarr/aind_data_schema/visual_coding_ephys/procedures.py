@@ -1,4 +1,4 @@
-"""Generates an example JSON file for visual behavior ephys procedures"""
+"""Generates an example JSON file for visual coding ephys procedures"""
 
 import json
 import warnings
@@ -56,8 +56,6 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, api_host: Opti
     ----------
     nwbfile : NWBFile
         The NWB file containing subject information to extract subject ID
-    session_info : pd.DataFrame
-        DataFrame containing session information to extract subject ID
     api_host : str, optional
         The API host URL. Defaults to "http://aind-metadata-service"
 
@@ -78,7 +76,7 @@ def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, api_host: Opti
     if subject_mapping_path is not None:
         with open(subject_mapping_path, 'r') as f:
             subject_mapping_dict = json.load(f)
-        subject_id = subject_mapping_dict.get(str(nwbfile.subject.subject_id), None)
+        subject_id = subject_mapping_dict.get(str(nwbfile.subject.subject_id))
     else:
         subject_id = nwbfile.subject.subject_id
 

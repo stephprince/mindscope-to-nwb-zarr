@@ -34,6 +34,6 @@ version-file = "mindscope_to_nwb_zarr/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["mindscope_to_nwb_zarr"]
 
-[tool.uv.sources]
-allensdk = { git = "https://github.com/rly/AllenSDK.git", rev = "a1d68976874097bdcb9b3321eda539538b24bb8b" }
+# [tool.uv.sources]
+# allensdk = { git = "https://github.com/rly/AllenSDK.git", rev = "a1d68976874097bdcb9b3321eda539538b24bb8b" }
 

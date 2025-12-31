@@ -82,6 +82,74 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
         deserialized.write_standard_file(output_directory=output_dir / data_description.name)
 
 
+def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
+    """
+    Iterate through all sessions in the mounted data directory and generate session metadata.
+
+    The S3 bucket s3://visual-behavior-neuropixels-data is mounted at data_dir/visual-behavior-neuropixels.
+    Iterates through all sessions in the behavior_sessions.csv and generates metadata JSON files.
+
+    Parameters
+    ----------
+    data_dir : Path
+        Path to data directory where S3 bucket is mounted
+    results_dir : Path
+        Path to directory to save output metadata JSON files
+    """
+    output_dir = results_dir / "visual-behavior-neuropixels-metadata"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Mounted data path
+    mounted_data_path = data_dir / "visual-behavior-neuropixels"
+    cache_dir = mounted_data_path / "project_metadata"
+
+    # Load session tables
+    behavior_sessions_df = pd.read_csv(cache_dir / "behavior_sessions.csv")
+    ecephys_sessions_df = pd.read_csv(cache_dir / "ecephys_sessions.csv")
+
+    print(f"Found {len(behavior_sessions_df)} behavior sessions")
+
+    for row_index, session_row in behavior_sessions_df.iterrows():
+        behavior_session_id = int(session_row['behavior_session_id'])
+        print(f"\nProcessing behavior session {behavior_session_id} (row {row_index}) ...")
+
+        # Check if this behavior session has associated ecephys data
+        ecephys_match = ecephys_sessions_df[
+            ecephys_sessions_df['behavior_session_id'] == behavior_session_id
+        ]
+
+        if len(ecephys_match) > 0:
+            ecephys_session_id = int(ecephys_match.iloc[0]['ecephys_session_id'])
+            session_dir = mounted_data_path / "behavior_ecephys_sessions" / str(ecephys_session_id)
+            nwb_filename = f"ecephys_session_{ecephys_session_id}.nwb"
+            session_id = ecephys_session_id
+        else:
+            session_dir = mounted_data_path / "behavior_only_sessions" / str(behavior_session_id)
+            nwb_filename = f"behavior_session_{behavior_session_id}.nwb"
+            session_id = behavior_session_id
+
+        nwb_file_path = session_dir / nwb_filename
+        if not nwb_file_path.exists():
+            print(f"NWB file not found: {nwb_file_path}. Skipping.")
+            continue
+
+        # Generate metadata
+        try:
+            generate_session_metadata(
+                nwb_file_path=nwb_file_path,
+                session_id=session_id,
+                cache_dir=cache_dir,
+                output_dir=output_dir,
+            )
+        except Exception as e:
+            print(f"Error generating metadata for session {session_id}: {e}")
+            continue
+
+        break  # TODO - uncomment after testing
+
+    print("\nDone generating metadata!")
+
+
 if __name__ == "__main__":
     repo_root = Path(__file__).parent.parent.parent.parent.parent
     cache_dir = repo_root / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/"
@@ -98,9 +166,9 @@ if __name__ == "__main__":
     # Process each session
     for session_id, nwb_file_path in sessions:
         print(f"\nProcessing session {session_id}...")
-        generate_session_metadata(nwb_file_path=nwb_file_path, 
-                                  session_id=session_id, 
-                                  cache_dir=cache_dir, 
+        generate_session_metadata(nwb_file_path=nwb_file_path,
+                                  session_id=session_id,
+                                  cache_dir=cache_dir,
                                   output_dir=output_dir)
 
     print("\nDone!")

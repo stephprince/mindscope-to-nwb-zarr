@@ -20,14 +20,15 @@ from pynwb import NWBFile
 
 
 def get_subject_id(nwbfile: NWBFile, session_info: pd.DataFrame = None) -> str:
-    """Get the subject ID from the NWB file, cross-checked with the session info. e.g., "457841"."""
+    """Get the subject ID from the NWB file, cross-checked with the session info. e.g., "457841".
+    """
     if session_info is not None:
         assert session_info['mouse_id'].values[0] == int(nwbfile.subject.subject_id), "subject_id mismatch occurred"
     return nwbfile.subject.subject_id
 
+
 def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
-    """
-    Calculate the animal's date of birth from age and acquisition date in NWB file.
+    """Calculate the animal's date of birth from age and acquisition date in NWB file.
     """
     # Extract age in days from NWB file subject.age field
     age_str = nwbfile.subject.age
@@ -42,6 +43,8 @@ def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
     date_of_birth = (acquisition_datetime - timedelta(days=age_in_days)).date()
 
     return date_of_birth
+
+
 def get_session_start_time(nwbfile: NWBFile, session_info: pd.DataFrame) -> datetime:
     """Get the session start time from the NWB file, cross-checked with the session info. 
     e.g., datetime object for 2018-08-24T14:51:25.667000+00:00
@@ -58,16 +61,19 @@ def get_session_start_time(nwbfile: NWBFile, session_info: pd.DataFrame) -> date
 
     return nwbfile.session_start_time
 
+
 def get_instrument_id(nwbfile: NWBFile, session_info) -> str:
     """Get the instrument ID from the NWB file, cross-checked with the session info. e.g. "BEH.F-Box1"."""
     instrument = next(iter(nwbfile.devices))
     assert session_info['equipment_name'].values[0] == instrument, "instrument_id mismatch occurred"
     return instrument
 
+
 def get_total_reward_volume(nwbfile: NWBFile) -> float | None:
     if 'reward_volume' in nwbfile.trials.colnames:
         return float(nwbfile.trials['reward_volume'][:].sum())
     return None
+
 
 def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
     if 'reward_volume' in nwbfile.trials.colnames:
@@ -79,6 +85,7 @@ def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
     
     return None
 
+
 def get_curriculum_status(session_info):
     # NOTE - nwbfile.lab_meta_data['task_parameters'] also has several task parameters for behavior files that might be useful to record
     keys = ["experience_level", "image_set", "session_number", "prior_exposures_to_image_set",
@@ -87,12 +94,12 @@ def get_curriculum_status(session_info):
     
     return json.dumps(curriculum_dict, cls=NumpyJsonEncoder)
 
+
 def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
     """Convert location names to CCFv3 brain structures.
 
     For VIS regions that don't have an exact match in CCFv3, this function
     falls back to the generic VIS structure.
-
     """
     # get locations from nwbfile
     locations = (nwbfile.electrodes.to_dataframe()
@@ -116,6 +123,7 @@ def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
 
     return all_structures
 
+
 def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
     """Get probe configurations from NWB file.
 
@@ -137,7 +145,7 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
     for device in nwbfile.devices.values():
         if device.__class__.__name__ == "EcephysProbe":
             all_structures = get_brain_locations(nwbfile, device)
-            targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')] # get targeted visual area
+            targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')]  # get targeted visual area
             if len(targeted_structure) > 1:
                 # NOTE: visual coding dataset has 12 functionally defined visual areas that are not included in the CCFv3
                 # these regions will be ignored and the target structure should still fall under one of the 6 VIS areas
@@ -156,18 +164,20 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
                     other_targeted_structure=list(set(all_structures) - set(targeted_structure)), # TODO - currently listing all other structures that are hit but might want to not list everything
                     atlas_coordinate=AtlasCoordinate(
                         coordinate_system=AtlasLibrary.CCFv3_10um,
-                        translation=[0, 0, 0], # TODO - should be target region coordinate - might not make sense for these datasets, TBD @Saskia
+                        translation=[0, 0, 0],  # TODO - should be target region coordinate - might not make sense for these datasets, TBD @Saskia
                     ),
-                    coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB, # TODO - what should this be? probably bregma ARID, will confirm
-                    transform=[Translation(translation=[0, 0, 0, 1],),], # TODO - what should this be? this will be the translation we care about, how we've positioned this probe
+                    coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # TODO - what should this be? probably bregma ARID, will confirm
+                    transform=[Translation(translation=[0, 0, 0, 1],),],  # TODO - what should this be? this will be the translation we care about, how we've positioned this probe
                     # expect that there is documentation on these translations somewhere @Saskia
                     notes=None,
                 )
             )
+
     if len(set(all_targeted_structures)) != len(all_targeted_structures):
         warnings.warn(f"Multiple probes targeting same brain structure found: {all_targeted_structures}")
 
     return probe_configs
+
 
 def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, OptotaggingStimulation]:
     """Extract optogenetic stimulation parameters from NWB optotagging data.
@@ -187,14 +197,17 @@ def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, Optotag
     for stimulus_name, df in opto_df.groupby('stimulus_name'):
         assert len(df['condition'].unique()) == 1, "Multiple pulse shapes found for stimulus_name"
         if 'pulse' in df['condition'].values[0].lower():
-            pulse_shape = PulseShape.SQUARE # TODO - double check if this is best descriptor for both slow and fast pulses
+            pulse_shape = PulseShape.SQUARE  # TODO - double check if this is best descriptor for both slow and fast pulses
         elif 'cosine' in df['condition'].values[0].lower():
-            pulse_shape = PulseShape.RAMP # TODO - described as "raised cosine ramp" in whitepaper, could define new enum if needed
+            pulse_shape = PulseShape.RAMP  # TODO - described as "raised cosine ramp" in whitepaper, could define new enum if needed
+        else:
+            raise ValueError(f"Unknown pulse shape in condition: {df['condition'].values[0]}")
 
         # get pulse duration and light levels used
         light_levels = sorted(df['level'].unique().tolist())
         pulse_durations = df['duration'].unique()
 
+        # create custom OptotaggingStimulation model
         opto_stimulation[stimulus_name] = OptotaggingStimulation(
             stimulus_name=stimulus_name,
             pulse_shape=pulse_shape,
@@ -212,6 +225,7 @@ def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, Optotag
 
     return opto_stimulation
 
+
 def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFrame) -> VisualStimulation:
     """Extract visual stimulation parameters from an intervals table.
 
@@ -228,30 +242,31 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
         Visual stimulation object with extracted parameters
     """
     # TODO - determine if there are any other parameters to include or better units
-    possible_parameters_and_units = {"orientation": "degrees",
-                                     "spatial_frequency": "cycles/degree",
-                                     "temporal_frequency": "Hz",
-                                     "contrast": "percent",
-                                     "duration": "S",
-                                     "phase": None,
-                                     "size": None,
-                                     "image_name": None,
-                                     "image_set": None,
-                                     "stimulus_name": None,
-                                     "stimulus_block": None,
-                                     "color": None,
-                                     "opacity": None,
-                                     "mask": None,
-                                     "speed": "degrees/second",
-                                     "dir": "degrees",
-                                     "coherence": "percent",
-                                     "dotLife": None,
-                                     "dotSize": None,
-                                     "nDots": None,
-                                     "fieldPos": None,
-                                     "fieldShape": None,
-                                     "fieldSize": None,
-                                     }
+    possible_parameters_and_units = {
+        "orientation": "degrees",
+        "spatial_frequency": "cycles/degree",
+        "temporal_frequency": "Hz",
+        "contrast": "percent",
+        "duration": "S",
+        "phase": None,
+        "size": None,
+        "image_name": None,
+        "image_set": None,
+        "stimulus_name": None,
+        "stimulus_block": None,
+        "color": None,
+        "opacity": None,
+        "mask": None,
+        "speed": "degrees/second",
+        "dir": "degrees",
+        "coherence": "percent",
+        "dotLife": None,
+        "dotSize": None,
+        "nDots": None,
+        "fieldPos": None,
+        "fieldShape": None,
+        "fieldSize": None,
+    }
     parameters = {}
     for param_key, param_unit in possible_parameters_and_units.items():
         if param_key in intervals_table.columns:
@@ -262,12 +277,13 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
                 parameters.update({f"{param_key}_unit": param_unit})
 
     visual_stimulation = VisualStimulation(
-                            stimulus_name=table_key,
-                            stimulus_parameters=parameters,
-                            stimulus_template_name=intervals_table['stimulus_name'].unique().tolist(),
-                            notes=None,
-                        )
+        stimulus_name=table_key,
+        stimulus_parameters=parameters,
+        stimulus_template_name=intervals_table['stimulus_name'].unique().tolist(),
+        notes=None,
+    )
     return visual_stimulation
+
 
 def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, intervals_table: pd.DataFrame,
                                          nwbfile: NWBFile, session_info: pd.DataFrame = None) -> StimulusEpoch:
@@ -292,29 +308,31 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
         Stimulus epoch object with extracted parameters
     """
     return StimulusEpoch(
-                stimulus_start_time=timedelta(seconds=intervals_table['start_time'].values[0]) + nwbfile.session_start_time,
-                stimulus_end_time=timedelta(seconds=intervals_table['stop_time'].values[-1]) + nwbfile.session_start_time,
-                stimulus_name=stimulus_name,
-                # TODO - acquire additional info about the code used for this task - might not be available
-                # will need to fill in with some type of information so we can use the Code.parameters field @Saskia
-                code=Code(
-                    url="None",
-                    core_dependency=Software(
-                        name="PsychoPy",
-                        version=None,
-                    ), # TODO - from whitepaper, add version if available @Saskia
-                    parameters=get_visual_stimulation_parameters(table_key, intervals_table).model_dump(),
-                ),
-                stimulus_modalities=[StimulusModality.VISUAL],
-                notes=None,
-                active_devices=["None"],
-                performance_metrics=None, # TODO - see if these are accessible anywhere?
-                training_protocol_name=session_info["session_type"].values[0] if session_info is not None else None,  # e.g., "TRAINING_0_gratings_autorewards_15min"
-                curriculum_status=get_curriculum_status(session_info) if session_info is not None else None,
-            )
+        stimulus_start_time=timedelta(seconds=intervals_table['start_time'].values[0]) + nwbfile.session_start_time,
+        stimulus_end_time=timedelta(seconds=intervals_table['stop_time'].values[-1]) + nwbfile.session_start_time,
+        stimulus_name=stimulus_name,
+        # TODO - acquire additional info about the code used for this task - might not be available
+        # will need to fill in with some type of information so we can use the Code.parameters field @Saskia
+        code=Code(
+            url="None",
+            core_dependency=Software(
+                name="PsychoPy",
+                version=None,
+            ),  # TODO - from whitepaper, add version if available @Saskia
+            parameters=get_visual_stimulation_parameters(table_key, intervals_table).model_dump(),
+        ),
+        stimulus_modalities=[StimulusModality.VISUAL],
+        notes=None,
+        active_devices=["None"],
+        performance_metrics=None,  # TODO - see if these are accessible anywhere?
+        training_protocol_name=session_info["session_type"].values[0] if session_info is not None else None,  # e.g., "TRAINING_0_gratings_autorewards_15min"
+        curriculum_status=get_curriculum_status(session_info) if session_info is not None else None,
+    )
+
 
 def serialized_dict(**kwargs) -> str:
     return json.dumps(dict(**kwargs), cls=NumpyJsonEncoder)
+
 
 class NumpyJsonEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle NumPy data types."""

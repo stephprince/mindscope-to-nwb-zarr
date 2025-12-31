@@ -10,8 +10,12 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.data_description
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import fetch_subject_from_aind_metadata_service
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.procedures import fetch_procedures_from_aind_metadata_service
 
+# Path to session metadata CSV files from the data folder
+SESSIONS_CSV_PATH = "visual-coding-neuropixels/ecephys-cache/sessions.csv"
 
-def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
+
+
+def load_session_info(session_id: int, data_dir: Path) -> pd.DataFrame:
     """
     Load session metadata from CSV file.
 
@@ -19,15 +23,15 @@ def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
     ----------
     session_id : int
         Session ID
-    cache_dir : Path
-        Path to directory containing metadata CSV files
+    data_dir : Path
+        Path to data directory containing metadata CSV files
 
     Returns
     -------
     pd.DataFrame
         Session metadata for the specified session
     """
-    sessions_table = pd.read_csv(cache_dir / "sessions.csv")
+    sessions_table = pd.read_csv(data_dir / SESSIONS_CSV_PATH)
     session_info = sessions_table.query("id == @session_id")
 
     if len(session_info) == 0:
@@ -36,7 +40,7 @@ def load_session_info(session_id: int, cache_dir: Path) -> pd.DataFrame:
     return session_info
 
 
-def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: Path, output_dir: Path, subject_mapping_path: Path) -> None:
+def generate_session_metadata(nwb_file_path: Path, session_id: int, data_dir: Path, output_dir: Path, subject_mapping_path: Path) -> None:
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -46,15 +50,15 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
         Path to the NWB file
     session_id : int
         Session ID for naming output files
-    cache_dir : Path
-        Path to directory containing metadata CSV files
+    data_dir : Path
+        Path to data directory containing metadata CSV files
     output_dir : Path
         Path to directory to save output JSON files
     subject_mapping_path : Path
         Path to JSON file containing subject ID mapping
     """
     # Load allen sdk session info
-    session_info = load_session_info(session_id, cache_dir)
+    session_info = load_session_info(session_id, data_dir)
 
     # Read NWB file
     nwbfile = read_nwb(nwb_file_path)
@@ -79,9 +83,67 @@ def generate_session_metadata(nwb_file_path: Path, session_id: int, cache_dir: P
         deserialized.write_standard_file(output_directory=output_dir / data_description.name)
 
 
+def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
+    """
+    Iterate through all sessions in the mounted data directory and generate session metadata.
+
+    The S3 bucket s3://allen-brain-observatory is mounted at data_dir/allen-brain-observatory.
+    Iterates through all sessions in the sessions.csv and generates metadata JSON files.
+
+    Parameters
+    ----------
+    data_dir : Path
+        Path to data directory where S3 bucket is mounted
+    results_dir : Path
+        Path to directory to save output metadata JSON files
+    """
+    output_dir = results_dir / "visual-coding-neuropixels-metadata"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Mounted data path
+    mounted_data_path = data_dir / "allen-brain-observatory" / "visual-coding-neuropixels" / "ecephys-cache"
+
+    # Load sessions table
+    sessions_df = pd.read_csv(mounted_data_path / "sessions.csv")
+
+    # Subject mapping path
+    subject_mapping_path = data_dir / "visual_coding_ephys_subject_mapping.json"
+
+    print(f"Found {len(sessions_df)} sessions")
+
+    for row_index, session_row in sessions_df.iterrows():
+        session_id = int(session_row['id'])
+        print(f"\nProcessing session {session_id} (row {row_index}) ...")
+
+        # Build NWB file path
+        session_dir = mounted_data_path / f"session_{session_id}"
+        nwb_filename = f"session_{session_id}.nwb"
+        nwb_file_path = session_dir / nwb_filename
+
+        if not nwb_file_path.exists():
+            print(f"NWB file not found: {nwb_file_path}. Skipping.")
+            continue
+
+        # Generate metadata
+        try:
+            generate_session_metadata(
+                nwb_file_path=nwb_file_path,
+                session_id=session_id,
+                data_dir=data_dir / "allen-brain-observatory",
+                output_dir=output_dir,
+                subject_mapping_path=subject_mapping_path,
+            )
+        except Exception as e:
+            print(f"Error generating metadata for session {session_id}: {e}")
+            continue
+        
+        break  # TODO - remove after testing
+
+    print("\nDone generating metadata!")
+
+
 if __name__ == "__main__":
     repo_root = Path(__file__).parent.parent.parent.parent.parent
-    cache_dir = repo_root / ".cache/visual_coding_ephys_cache_dir/"
     output_dir = repo_root / "data/schema/ephys_visual_coding/"
     output_dir.mkdir(parents=True, exist_ok=True)
     subject_mapping_path = repo_root / "data/visual_coding_ephys_subject_mapping.json"
@@ -95,10 +157,11 @@ if __name__ == "__main__":
     # Process each session
     for session_id, nwb_file_path in sessions:
         print(f"\nProcessing session {session_id}...")
-        generate_session_metadata(nwb_file_path=nwb_file_path,
-                                  session_id=session_id,
-                                  cache_dir=cache_dir,
-                                  output_dir=output_dir,
-                                  subject_mapping_path=subject_mapping_path)
-
+        generate_session_metadata(
+            nwb_file_path=nwb_file_path,
+            session_id=session_id,
+            data_dir=data_dir,
+            output_dir=output_dir,
+            subject_mapping_path=subject_mapping_path
+        )
     print("\nDone!")
