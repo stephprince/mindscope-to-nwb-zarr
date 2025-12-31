@@ -1,5 +1,6 @@
 """Generates acquisition metadata from NWB files for visual coding ophys sessions"""
 
+import numpy as np
 import re
 import pandas as pd
 
@@ -49,8 +50,8 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     Returns:
         A dictionary containing imaging plane metadata.
     """
-    assert len(nwbfile.devices) == 1
-    device = next(iter(nwbfile.devices.values()))
+    assert len(nwbfile.devices) == 3, "Expected three devices per NWB file: Camera, Microscope, and StimulusDisplay"
+    device = nwbfile.devices["Microscope"]
 
     assert len(nwbfile.imaging_planes) == 1, "Expected one imaging plane per NWB file"
     imaging_plane = next(iter(nwbfile.imaging_planes.values()))
@@ -84,6 +85,16 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
         imaging_plane_targeted_structure_str=targeted_structure_str,
         imaging_plane_depth=imaging_plane_depth,
     )
+
+
+def _get_emission_wavelength(imaging_plane) -> float | None:
+    """Get emission wavelength from imaging plane, returning None if not available or nan."""
+    if not imaging_plane.optical_channel:
+        return None
+    emission_lambda = imaging_plane.optical_channel[0].emission_lambda
+    if emission_lambda is None or (isinstance(emission_lambda, float) and np.isnan(emission_lambda)):
+        return None
+    return float(emission_lambda)
 
 
 def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> ImagingConfig:
@@ -132,7 +143,7 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
                     ),
                 ],
                 emission_filters=[],
-                emission_wavelength=imaging_plane.optical_channel[0].emission_lambda if imaging_plane.optical_channel else 520,
+                emission_wavelength=_get_emission_wavelength(imaging_plane),
                 emission_wavelength_unit=SizeUnit.NM,
             ),
         ],
@@ -147,7 +158,7 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
             ),
         ],
         sampling_strategy=SamplingStrategy(
-            frame_rate=imaging_plane.imaging_rate,
+            frame_rate=30,  # from de Vries et al, 2019
             frame_rate_unit=FrequencyUnit.HZ,
         ),
     )
