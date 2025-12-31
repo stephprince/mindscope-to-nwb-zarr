@@ -10,6 +10,15 @@
 			"type": "text",
 			"value_type": "string",
 			"required": true
+		},
+		{
+			"id": "CewKNE6rJidobUVN",
+			"name": "Generate AIND metadata and not Zarr files",
+			"param_name": "metadata",
+			"type": "list",
+			"value_type": "boolean",
+			"default_value": "False",
+			"extra_data": []
 		}
 	]
 }
