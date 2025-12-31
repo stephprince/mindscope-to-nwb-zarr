@@ -37,6 +37,8 @@ Then, create a new Code Ocean data asset using the web interface by dragging and
 
 Then, go to the [Allen Brain Observatory Visual Coding 2p NWB HDF5 to Zarr](https://codeocean.allenneuraldynamics.org/capsule/9983566/tree) pipeline, add the new data asset to the `data` directory, and add the new data asset as an input to the pipeline. Map the paths from the data asset to the capsule (`data/visual-coding-ophys` to `capsule/data/visual-coding-ophys`), configure the capsule with the correct parameter (`--dataset Visual Coding 2p`), and connect and map the capsule to the results bucket (defaults should be fine). Finally, run the pipeline. It will take several minutes to load pipeline monitoring before starting tasks.
 
+If time permits, it may be more efficient to transfer the data directly from DANDI's S3 storage to Code Ocean's S3 storage instead of downloading to the capsule via HTTP.
+
 ## Testing Locally
 
 1. `cd code`
