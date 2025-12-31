@@ -9,10 +9,8 @@ from aind_data_schema_models.organizations import Organization
 from aind_data_schema_models.data_name_patterns import DataLevel, Group
 from aind_data_schema_models.licenses import License
 from aind_data_schema.components.identifiers import Person
-
 from aind_data_schema.core.data_description import Funding, DataDescription
 
-from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
 
 

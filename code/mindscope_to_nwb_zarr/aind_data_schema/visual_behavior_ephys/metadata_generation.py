@@ -149,27 +149,3 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
         break  # TODO - uncomment after testing
 
     print("\nDone generating metadata!")
-
-
-if __name__ == "__main__":
-    repo_root = Path(__file__).parent.parent.parent.parent.parent
-    cache_dir = repo_root / ".cache/visual_behavior_neuropixels_cache_dir/visual-behavior-neuropixels-0.5.0/project_metadata/"
-    output_dir = repo_root / "data/schema/ephys_visual_behavior/"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Define sessions to process
-    # TODO - create list of all session ids and corresponding nwb file paths
-    sessions = [
-        (1014008383, repo_root / "data/visual_behavior_neuropixels/behavior_session_1014008383.nwb"),
-        (1043752325, repo_root / "data/visual_behavior_neuropixels/ecephys_session_1043752325.nwb"),
-    ]
-
-    # Process each session
-    for session_id, nwb_file_path in sessions:
-        print(f"\nProcessing session {session_id}...")
-        generate_session_metadata(nwb_file_path=nwb_file_path,
-                                  session_id=session_id,
-                                  cache_dir=cache_dir,
-                                  output_dir=output_dir)
-
-    print("\nDone!")
