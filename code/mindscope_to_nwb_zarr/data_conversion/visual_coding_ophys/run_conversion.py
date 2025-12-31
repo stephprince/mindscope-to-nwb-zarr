@@ -330,7 +330,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
 
             # Export to Zarr
             new_base_filename = processed_file_path.stem.replace(old_subject_id, new_subject_id)
-            zarr_path = results_dir / "visual-coding-ophys" / f"{new_base_filename}.zarr"
+            zarr_path = results_dir / "visual-coding-ophys" / f"{new_base_filename}.nwb.zarr"
             print(f"Exporting to Zarr file {zarr_path} ...")
             with NWBZarrIO(str(zarr_path), mode='w') as export_io:
                 export_io.export(src_io=processed_io, nwbfile=base_nwbfile, write_args=dict(link_data=False))
