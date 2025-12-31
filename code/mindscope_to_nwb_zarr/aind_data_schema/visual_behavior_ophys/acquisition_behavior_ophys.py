@@ -481,7 +481,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                         device_name="Lick_Spout_1",  # placeholder
                         solution=Liquid.WATER,
                         solution_valence=Valence.POSITIVE,
-                        volume=get_individual_reward_volume(nwbfile), # TODO - use the smallest reward volume if multiple
+                        volume=get_individual_reward_volume(nwbfile),
                         volume_unit=VolumeUnit.ML,
                         relative_position=["Anterior"],
                         notes="",  # TODO - write that reward volume was both x and y
