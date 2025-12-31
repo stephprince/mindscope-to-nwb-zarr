@@ -56,26 +56,17 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     assert len(nwbfile.imaging_planes) == 1, "Expected one imaging plane per NWB file"
     imaging_plane = next(iter(nwbfile.imaging_planes.values()))
 
-    # Parse imaging plane description for dimensions and structure
-    # Format: "(width, height) field of view in STRUCTURE at depth X um"
-    description_pattern = r"\((\d+), (\d+)\) field of view in (\w+) at depth (\d+) um"
-    match = re.search(description_pattern, imaging_plane.description)
+    imaging_plane_dimensions = [512, 512]  # Default dimensions
+    imaging_plane_depth = session_info.get('imaging_depth')
 
-    if match:
-        imaging_plane_dimensions = [int(match.group(1)), int(match.group(2))]
-        targeted_structure_str = match.group(3)
-        imaging_plane_depth = int(match.group(4))
-    else:
-        # Fall back to session_info if description doesn't match
-        imaging_plane_dimensions = [512, 512]  # Default
-        targeted_structure_str = session_info.get('targeted_structure', 'VISp')
-        imaging_plane_depth = int(session_info.get('imaging_depth', 175))
+    targeted_structure_str = imaging_plane.location
+    assert targeted_structure_str == session_info['targeted_structure']['acronym'], (
+        f"Imaging plane targeted structure '{targeted_structure_str}' does not match session info "
+        f"'{session_info['targeted_structure']['acronym']}'"
+    )
 
     # Get CCFv3 brain structure
-    try:
-        targeted_structure = CCFv3.by_acronym(targeted_structure_str)
-    except (ValueError, AttributeError):
-        targeted_structure = CCFv3.VIS  # Fall back to generic visual area
+    targeted_structure = CCFv3.by_acronym(targeted_structure_str)
 
     return dict(
         device=device,
@@ -265,7 +256,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         specimen_id=None,
         acquisition_start_time=nwbfile.session_start_time,
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        protocol_id=None,
+        protocol_id=[nwbfile.protocol],  # TODO is this correct? Example value 20160706_244896_3StimC @Saskia
         ethics_review_id=None,  # TODO @Saskia
         instrument_id=device.name,  # TODO: The instrument ID will need to match the instrument file @Saskia
         acquisition_type=session_info.get('stimulus_name', 'Visual Coding 2p'),
@@ -281,7 +272,10 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 active_devices=[  # TODO: These device names need to match the instrument file @Saskia
                     device.name,
                     "BehaviorCamera",
-                    "EyeCamera",
+                    # See de Vries et al, 2019 and existing NWB 2.0 file metadata for device details
+                    # An AVT Mako-G032B camera used to track eye movement and pupil dilation.
+                    # An ASUS PA248Q monitor used to display visual stimuli.
+                    # Scientifica Vivoscope or a Nikon A1R-MP multiphoton microscope. The Nikon system was adapted to provide space to accommodate the behavior apparatus.
                 ],
                 configurations=[
                     imaging_config,
