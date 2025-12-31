@@ -66,6 +66,7 @@ Note: Local testing requires access to the Mindscope NWB HDF5 files, which are n
    - running -> behavior
    - stimulus -> behavior (?)
 - Consider reorganizing eye tracking rig metadata to be under the `general` group or a subtype of `Device` instead of under a processing module.
+- Evaluate the efficiency and usability of storing many image objects in the Images container in Zarr vs storing them as a stacked array.
 - Add explicit link from stimulus presentation and trials tables to the stimulus template images in the new `Images` container instead of relying on name/indices matching.
 
 ### Visual Behavior Ophys
