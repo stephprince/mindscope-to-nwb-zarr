@@ -69,6 +69,8 @@ Each dataset has a `create_inputs.py` module that generates numbered input files
 
 4. **Run the pipeline**
 
+Consider reconfiguring the pipeline to look like this [Example Hyperparameter Search Pipeline](https://codeocean.allenneuraldynamics.org/capsule/3709372/tree/v1) instead of creating input data assets.
+
 
 ## Project Structure
 
