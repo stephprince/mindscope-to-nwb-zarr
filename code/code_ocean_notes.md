@@ -39,5 +39,5 @@ process {
 }
 ```
 - Each task of a pipeline must generate a file. Otherwise, the task will be marked as failed.
-- The Code Ocean App Builder does not support simple boolean command line arguments like `--metadata`. Instead, you must use a string argument with choices like `--metadata True/False`.
+- The Code Ocean App Builder does not support simple boolean command line arguments like `--metadata_only`. Instead, you must use a string argument with choices like `--metadata_only True/False`.
 - After a pipeline run is complete, you can view the Nextflow Artifacts by clicking on the three dots next to the pipeline run in the Timeline tab. This can help with debugging.

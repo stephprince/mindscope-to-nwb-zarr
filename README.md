@@ -15,13 +15,13 @@ This repository is set up as a Code Ocean capsule to convert Mindscope NWB files
 
 ```bash
 cd code
-uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>" --metadata False
+uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>" --metadata_only False
 ```
 
 **Parameters:**
 - `--dataset`: One of: `"Visual Behavior Ephys"`, `"Visual Behavior Ophys"`, `"Visual Coding Ephys"`, `"Visual Coding Ophys"` (case-insensitive)
 - `--results_dir`: Path to output folder for converted Zarr files and metadata (default: `../results/`)
-- `--metadata`: Set to `True` to generate only AIND metadata JSON files (no Zarr conversion)
+- `--metadata_only`: Set to `True` to generate only AIND metadata JSON files (no Zarr conversion)
 
 **Example:**
 ```bash
