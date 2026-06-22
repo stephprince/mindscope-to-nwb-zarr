@@ -5,6 +5,8 @@ import re
 import pandas as pd
 
 from datetime import timedelta
+from functools import lru_cache
+from pathlib import Path
 from pynwb import NWBFile
 
 from aind_data_schema.components.identifiers import Code, Software
@@ -18,6 +20,7 @@ from aind_data_schema.components.configs import (
     Channel,
     DetectorConfig,
     LaserConfig,
+    Translation,
     TriggerType,
     ImagingConfig,
     Plane,
@@ -39,6 +42,47 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
     get_modalities
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import rig_for_experiment
+
+
+# CSV mapping subject (donor/mouse) id -> ethics (IACUC) review id, bundled in the repo.
+_ETHICS_REVIEW_CSV = Path(__file__).resolve().parents[3] / "reference" / "ethics_review_ids.csv"
+
+
+@lru_cache(maxsize=None)
+def _load_subject_to_ethics_review(csv_path: str) -> dict:
+    """Load the subject_id -> ethics_review_id mapping from the CSV (cached)."""
+    df = pd.read_csv(csv_path, usecols=["subject_id", "ethics_review_id"])
+    return dict(zip(df["subject_id"].astype(int), df["ethics_review_id"].astype(int)))
+
+
+def get_ethics_review_id(subject_id, csv_path=None) -> list[str]:
+    """Look up the ethics review id(s) for a subject.
+
+    Parameters
+    ----------
+    subject_id : int | str
+        The subject's donor/mouse id (e.g. ``"244896"``).
+    csv_path : str | Path, optional
+        Path to the subject->ethics_review_id mapping CSV. Defaults to the bundled copy.
+
+    Returns
+    -------
+    list[str]
+        A single-element list with the ethics review id as a string (the
+        Acquisition field is a list).
+
+    Raises
+    ------
+    KeyError
+        If the subject is not present in the mapping CSV.
+    """
+    mapping = _load_subject_to_ethics_review(str(csv_path or _ETHICS_REVIEW_CSV))
+    review_id = mapping.get(int(subject_id))
+    if review_id is None:
+        raise KeyError(
+            f"No ethics_review_id found for subject_id {subject_id!r} in {_ETHICS_REVIEW_CSV}"
+        )
+    return [str(review_id)]
 
 
 def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
@@ -122,13 +166,13 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
                 channel_name="Green channel",
                 intended_measurement=imaging_plane.indicator,
                 detector=DetectorConfig(
-                    device_name="PMT 1",  # TODO: This should correspond to a device in the instrument file @Saskia
+                    device_name="PMT",  # Corresponds to device in instrument file
                     exposure_time=0.1,
                     trigger_type=TriggerType.INTERNAL,
                 ),
                 light_sources=[
                     LaserConfig(
-                        device_name="Ti:Sapphire laser",  # TODO: This should correspond to a device in the instrument file @Saskia
+                        device_name="Ti-Saph",  # Corresponds to device in instrument file
                         wavelength=imaging_plane.excitation_lambda,
                         wavelength_unit=SizeUnit.NM,
                         power=None,  # NOTE: Laser power was adjusted per session and was not recorded in the NWB files
@@ -141,9 +185,9 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
         ],
         images=[
             PlanarImage(
-                channel_name="Green channel",  # should match one of the defined channels above
+                channel_name="Green channel",  # Matches defined channel above
                 image_to_acquisition_transform=[
-                    # TODO: Where to find this information? May not have this information anymore. @Saskia
+                    Translation(0, 0)
                 ],
                 dimensions=Scale(scale=imaging_plane_dimensions),
                 planes=planes,
@@ -258,13 +302,13 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         acquisition_start_time=nwbfile.session_start_time,
         acquisition_end_time=get_data_stream_end_time(nwbfile),
         protocol_id=[nwbfile.protocol],  # TODO is this correct? Example value 20160706_244896_3StimC @Saskia
-        ethics_review_id=None,  # TODO @Saskia
+        ethics_review_id=get_ethics_review_id(subject_id),
         # Match the instrument file's instrument_id (the rig name, e.g. "CAM2P.1").
         # Falls back to the NWB device name for sessions whose rig is unresolved.
         instrument_id=rig_for_experiment(session_info) or device.name,
         acquisition_type=session_info.get('stimulus_name', 'Visual Coding 2p'),
         notes=None,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARID,  # TODO: Determine correct coordinate system @Saskia
+        coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),

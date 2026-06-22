@@ -1,6 +1,11 @@
 """Script to generate AIND data schema JSON files for visual coding ophys dataset.
 
-NWB files are streamed from DANDI Archive using fsspec (no download required).
+NWB files are streamed from the DANDI Archive using fsspec (no download required)
+instead of from the Allen Institute S3 bucket for this dataset (s3://allen-brain-observatory,
+path: visual-coding-2p) because the S3 bucket contians NWB 1.0.5 files and the DANDI versions
+of the NWB files were recently updated to NWB 2.7. As far as we know, the Allen Institute
+does not maintain a separate S3 bucket containing the updated NWB files, so streaming
+from DANDI is the only way to access the updated NWB files for this dataset.
 
 Source data on DANDI Archive:
     dandiset 000728, version 0.240827.1809
@@ -38,19 +43,20 @@ STIMULUS_NAME_TO_SUFFIX = {
 }
 
 
-def get_dandi_asset_path(experiment_metadata: pd.Series) -> str:
-    """Build DANDI asset path for the processed NWB file from experiment metadata.
+def get_dandi_base_name(experiment_metadata: pd.Series) -> str:
+    """Build the DANDI asset base name (filename stem without the modality suffix).
 
-    Asset paths follow the pattern:
-        sub-{specimen_id}/sub-{specimen_id}_ses-{id}_{stim_name}_behavior+image+ophys.nwb
+    The base name follows the pattern:
+        sub-{specimen_id}_ses-{id}-{StimX}
 
-    Where stim_name is "StimA", "StimB", "StimC", or "StimC2" based on stimulus_name.
+    Where StimX is "StimA", "StimB", "StimC", or "StimC2" based on stimulus_name,
+    e.g. "sub-639389525_ses-653123586-StimC2".
 
     Args:
         experiment_metadata: A row from the ophys experiment metadata DataFrame.
 
     Returns:
-        The DANDI asset path for the processed NWB file.
+        The DANDI asset base name.
     """
     specimen_id = experiment_metadata['specimen_id']
     experiment_id = experiment_metadata['id']
@@ -60,10 +66,25 @@ def get_dandi_asset_path(experiment_metadata: pd.Series) -> str:
     if stim_suffix is None:
         raise ValueError(f"Unknown stimulus_name: {stimulus_name}")
 
-    subject_dir = f"sub-{specimen_id}"
-    base_name = f"sub-{specimen_id}_ses-{experiment_id}-{stim_suffix}"
+    return f"sub-{specimen_id}_ses-{experiment_id}-{stim_suffix}"
 
-    return f"{subject_dir}/{base_name}_behavior+image+ophys.nwb"
+
+def get_dandi_asset_path(experiment_metadata: pd.Series) -> str:
+    """Build DANDI asset path for the processed NWB file from experiment metadata.
+
+    Asset paths follow the pattern:
+        sub-{specimen_id}/sub-{specimen_id}_ses-{id}-{StimX}_behavior+image+ophys.nwb
+
+    Args:
+        experiment_metadata: A row from the ophys experiment metadata DataFrame.
+
+    Returns:
+        The DANDI asset path for the processed NWB file.
+    """
+    specimen_id = experiment_metadata['specimen_id']
+    base_name = get_dandi_base_name(experiment_metadata)
+
+    return f"sub-{specimen_id}/{base_name}_behavior+image+ophys.nwb"
 
 
 def stream_nwb_from_dandi(asset_path: str):
@@ -74,10 +95,10 @@ def stream_nwb_from_dandi(asset_path: str):
 
     Returns:
         Tuple of (nwbfile, io, h5_file, file_handle) - the NWB file object, IO handle,
-        h5py File object, and fsspec file handle.
+        h5py File object, and remfile file handle.
         Caller is responsible for closing all handles.
     """
-    import fsspec
+    import remfile
     from dandi.dandiapi import DandiAPIClient
 
     with DandiAPIClient() as client:
@@ -90,9 +111,11 @@ def stream_nwb_from_dandi(asset_path: str):
             )
         s3_url = asset.get_content_url(follow_redirects=1, strip_query=True)
 
-    # Open the file using fsspec for streaming
-    fs = fsspec.filesystem("http")
-    file_handle = fs.open(s3_url, "rb")
+    # Stream with remfile, which does block-level caching/prefetch over HTTP. Reading
+    # the HDF5 metadata tree issues many small byte-range reads; remfile coalesces them
+    # into a few larger requests, which is far faster and more robust to connection
+    # resets than raw fsspec http (which makes one round-trip per HDF5 object).
+    file_handle = remfile.File(s3_url)
 
     # Wrap with h5py.File, then pass to NWBHDF5IO
     h5_file = h5py.File(file_handle, "r")
@@ -115,8 +138,10 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
     output_dir : Path
         Path to directory to save output JSON files
     """
-    # Generate metadata models
-    data_description = generate_data_description(nwbfile, session_info)
+    # Generate metadata models. The DataDescription name (also used as the per-session
+    # output folder name below) is set to the DANDI asset base name.
+    base_name = get_dandi_base_name(session_info)
+    data_description = generate_data_description(nwbfile, session_info, name=base_name)
     subject = None  # fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = None  # fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
