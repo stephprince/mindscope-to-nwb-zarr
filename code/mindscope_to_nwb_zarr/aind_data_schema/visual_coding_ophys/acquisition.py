@@ -38,6 +38,7 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_end_time,
     get_modalities
 )
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import rig_for_experiment
 
 
 def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
@@ -258,7 +259,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         acquisition_end_time=get_data_stream_end_time(nwbfile),
         protocol_id=[nwbfile.protocol],  # TODO is this correct? Example value 20160706_244896_3StimC @Saskia
         ethics_review_id=None,  # TODO @Saskia
-        instrument_id=device.name,  # TODO: The instrument ID will need to match the instrument file @Saskia
+        # Match the instrument file's instrument_id (the rig name, e.g. "CAM2P.1").
+        # Falls back to the NWB device name for sessions whose rig is unresolved.
+        instrument_id=rig_for_experiment(session_info) or device.name,
         acquisition_type=session_info.get('stimulus_name', 'Visual Coding 2p'),
         notes=None,
         coordinate_system=CoordinateSystemLibrary.BREGMA_ARID,  # TODO: Determine correct coordinate system @Saskia

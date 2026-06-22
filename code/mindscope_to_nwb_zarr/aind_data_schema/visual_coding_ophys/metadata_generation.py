@@ -24,6 +24,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.acquisition impo
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.data_description import generate_data_description
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.subject import fetch_subject_from_aind_metadata_service
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.procedures import fetch_procedures_from_aind_metadata_service
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import generate_instrument
 
 DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
@@ -119,8 +120,11 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
     subject = None  # fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = None  # fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
-    # instrument = generate_instrument(nwbfile, session_info)  # TODO - add instrument generation
-    metadata_models = [data_description, subject, acquisition, procedures]
+    # instrument is None when the session's rig cannot be resolved (older
+    # experiments with no ophys_session_id in storage_directory) or has no
+    # instrument definition; such sessions are skipped below.
+    instrument = generate_instrument(nwbfile, session_info)
+    metadata_models = [data_description, subject, acquisition, procedures, instrument]
 
     # Save the metadata files
     session_output_dir = output_dir / data_description.name
