@@ -142,9 +142,9 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
     # output folder name below) is set to the DANDI asset base name.
     base_name = get_dandi_base_name(session_info)
     data_description = generate_data_description(nwbfile, session_info, name=base_name)
-    subject = None  # fetch_subject_from_aind_metadata_service(nwbfile, session_info)
+    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
-    procedures = None  # fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
+    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
     # instrument is None when the session's rig cannot be resolved (older
     # experiments with no ophys_session_id in storage_directory) or has no
     # instrument definition; such sessions are skipped below.

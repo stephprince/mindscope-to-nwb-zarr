@@ -187,7 +187,7 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
             PlanarImage(
                 channel_name="Green channel",  # Matches defined channel above
                 image_to_acquisition_transform=[
-                    Translation(0, 0)
+                    Translation(translation=[0, 0])
                 ],
                 dimensions=Scale(scale=imaging_plane_dimensions),
                 planes=planes,

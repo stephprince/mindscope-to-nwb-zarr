@@ -3,6 +3,7 @@
 import json
 import warnings
 import pandas as pd
+from datetime import datetime
 from pynwb import NWBFile
 from typing import Optional
 
@@ -92,8 +93,13 @@ def fetch_subject_from_aind_metadata_service(
             assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
                 f"Sex mismatch: NWB={nwbfile.subject.sex}, API={raw_data['subject_details']['sex']}"
 
-            assert get_subject_date_of_birth(nwbfile).strftime("%Y-%m-%d") == raw_data['subject_details']['date_of_birth'], \
-                f"Date of birth mismatch: NWB={get_subject_date_of_birth(nwbfile)}, API={raw_data['subject_details']['date_of_birth']}"
+            # The NWB stores only an integer-day age (P<days>D), so the DOB derived from
+            # it (acquisition_date - age) is approximate. Allow a small tolerance against
+            # the authoritative API date_of_birth rather than requiring exact equality.
+            nwb_dob = get_subject_date_of_birth(nwbfile)
+            api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
+            assert abs((nwb_dob - api_dob).days) <= 2, \
+                f"Date of birth mismatch >2 days: NWB={nwb_dob}, API={api_dob}"
 
             assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
                 f"Genotype mismatch: NWB={nwbfile.subject.genotype}, API={raw_data['subject_details']['genotype']}"

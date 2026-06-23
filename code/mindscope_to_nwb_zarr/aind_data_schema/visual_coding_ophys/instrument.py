@@ -34,7 +34,7 @@ import pandas as pd
 
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema_models.organizations import Organization
-from aind_data_schema_models.units import FrequencyUnit, SizeUnit
+from aind_data_schema_models.units import FrequencyUnit, SizeUnit, UnitlessUnit
 from aind_data_schema_models.devices import CameraTarget
 from aind_data_schema_models.coordinates import AnatomicalRelative
 
@@ -160,7 +160,9 @@ def _build_monitor(version: str) -> Monitor:
         viewing_distance_unit="centimeter",
         relative_position=monitor_version["relative_position"],
         contrast=30,
+        contrast_unit=UnitlessUnit.PERCENT,
         brightness=50,
+        brightness_unit=UnitlessUnit.PERCENT,
         coordinate_system=CoordinateSystemLibrary.SIPE_MONITOR_RTF,
         transform=monitor_version["transform"],
     )
