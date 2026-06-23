@@ -32,7 +32,7 @@ from aind_data_schema.components.coordinates import (
     Scale,
 )
 from aind_data_schema.components.stimulus import VisualStimulation
-from aind_data_schema_models.units import SizeUnit, FrequencyUnit, MassUnit, PowerUnit, TimeUnit
+from aind_data_schema_models.units import SizeUnit, FrequencyUnit, MassUnit, PowerUnit
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
@@ -41,7 +41,10 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_end_time,
     get_modalities
 )
-from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import rig_for_experiment
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
+    rig_for_experiment,
+    MICROSCOPE_NAME,
+)
 
 
 # CSV mapping subject (donor/mouse) id -> ethics (IACUC) review id, bundled in the repo.
@@ -147,7 +150,6 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
     imaging_plane_dimensions = imaging_plane_info["imaging_plane_dimensions"]
     imaging_plane_depth = imaging_plane_info["imaging_plane_depth"]
     targeted_structure = imaging_plane_info["imaging_plane_targeted_structure"]
-    device = imaging_plane_info["device"]
 
     planes = [
         Plane(
@@ -160,14 +162,17 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
     ]
 
     imaging_config = ImagingConfig(
-        device_name=device.name,  # TODO: The device name will need to match the device name defined in the instrument file @Saskia
+        device_name=MICROSCOPE_NAME,  # matches the microscope device defined in the instrument file
         channels=[
             Channel(
                 channel_name="Green channel",
                 intended_measurement=imaging_plane.indicator,
                 detector=DetectorConfig(
                     device_name="PMT",  # Corresponds to device in instrument file
-                    exposure_time=0.1,
+                    # No exposure time: the imaging is resonant-scanner two-photon at
+                    # 30 Hz (de Vries et al., 2020), recorded via SamplingStrategy below.
+                    # A PMT is a point detector with no camera-style exposure time, and
+                    # the paper/whitepaper report only the 30 Hz frame rate.
                     trigger_type=TriggerType.INTERNAL,
                 ),
                 light_sources=[
@@ -260,7 +265,7 @@ def get_stimulus_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[Stimu
             ),
             stimulus_modalities=[StimulusModality.VISUAL],
             notes=None,
-            active_devices=["None"],
+            active_devices=["Stimulus Screen"],  # the stimulus monitor in the instrument
             performance_metrics=None,
             training_protocol_name=None,
             curriculum_status=None,
@@ -316,22 +321,24 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 modalities=get_modalities(nwbfile),
                 code=None,
                 notes=None,
-                active_devices=[  # TODO: These device names need to match the instrument file @Saskia
-                    device.name,
-                    "BehaviorCamera",
-                    # See de Vries et al, 2019 and existing NWB 2.0 file metadata for device details
-                    # An AVT Mako-G032B camera used to track eye movement and pupil dilation.
-                    # An ASUS PA248Q monitor used to display visual stimuli.
-                    # Scientifica Vivoscope or a Nikon A1R-MP multiphoton microscope. The Nikon system was adapted to provide space to accommodate the behavior apparatus.
+                # Device names must match devices defined in the instrument file.
+                # Per de Vries et al. (2020), each session simultaneously recorded the
+                # two-photon movie, eye tracking, a side-view full-body camera, and
+                # running speed -- all at 30 Hz.
+                active_devices=[
+                    MICROSCOPE_NAME,           # two-photon microscope
+                    "Ti-Saph",                 # excitation laser
+                    "PMT",                     # detector
+                    "Eye Camera",              # eye-tracking camera
+                    "Body Camera",             # side-view full-body camera
+                    "MindScope Running Disc",  # running wheel (running speed)
                 ],
+                # Only the imaging config is included. The behavior camera's 30 fps is
+                # already recorded on the instrument's Camera (frame_rate=30 Hz); the
+                # NWB does not record a true camera exposure time, so no DetectorConfig
+                # is fabricated for it (a 33 ms "exposure" would just be the frame period).
                 configurations=[
                     imaging_config,
-                    DetectorConfig(
-                        device_name="BehaviorCamera",  # TODO: This should correspond to a device in the instrument file @Saskia
-                        exposure_time=33,
-                        exposure_time_unit=TimeUnit.MS,
-                        trigger_type=TriggerType.INTERNAL,
-                    ),
                 ],
             ),
         ],
@@ -341,7 +348,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
             animal_weight_post=None,
             weight_unit=MassUnit.G,
             anaesthesia=None,
-            mouse_platform_name="Running Wheel",  # TODO: Verify this is correct for visual coding ophys @Saskia
+            mouse_platform_name="MindScope Running Disc",  # matches the Disc device in the instrument; de Vries et al. describe a rotating disk
         ),
     )
 

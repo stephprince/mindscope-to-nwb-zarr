@@ -74,14 +74,17 @@ _NIKON_NOTE = _BASE_NOTE + " Detector was proprietary part of Nikon."
 
 # Microscope variants. NOTE: the source files name the Scientifica microscope
 # "Nikon 1" as well; this is preserved verbatim for fidelity to the provided
-# instrument definitions.
+# instrument definitions. The name is shared by every rig and is referenced by
+# the acquisition's ImagingConfig.device_name so the config points at the
+# instrument's microscope device.
+MICROSCOPE_NAME = "Nikon 1"
 _NIKON_MICROSCOPE = dict(
-    name="Nikon 1",
+    name=MICROSCOPE_NAME,
     manufacturer=Organization.NIKON,
     model="A1R MP+",
 )
 _SCIENTIFICA_MICROSCOPE = dict(
-    name="Nikon 1",
+    name=MICROSCOPE_NAME,
     manufacturer=Organization.SCIENTIFICA,
     model="Vivoscope",
 )
