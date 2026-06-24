@@ -10,6 +10,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.acquisition impo
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.data_description import generate_data_description
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import fetch_subject_from_aind_metadata_service
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.procedures import fetch_procedures_from_aind_metadata_service
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import generate_instrument
 
 # Path to session metadata CSV files from the data folder
 SESSIONS_CSV_PATH = "allen-brain-observatory/visual-coding-neuropixels/ecephys-cache/sessions.csv"
@@ -44,8 +45,8 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
     subject = None  # fetch_subject_from_aind_metadata_service(nwbfile, session_info, subject_mapping_path=SUBJECT_MAPPING_PATH)
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = None  # fetch_procedures_from_aind_metadata_service(nwbfile, subject_mapping_path=SUBJECT_MAPPING_PATH)
-    #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
-    metadata_models = [data_description, subject, acquisition, procedures]  # add instrument when available
+    instrument = generate_instrument(nwbfile, session_info)
+    metadata_models = [data_description, subject, acquisition, procedures, instrument]
     
     # Save the metadata files
     Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)

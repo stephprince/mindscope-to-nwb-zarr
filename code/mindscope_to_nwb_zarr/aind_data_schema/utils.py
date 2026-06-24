@@ -126,6 +126,52 @@ def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
     return all_structures
 
 
+def build_probe_config(nwbfile: NWBFile, device, device_name: str = None) -> ProbeConfig:
+    """Build a ProbeConfig for a single EcephysProbe device.
+
+    Parameters
+    ----------
+    nwbfile : NWBFile
+        The NWB file containing the electrode table and device information.
+    device : Device
+        The EcephysProbe device to build a config for.
+    device_name : str, optional
+        Name to record on the ProbeConfig. Defaults to ``device.name`` (the NWB
+        device name); callers can override it to match an instrument component
+        name (e.g. ``"ProbeA"``).
+
+    Returns
+    -------
+    ProbeConfig
+        The probe configuration for the given device.
+    """
+    all_structures = get_brain_locations(nwbfile, device)
+    targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')]  # get targeted visual area
+    if len(targeted_structure) > 1:
+        # NOTE: visual coding dataset has 12 functionally defined visual areas that are not included in the CCFv3
+        # these regions will be ignored and the target structure should still fall under one of the 6 VIS areas
+        # VISal, VISam, VISl, VISpl, VISp, VISrl, VISpm
+        warnings.warn(f"More than one visual area found: {targeted_structure}")
+
+    return ProbeConfig(
+        device_name=device_name if device_name is not None else device.name,
+        # 6 probes, each targets a cortical visual area (e.g. VISp, VISl, VISal, VISrl, VISam, VISpm)
+        # would list that specific area as the primary targeted structure
+        # should be the same for every experiment, most files should have majority of one
+        # TODO: some sessions, e.g., 737581020 and 743475441 have a probe with no targeted structures in the above 6 visual areas. VISmma is listed but not in CCFv3. @Saskia to decide how to handle this case because this field is required.
+        primary_targeted_structure=targeted_structure[0],
+        other_targeted_structure=list(set(all_structures) - set(targeted_structure)), # TODO - currently listing all other structures that are hit but might want to not list everything
+        atlas_coordinate=AtlasCoordinate(
+            coordinate_system=AtlasLibrary.CCFv3_10um,
+            translation=[0, 0, 0],  # TODO - should be target region coordinate - might not make sense for these datasets, TBD @Saskia
+        ),
+        coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # TODO - what should this be? probably bregma ARID, will confirm
+        transform=[Translation(translation=[0, 0, 0, 1],),],  # TODO - what should this be? this will be the translation we care about, how we've positioned this probe
+        # expect that there is documentation on these translations somewhere @Saskia
+        notes=None,
+    )
+
+
 def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
     """Get probe configurations from NWB file.
 
@@ -142,49 +188,16 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
     list[ProbeConfig]
         List of probe configuration objects for each probe in the file
     """
-    probe_configs = []
-    all_targeted_structures = []
-    for device in nwbfile.devices.values():
-        if device.__class__.__name__ == "EcephysProbe":
-            all_structures = get_brain_locations(nwbfile, device)
-            targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')]  # get targeted visual area
-            if len(targeted_structure) > 1:
-                # NOTE: visual coding dataset has 12 functionally defined visual areas that are not included in the CCFv3
-                # these regions will be ignored and the target structure should still fall under one of the 6 VIS areas
-                # VISal, VISam, VISl, VISpl, VISp, VISrl, VISpm
-                warnings.warn(f"More than one visual area found: {targeted_structure}")
-
-            all_targeted_structures.append(targeted_structure[0])
-
-            probe_configs.append(
-                ProbeConfig(
-                    device_name=device.name,
-                    # 6 probes, each targets a cortical visual area (e.g. VISp, VISl, VISal, VISrl, VISam, VISpm)
-                    # would list that specific area as the primary targeted structure
-                    # should be the same for every experiment, most files should have majority of one
-                    # TODO: some sessions, e.g., 737581020 and 743475441 have a probe with no targeted structures in the above 6 visual areas. VISmma is listed but not in CCFv3. @Saskia to decide how to handle this case because this field is required.
-                    primary_targeted_structure=targeted_structure[0],
-                    other_targeted_structure=list(set(all_structures) - set(targeted_structure)), # TODO - currently listing all other structures that are hit but might want to not list everything
-                    atlas_coordinate=AtlasCoordinate(
-                        coordinate_system=AtlasLibrary.CCFv3_10um,
-                        translation=[0, 0, 0],  # TODO - should be target region coordinate - might not make sense for these datasets, TBD @Saskia
-                    ),
-                    coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # TODO - what should this be? probably bregma ARID, will confirm
-                    transform=[Translation(translation=[0, 0, 0, 1],),],  # TODO - what should this be? this will be the translation we care about, how we've positioned this probe
-                    # expect that there is documentation on these translations somewhere @Saskia
-                    notes=None,
-                )
-            )
-
     # In visual coding ephys, multiple probes sometimes target the same structure, e.g.:
     # session 746083955 (row 9): Multiple probes targeting same brain structure found: VISpm, VISpm, VISp, VISl, VISal, VISrl.
     # session 751348571 (row 12): Multiple probes targeting same brain structure found: VISam, VISpm, VISp, VISl, VISrl, VISrl.
     # session 754829445 (row 14): Multiple probes targeting same brain structure found: VISam, VISpm, VISp, VISl, VISrl, VISp.
-    # so commenting out this warning for now. @Saskia to verify this is expected behavior.
-    # if len(set(all_targeted_structures)) != len(all_targeted_structures):
-    #     warnings.warn(f"Multiple probes targeting same brain structure found: {all_targeted_structures}")
-
-    return probe_configs
+    # so not warning on duplicate targeted structures for now. @Saskia to verify this is expected behavior.
+    return [
+        build_probe_config(nwbfile, device)
+        for device in nwbfile.devices.values()
+        if device.__class__.__name__ == "EcephysProbe"
+    ]
 
 
 def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, OptotaggingStimulation]:
