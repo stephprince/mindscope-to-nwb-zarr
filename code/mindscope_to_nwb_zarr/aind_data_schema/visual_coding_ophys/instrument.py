@@ -72,19 +72,15 @@ _BASE_NOTE = (
 )
 _NIKON_NOTE = _BASE_NOTE + " Detector was proprietary part of Nikon."
 
-# Microscope variants. NOTE: the source files name the Scientifica microscope
-# "Nikon 1" as well; this is preserved verbatim for fidelity to the provided
-# instrument definitions. The name is shared by every rig and is referenced by
-# the acquisition's ImagingConfig.device_name so the config points at the
-# instrument's microscope device.
-MICROSCOPE_NAME = "Nikon 1"
+# Microscope variants (manufacturer/model only). The microscope device *name* is
+# per-rig (see RIG_MICROSCOPE_NAMES) and assigned in build_instrument; it is
+# referenced by the acquisition's ImagingConfig.device_name so the config points
+# at the instrument's microscope device.
 _NIKON_MICROSCOPE = dict(
-    name=MICROSCOPE_NAME,
     manufacturer=Organization.NIKON,
     model="A1R MP+",
 )
 _SCIENTIFICA_MICROSCOPE = dict(
-    name=MICROSCOPE_NAME,
     manufacturer=Organization.SCIENTIFICA,
     model="Vivoscope",
 )
@@ -123,6 +119,18 @@ RIG_SPECS = {
         original_date=date(2016, 6, 24),
         final_date=date(2016, 10, 11),
     ),
+}
+
+# Per-rig microscope device name. The instrument_id stays the internal rig id
+# ("CAM2P.N"); the microscope device is named after the rig's microscope (Nikon
+# for CAM2P.1/.2, Scientifica for CAM2P.3/.4/.5). The acquisition's
+# ImagingConfig.device_name matches this name.
+RIG_MICROSCOPE_NAMES = {
+    "CAM2P.1": "Nikon 1",
+    "CAM2P.2": "Nikon 2",
+    "CAM2P.3": "Scientifica 1",
+    "CAM2P.4": "Scientifica 2",
+    "CAM2P.5": "Scientifica 3",
 }
 
 # Monitor configuration per version. The only hardware difference between the
@@ -309,7 +317,7 @@ def build_instrument(rig_name: str, version: str) -> Instrument:
         notes=spec["notes"],
         temperature_control=None,
         components=[
-            Microscope(**spec["microscope"]),
+            Microscope(name=RIG_MICROSCOPE_NAMES[rig_name], **spec["microscope"]),
             *_build_shared_components()[:3],  # Laser, Objective, Detector
             _build_monitor(version),
             *_build_shared_components()[3:],  # Disc, cameras, dichroic
@@ -398,6 +406,20 @@ def rig_for_experiment(session_info, rig_csv_path=None) -> str | None:
         return None
     mapping = _load_session_to_rig(str(rig_csv_path or _DEFAULT_RIG_CSV))
     return mapping.get(session_id)
+
+
+def microscope_name_for_experiment(session_info, rig_csv_path=None) -> str | None:
+    """Resolve the microscope device name for an experiment's rig.
+
+    Looks up the internal ``CAM2P.N`` rig (see :func:`rig_for_experiment`) and maps
+    it to the microscope device name (e.g. ``"CAM2P.1" -> "Nikon 1"``) used by the
+    instrument and matched by the acquisition's ImagingConfig.device_name. Returns
+    ``None`` if the rig is unresolved or has no instrument definition.
+    """
+    rig_name = rig_for_experiment(session_info, rig_csv_path)
+    if rig_name is None:
+        return None
+    return RIG_MICROSCOPE_NAMES.get(rig_name)
 
 
 def generate_instrument(nwbfile, session_info, rig_csv_path=None) -> Instrument | None:

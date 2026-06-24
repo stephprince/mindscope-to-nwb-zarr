@@ -43,7 +43,7 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
     rig_for_experiment,
-    MICROSCOPE_NAME,
+    microscope_name_for_experiment,
 )
 
 
@@ -136,12 +136,14 @@ def _get_emission_wavelength(imaging_plane) -> float | None:
     return float(emission_lambda)
 
 
-def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> ImagingConfig:
+def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict, microscope_name: str) -> ImagingConfig:
     """Create an imaging configuration for a visual coding ophys acquisition.
 
     Args:
         nwbfile: The NWB file to process.
         imaging_plane_info: Dictionary containing imaging plane metadata.
+        microscope_name: Name of the instrument's microscope device this config
+            points at (per-rig, e.g. "Nikon 1"); see ``microscope_name_for_experiment``.
 
     Returns:
         An ImagingConfig object representing the imaging configuration.
@@ -162,11 +164,14 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict) -> Imaging
     ]
 
     imaging_config = ImagingConfig(
-        device_name=MICROSCOPE_NAME,  # matches the microscope device defined in the instrument file
+        device_name=microscope_name,  # matches the microscope device defined in the instrument file
         channels=[
             Channel(
                 channel_name="Green channel",
                 intended_measurement=imaging_plane.indicator,
+                # Laser power was adjusted per session and not recorded, but we do
+                # not mark the channel as variable-power (kept False, the default).
+                variable_power=False,
                 detector=DetectorConfig(
                     device_name="PMT",  # Corresponds to device in instrument file
                     # No exposure time: the imaging is resonant-scanner two-photon at
@@ -295,8 +300,12 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     imaging_plane_info = get_imaging_plane_info(nwbfile, session_info)
     device = imaging_plane_info["device"]
 
+    # Per-rig microscope device name (e.g. "Nikon 1"), matching the instrument file.
+    # Falls back to the NWB device name for sessions whose rig is unresolved.
+    microscope_name = microscope_name_for_experiment(session_info) or device.name
+
     # Create imaging config
-    imaging_config = create_imaging_config(nwbfile, imaging_plane_info)
+    imaging_config = create_imaging_config(nwbfile, imaging_plane_info, microscope_name)
 
     # Get subject ID from session metadata (external_donor_name is the 6-digit mouse ID)
     subject_id = session_info['specimen']['donor']['external_donor_name']
@@ -311,7 +320,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         # Match the instrument file's instrument_id (the rig name, e.g. "CAM2P.1").
         # Falls back to the NWB device name for sessions whose rig is unresolved.
         instrument_id=rig_for_experiment(session_info) or device.name,
-        acquisition_type=session_info.get('stimulus_name', 'Visual Coding 2p'),
+        # The Allen "session_type": the stimulus_name from the experiment metadata
+        # (e.g. "three_session_C"). No separate session_type field exists in the schema.
+        acquisition_type=session_info['stimulus_name'],
         notes=None,
         coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
@@ -326,7 +337,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 # two-photon movie, eye tracking, a side-view full-body camera, and
                 # running speed -- all at 30 Hz.
                 active_devices=[
-                    MICROSCOPE_NAME,           # two-photon microscope
+                    microscope_name,           # two-photon microscope
                     "Ti-Saph",                 # excitation laser
                     "PMT",                     # detector
                     "Eye Camera",              # eye-tracking camera
