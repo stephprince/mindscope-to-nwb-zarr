@@ -307,7 +307,8 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
 
 
 def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, intervals_table: pd.DataFrame,
-                                         nwbfile: NWBFile, session_info: pd.Series = None) -> StimulusEpoch:
+                                         nwbfile: NWBFile, session_info: pd.Series = None,
+                                         session_start_time: datetime = None) -> StimulusEpoch:
     """Convert intervals table to a StimulusEpoch object.
 
     Parameters
@@ -322,15 +323,22 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
         The NWB file containing session information
     session_info : pd.DataFrame, optional
         DataFrame with session metadata (for visual behavior experiments)
+    session_start_time : datetime, optional
+        Absolute time to anchor the interval offsets to. Interval start/stop times
+        are seconds relative to the session start; defaults to
+        ``nwbfile.session_start_time``. Pass a corrected value when the file's
+        session_start_time is a packaging date rather than the real acquisition time.
 
     Returns
     -------
     StimulusEpoch
         Stimulus epoch object with extracted parameters
     """
+    if session_start_time is None:
+        session_start_time = nwbfile.session_start_time
     return StimulusEpoch(
-        stimulus_start_time=timedelta(seconds=intervals_table['start_time'].values[0]) + nwbfile.session_start_time,
-        stimulus_end_time=timedelta(seconds=intervals_table['stop_time'].values[-1]) + nwbfile.session_start_time,
+        stimulus_start_time=timedelta(seconds=intervals_table['start_time'].values[0]) + session_start_time,
+        stimulus_end_time=timedelta(seconds=intervals_table['stop_time'].values[-1]) + session_start_time,
         stimulus_name=stimulus_name,
         # TODO - acquire additional info about the code used for this task - might not be available
         # will need to fill in with some type of information so we can use the Code.parameters field @Saskia

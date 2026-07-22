@@ -8,7 +8,10 @@ from pynwb import read_nwb
 
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.data_description import generate_data_description
-from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import fetch_subject_from_aind_metadata_service
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import (
+    fetch_subject_from_aind_metadata_service,
+    cross_check_mouse_id,
+)
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.procedures import fetch_procedures_from_aind_metadata_service
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import generate_instrument
 
@@ -39,6 +42,9 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
     # Validate that session type matches metadata
     assert nwbfile.stimulus_notes == session_info['session_type'], \
         f"Session type mismatch: {nwbfile.stimulus_notes} != {session_info['session_type']}"
+
+    # Cross-check the mouse id across the experiment CSV and the subject mapping
+    cross_check_mouse_id(nwbfile, session_info, subject_mapping_path=SUBJECT_MAPPING_PATH)
 
     # Generate metadata models
     data_description = generate_data_description(nwbfile, session_info)

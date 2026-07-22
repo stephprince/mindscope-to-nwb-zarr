@@ -11,12 +11,52 @@ from aind_data_schema.core.subject import Subject
 from aind_data_schema.components.subjects import Housing, Sex, MouseSubject
 
 from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id, get_subject_date_of_birth
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import get_experiment_metadata
 
 # Import the metadata service client
 import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 import json
+
+
+def cross_check_mouse_id(nwbfile: NWBFile, session_info: pd.Series, subject_mapping_path: str) -> None:
+    """Warn if the 6-digit mouse id disagrees across the three reference sources.
+
+    The experiment metadata CSV maps ``session_id`` (the sessions.csv row driving
+    generation) directly to a 6-digit mouse id. The subject mapping JSON maps the NWB
+    ``subject_id`` to the same 6-digit mouse id. This confirms the two agree for the
+    session.
+
+    Note: sessions.csv's ``specimen_id`` is a different id space than the subject
+    mapping keys (the NWB subject ids), so it cannot be joined to the mapping directly.
+    Session 819701982 is absent from the experiment CSV and is skipped.
+    """
+    session_id = int(session_info['id'])
+    experiment_metadata = get_experiment_metadata(session_id)
+    if experiment_metadata is None:
+        warnings.warn(
+            f"Session {session_id} is absent from the experiment metadata CSV; "
+            f"skipping mouse id cross-check."
+        )
+        return
+    expected_mouse_id = str(experiment_metadata['mouse_id'])
+
+    with open(subject_mapping_path, 'r') as f:
+        subject_mapping = json.load(f)
+    nwb_subject_id = str(nwbfile.subject.subject_id)
+    mapped_mouse_id = subject_mapping.get(nwb_subject_id)
+
+    if mapped_mouse_id is None:
+        warnings.warn(
+            f"Session {session_id}: NWB subject id {nwb_subject_id} not found in the subject "
+            f"mapping; cannot cross-check experiment CSV mouse id {expected_mouse_id}."
+        )
+    elif str(mapped_mouse_id) != expected_mouse_id:
+        warnings.warn(
+            f"Session {session_id}: mouse id mismatch - experiment CSV says {expected_mouse_id}, "
+            f"but subject mapping (via NWB subject id {nwb_subject_id}) says {mapped_mouse_id}."
+        )
 
 
 

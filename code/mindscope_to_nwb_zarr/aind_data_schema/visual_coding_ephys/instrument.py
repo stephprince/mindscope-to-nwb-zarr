@@ -1,7 +1,11 @@
 """Generates Allen Brain Observatory Neuropixels Instrument"""
 
 import re
+import pandas as pd
+
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
 
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema_models.organizations import Organization
@@ -37,8 +41,49 @@ from aind_data_schema.core.instrument import Instrument
 # Six Neuropixels probe assemblies, one per letter A-F.
 EPHYS_ASSEMBLY_LETTERS = "ABCDEF"
 
-# Shared instrument identifier for all Visual Coding Neuropixels sessions.
+# Fallback instrument identifier, used only for sessions absent from the reference
+# CSV (session 819701982). Sessions in the CSV use their actual rig id ("NP.1" or
+# "NP.2"); see get_rig_id.
 INSTRUMENT_ID = "NP"
+
+# Per-session experiment start time, rig, and operator are not stored in the NWB
+# files; they are transcribed from the original platform JSON files into this CSV.
+EXPERIMENT_METADATA_PATH = (
+    Path(__file__).parent.parent.parent.parent
+    / "reference"
+    / "neuropixels_vc_experiment_metadata.csv"
+)
+
+
+@lru_cache(maxsize=1)
+def _load_experiment_metadata() -> pd.DataFrame:
+    """Load the per-session experiment metadata CSV, indexed by session id."""
+    return pd.read_csv(EXPERIMENT_METADATA_PATH).set_index("session_id")
+
+
+def get_experiment_metadata(session_id: int) -> pd.Series | None:
+    """Return the reference experiment metadata row for a session.
+
+    Returns ``None`` for sessions absent from the CSV. One session (819701982)
+    has no entry, so callers must fall back to values derivable from the NWB file.
+    """
+    metadata = _load_experiment_metadata()
+    if session_id not in metadata.index:
+        return None
+    return metadata.loc[session_id]
+
+
+def get_rig_id(session_id: int) -> str:
+    """Instrument/rig identifier for a session, e.g. "NP.1" or "NP.2".
+
+    Read from the reference experiment metadata CSV so the instrument id matches the
+    physical rig used. Falls back to the shared ``INSTRUMENT_ID`` ("NP") for session
+    819701982, which is absent from the CSV.
+    """
+    metadata = get_experiment_metadata(session_id)
+    if metadata is None:
+        return INSTRUMENT_ID
+    return metadata['rig_id']
 
 # Optotagging light source. The rig was modified partway through data collection:
 # sessions with id >= OPTOTAGGING_LASER_MIN_SESSION_ID used a 473 nm laser, while
@@ -236,12 +281,14 @@ base_components = [
 
 
 def build_instrument(session_id: int) -> Instrument:
-    """Build the ``NP`` instrument in the rig state used by the given session.
+    """Build the instrument in the rig state used by the given session.
 
-    The optotagging light source and ``modification_date`` differ between the two
-    rig states: sessions with id >= ``OPTOTAGGING_LASER_MIN_SESSION_ID`` get the
-    473 nm laser (dated to session 789848216's acquisition), earlier sessions get
-    the 465 nm LED. All other components are shared.
+    The ``instrument_id`` is the actual rig ("NP.1" or "NP.2") from the reference
+    CSV (``INSTRUMENT_ID`` for the one session absent from it). The optotagging light
+    source and ``modification_date`` differ between the two rig states: sessions with
+    id >= ``OPTOTAGGING_LASER_MIN_SESSION_ID`` get the 473 nm laser (dated to session
+    789848216's acquisition), earlier sessions get the 465 nm LED. All other
+    components are shared.
     """
     if uses_optotagging_laser(session_id):
         light_source = optotagging_laser
@@ -251,7 +298,7 @@ def build_instrument(session_id: int) -> Instrument:
         modification_date = LED_RIG_MODIFICATION_DATE
     return Instrument(
         location="325",
-        instrument_id=INSTRUMENT_ID,
+        instrument_id=get_rig_id(session_id),
         modification_date=modification_date,
         coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         modalities=[Modality.ECEPHYS, Modality.BEHAVIOR_VIDEOS],
@@ -263,11 +310,13 @@ def build_instrument(session_id: int) -> Instrument:
 def generate_instrument(nwbfile=None, session_info=None) -> Instrument:
     """Return the AIND Instrument for a Visual Coding Neuropixels session.
 
-    All sessions share the reconstructed ``NP`` instrument, but in one of two rig
-    states: the optotagging light source was changed from a 465 nm LED to a
-    473 nm laser starting with session 789848216. The state is selected from the
-    session id (``session_info['id']``). The ``nwbfile`` parameter is accepted
-    only for interface symmetry with the other ``generate_*`` functions.
+    The ``instrument_id`` is the session's actual rig ("NP.1" or "NP.2", from the
+    reference CSV; the shared ``INSTRUMENT_ID`` "NP" for session 819701982, which is
+    absent from the CSV). Each rig is reconstructed in one of two states: the
+    optotagging light source was changed from a 465 nm LED to a 473 nm laser starting
+    with session 789848216. Both rig and state are selected from the session id
+    (``session_info['id']``). The ``nwbfile`` parameter is accepted only for
+    interface symmetry with the other ``generate_*`` functions.
     """
     return build_instrument(int(session_info["id"]))
 

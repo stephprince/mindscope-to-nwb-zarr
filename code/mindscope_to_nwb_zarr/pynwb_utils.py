@@ -36,24 +36,34 @@ def get_latest_time(nwbfile: NWBFile) -> float | None:
             
     return max_time
 
-def get_data_stream_end_time(nwbfile: NWBFile) -> datetime | None:
-    """Calculate acquisition end time from NWB file by finding the latest timestamp across all TimeSeries"""
+def get_data_stream_end_time(nwbfile: NWBFile, session_start_time: datetime = None) -> datetime | None:
+    """Calculate acquisition end time from NWB file by finding the latest timestamp across all TimeSeries.
+
+    Timestamps in the file are seconds relative to the session start. By default the
+    absolute end time is anchored to ``nwbfile.session_start_time``; pass
+    ``session_start_time`` to re-anchor to a corrected start (e.g. when the file's
+    session_start_time is a packaging date rather than the real acquisition time).
+    """
     latest_time = get_latest_time(nwbfile)
+    if session_start_time is None:
+        session_start_time = nwbfile.session_start_time
 
     # Calculate end time
     if latest_time is not None:
-        end_time = nwbfile.session_start_time + timedelta(seconds=float(latest_time))
+        end_time = session_start_time + timedelta(seconds=float(latest_time))
     else:
         end_time = None
 
     return end_time
 
-def get_data_stream_start_time(nwbfile: NWBFile) -> datetime | None:
+def get_data_stream_start_time(nwbfile: NWBFile, session_start_time: datetime = None) -> datetime | None:
     earliest_time = get_earliest_time(nwbfile)
+    if session_start_time is None:
+        session_start_time = nwbfile.session_start_time
 
     # Calculate end time
     if earliest_time is not None:
-        start_time = nwbfile.session_start_time + timedelta(seconds=float(earliest_time))
+        start_time = session_start_time + timedelta(seconds=float(earliest_time))
     else:
         start_time = None
 
