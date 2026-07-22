@@ -1,6 +1,5 @@
 """Generates Allen Brain Observatory Neuropixels Instrument"""
 
-import re
 import pandas as pd
 
 from datetime import date
@@ -37,6 +36,8 @@ from aind_data_schema.components.devices import (
 from aind_data_schema.components.identifiers import Software
 
 from aind_data_schema.core.instrument import Instrument
+
+from mindscope_to_nwb_zarr.aind_data_schema.utils import EPHYS_GLOBAL_COORDINATE_SYSTEM
 
 # Six Neuropixels probe assemblies, one per letter A-F.
 EPHYS_ASSEMBLY_LETTERS = "ABCDEF"
@@ -146,20 +147,6 @@ def manipulator_name(letter: str) -> str:
 def probe_name(letter: str) -> str:
     """Instrument component name for the probe of a given probe letter."""
     return f"Probe{letter}"
-
-
-def probe_letter_from_device_name(device_name: str) -> str:
-    """Extract the assembly letter from an NWB probe device name.
-
-    The Visual Coding Neuropixels NWB files name probe devices ``probeA`` ..
-    ``probeF``; this returns the upper-cased trailing identifier (e.g.
-    ``"probeA" -> "A"``) so acquisition configs can be matched to the instrument
-    components built with the same letter.
-    """
-    match = re.fullmatch(r"probe[_\s-]?([A-Za-z0-9]+)", device_name, flags=re.IGNORECASE)
-    if not match:
-        raise ValueError(f"Cannot parse probe letter from device name {device_name!r}")
-    return match.group(1).upper()
 
 
 # Generate EphysAssembly objects A-F
@@ -300,7 +287,7 @@ def build_instrument(session_id: int) -> Instrument:
         location="325",
         instrument_id=get_rig_id(session_id),
         modification_date=modification_date,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
+        coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         modalities=[Modality.ECEPHYS, Modality.BEHAVIOR_VIDEOS],
         notes="Created several years posthoc from incomplete records. Much information is missing.",
         temperature_control=None,

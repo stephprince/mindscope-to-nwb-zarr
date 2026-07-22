@@ -6,10 +6,11 @@ import pandas as pd
 import warnings
 
 from aind_data_schema_models.brain_atlas import CCFv3
+from aind_data_schema_models.coordinates import AxisName, Direction, Origin
 from aind_data_schema.components.stimulus import VisualStimulation, PulseShape
 from aind_data_schema.components.configs import ProbeConfig
-from aind_data_schema.components.coordinates import Translation, AtlasCoordinate, AtlasLibrary, CoordinateSystemLibrary
-from aind_data_schema_models.units import TimeUnit
+from aind_data_schema.components.coordinates import Axis, CoordinateSystem, Rotation, Translation
+from aind_data_schema_models.units import AngleUnit, SizeUnit, TimeUnit
 from aind_data_schema_models.stimulus_modality import StimulusModality
 from aind_data_schema.components.identifiers import Software, Code
 from aind_data_schema.core.acquisition import StimulusEpoch
@@ -126,15 +127,135 @@ def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
     return all_structures
 
 
+# ---------------------------------------------------------------------------
+# Neuropixels probe geometry for the Allen Brain Observatory rig.
+#
+# The six-probe rig places each probe (A-F) at a fixed position and orientation
+# relative to bregma. These values are shared by both Neuropixels/ephys datasets
+# (Visual Coding and Visual Behavior), whose NWB files name the probe devices
+# probeA..probeF. Transcribed from the brain observatory probe-config reference.
+# ---------------------------------------------------------------------------
+
+# Per-probe orientation relative to the V1 reticle, in degrees.
+PROBE_ROTATIONS = {
+    'A': [-18.1947618, 18.45024358, -16.25274646],
+    'B': [0, -39.08251859, -19.99997558],
+    'C': [112.8691441, -71.24837276, -124.32351133],
+    'D': [161.8052382, -18.45024358, -163.74725354],
+    'E': [180, 39.08251859, -160.00002442],
+    'F': [-67.1308559, 71.24837276, -55.67648867],
+}
+
+# Per-probe location relative to the V1 reticle (x, y, z, depth).
+PROBE_OFFSETS = {
+    'A': [0.770, -0.150, -1.335, 0],
+    'B': [1.54, -0.149, -0.0004, 0],
+    'C': [0.770, -0.149, 1.334, 0],
+    'D': [-0.770, -0.1449, 1.334, 0],
+    'E': [-1.541, -0.149, 0.0004, 0],
+    'F': [-0.77094, -0.14997, -1.33436, 0],
+}
+
+# Cortical visual area each probe targets. Each probe targets a single area; the
+# structures a probe merely passes through are recorded in the NWB electrodes table,
+# not listed here (they are recorded, not targeted).
+PROBE_TARGETED_STRUCTURES = {
+    'A': CCFv3.by_acronym('VISam'),
+    'B': CCFv3.by_acronym('VISpm'),
+    'C': CCFv3.by_acronym('VISp'),
+    'D': CCFv3.by_acronym('VISl'),
+    'E': CCFv3.by_acronym('VISal'),
+    'F': CCFv3.by_acronym('VISrl'),
+}
+
+# Reticle-to-bregma transform and insertion depth, shared by all probes.
+RETICLE_ROTATION = [0.0, -23.11637603, 0.0]
+RETICLE_OFFSET = [-2.777, -3.071, 0.607, 0]
+PROBE_INSERTION_DEPTH = [0, -3.5, 0, 3.5]
+
+# Ephys global (bregma-relative) coordinate system the probe transforms resolve into.
+# Ephys-specific: the ophys datasets position imaging planes in their own frames and
+# do not use this. See PROBE_COORDINATE_SYSTEM for the per-probe local frame.
+EPHYS_GLOBAL_COORDINATE_SYSTEM = CoordinateSystem(
+    name="BREGMA_RAS",
+    origin=Origin.BREGMA,
+    axis_unit=SizeUnit.MM,
+    axes=[
+        Axis(name=AxisName.ML, direction=Direction.LR),
+        Axis(name=AxisName.AP, direction=Direction.PA),
+        Axis(name=AxisName.SI, direction=Direction.IS),
+    ],
+)
+
+# Probe-local coordinate system (tip origin) that each ProbeConfig is expressed in.
+PROBE_COORDINATE_SYSTEM = CoordinateSystem(
+    name="PROBE_RUFD",
+    origin=Origin.TIP,
+    axis_unit=SizeUnit.UM,  # standard unit for probe coordinates
+    axes=[
+        Axis(name=AxisName.X, direction=Direction.LR),
+        Axis(name=AxisName.Y, direction=Direction.DU),
+        Axis(name=AxisName.Z, direction=Direction.BF),
+        Axis(name=AxisName.DEPTH, direction=Direction.UD),
+    ],
+)
+
+PROBE_TRANSFORM_NOTES = """Six transformations define the position and orientation of the probe in the global coordinate space:
+
+    Translation 1: moves the probe along the insertion axis to the approximate depth inside the brain
+    Rotation 1: sets probe orientation relative to V1 reticle
+    Rotation 2: flips probe by 90 degrees
+    Translation 2: sets probe location relative to V1 reticle
+    Rotation 3: rotates reticle-relative coordinates into bregma-relative coordinates
+    Translation 3: translates reticle-relative coordinates into bregma-relative coordinates
+    """
+
+
+def probe_letter_from_device_name(device_name: str) -> str:
+    """Extract the assembly letter from an NWB probe device name.
+
+    The Neuropixels NWB files name probe devices ``probeA`` .. ``probeF``; this returns
+    the upper-cased trailing identifier (e.g. ``"probeA" -> "A"``) used to look up the
+    probe's fixed rig geometry and to match acquisition configs to instrument components.
+    """
+    match = re.fullmatch(r"probe[_\s-]?([A-Za-z0-9]+)", device_name, flags=re.IGNORECASE)
+    if not match:
+        raise ValueError(f"Cannot parse probe letter from device name {device_name!r}")
+    return match.group(1).upper()
+
+
+def build_probe_transform(letter: str) -> list:
+    """Build the six-step transform placing probe ``letter`` in bregma-relative space.
+
+    Mirrors the brain observatory probe-config reference: insertion depth, orientation
+    relative to the V1 reticle, a 90-degree flip, the reticle-relative location, and the
+    reticle-to-bregma rotation and translation. See ``PROBE_TRANSFORM_NOTES``.
+    """
+    return [
+        Translation(translation=PROBE_INSERTION_DEPTH),  # depth along the insertion axis
+        Rotation(angles=PROBE_ROTATIONS[letter], angles_unit=AngleUnit.DEG),  # orient vs V1 reticle
+        Rotation(angles=[90, 0, 0], angles_unit=AngleUnit.DEG),  # flip probe by 90 degrees
+        Translation(translation=PROBE_OFFSETS[letter]),  # locate vs V1 reticle
+        Rotation(angles=RETICLE_ROTATION, angles_unit=AngleUnit.DEG),  # reticle -> bregma rotation
+        Translation(translation=RETICLE_OFFSET),  # reticle -> bregma translation
+    ]
+
+
 def build_probe_config(nwbfile: NWBFile, device, device_name: str = None) -> ProbeConfig:
     """Build a ProbeConfig for a single EcephysProbe device.
+
+    The targeted structure, coordinate system, and full position/orientation transform
+    are the fixed brain-observatory rig geometry for the probe's letter (A-F), shared
+    across the Neuropixels/ephys datasets. Each probe has a single targeted structure;
+    structures the probe merely passed through stay in the NWB electrodes table and are
+    not duplicated into ``other_targeted_structure``.
 
     Parameters
     ----------
     nwbfile : NWBFile
-        The NWB file containing the electrode table and device information.
+        The NWB file (accepted for interface symmetry; geometry is keyed by probe letter).
     device : Device
-        The EcephysProbe device to build a config for.
+        The EcephysProbe device to build a config for; its name gives the probe letter.
     device_name : str, optional
         Name to record on the ProbeConfig. Defaults to ``device.name`` (the NWB
         device name); callers can override it to match an instrument component
@@ -145,30 +266,13 @@ def build_probe_config(nwbfile: NWBFile, device, device_name: str = None) -> Pro
     ProbeConfig
         The probe configuration for the given device.
     """
-    all_structures = get_brain_locations(nwbfile, device)
-    targeted_structure = [s for s in all_structures if s.acronym.startswith('VIS')]  # get targeted visual area
-    if len(targeted_structure) > 1:
-        # NOTE: visual coding dataset has 12 functionally defined visual areas that are not included in the CCFv3
-        # these regions will be ignored and the target structure should still fall under one of the 6 VIS areas
-        # VISal, VISam, VISl, VISpl, VISp, VISrl, VISpm
-        warnings.warn(f"More than one visual area found: {targeted_structure}")
-
+    letter = probe_letter_from_device_name(device.name)
     return ProbeConfig(
         device_name=device_name if device_name is not None else device.name,
-        # 6 probes, each targets a cortical visual area (e.g. VISp, VISl, VISal, VISrl, VISam, VISpm)
-        # would list that specific area as the primary targeted structure
-        # should be the same for every experiment, most files should have majority of one
-        # TODO: some sessions, e.g., 737581020 and 743475441 have a probe with no targeted structures in the above 6 visual areas. VISmma is listed but not in CCFv3. @Saskia to decide how to handle this case because this field is required.
-        primary_targeted_structure=targeted_structure[0],
-        other_targeted_structure=list(set(all_structures) - set(targeted_structure)), # TODO - currently listing all other structures that are hit but might want to not list everything
-        atlas_coordinate=AtlasCoordinate(
-            coordinate_system=AtlasLibrary.CCFv3_10um,
-            translation=[0, 0, 0],  # TODO - should be target region coordinate - might not make sense for these datasets, TBD @Saskia
-        ),
-        coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # TODO - what should this be? probably bregma ARID, will confirm
-        transform=[Translation(translation=[0, 0, 0, 1],),],  # TODO - what should this be? this will be the translation we care about, how we've positioned this probe
-        # expect that there is documentation on these translations somewhere @Saskia
-        notes=None,
+        primary_targeted_structure=PROBE_TARGETED_STRUCTURES[letter],
+        coordinate_system=PROBE_COORDINATE_SYSTEM,
+        transform=build_probe_transform(letter),
+        notes=PROBE_TRANSFORM_NOTES,
     )
 
 

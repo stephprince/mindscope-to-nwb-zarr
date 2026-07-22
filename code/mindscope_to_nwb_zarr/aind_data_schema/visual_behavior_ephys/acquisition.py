@@ -37,6 +37,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_probe_configs,
     get_optostimulation_parameters,
     convert_intervals_to_stimulus_epochs,
+    EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
 
 
@@ -151,7 +152,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description,
         notes=None,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARID,  # TODO - determine correct coordinate system library, will also be defined with instrument (not required to be same as acquisition)
+        coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         # coordinate system info might not be available, will check @Saskia
         # calibrations=[],  # TODO - add if available - will be difficult to find, probably not
         # maintenance=[],

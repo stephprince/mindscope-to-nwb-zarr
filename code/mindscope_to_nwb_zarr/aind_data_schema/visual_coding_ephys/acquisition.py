@@ -31,14 +31,15 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
 )
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     build_probe_config,
+    probe_letter_from_device_name,
     get_optostimulation_parameters,
     convert_intervals_to_stimulus_epochs,
+    EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
     ephys_assembly_name,
     manipulator_name,
     probe_name,
-    probe_letter_from_device_name,
     uses_optotagging_laser,
     optotagging_device_name,
     get_experiment_metadata,
@@ -260,8 +261,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         instrument_id=instrument_id,  # actual rig ("NP.1"/"NP.2"); matches the generated Instrument
         acquisition_type=nwbfile.stimulus_notes,  # TODO - assert correct field for this data and present in both functional connectivity and brain observatory datasets
         notes=None,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARID,  # TODO - determine correct coordinate system library, will also be defined with instrument (not required to be same as acquisition)
-        # coordinate system info might not be available, will check @Saskia
+        coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         # calibrations=[],
         # maintenance=[],
         data_streams=[
