@@ -33,6 +33,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     build_probe_config,
     probe_letter_from_device_name,
     get_optostimulation_parameters,
+    get_ethics_review_id,
     convert_intervals_to_stimulus_epochs,
     EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
@@ -44,6 +45,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument impor
     optotagging_device_name,
     get_experiment_metadata,
     get_rig_id,
+    get_mouse_id,
     OPTOTAGGING_LASER_WAVELENGTH,
 )
 
@@ -225,6 +227,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     # Rig id ("NP.1"/"NP.2") from the same source as the instrument file, so the
     # acquisition instrument_id matches the generated Instrument.
     instrument_id = get_rig_id(session_id)
+    # Ethics (IACUC) review id, keyed by the 6-digit mouse id from the subject mapping
+    # (via the NWB subject_id, present for all 58 sessions incl. 819701982).
+    ethics_review_id = get_ethics_review_id(get_mouse_id(nwbfile))
     if experiment_metadata is not None:
         acquisition_start_time = datetime.fromisoformat(
             experiment_metadata['ExperimentStartTime']
@@ -257,7 +262,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         acquisition_start_time=acquisition_start_time,  # from reference CSV (platform JSON)
         acquisition_end_time=acquisition_end_time,  # NWB offset re-anchored to the corrected start
         experimenters=experimenters,  # operatorID from reference CSV
-        ethics_review_id=None,  # TODO - obtain if available - YES, @Saskia
+        ethics_review_id=ethics_review_id,  # IACUC review id, looked up by mouse id (all 58 sessions)
         instrument_id=instrument_id,  # actual rig ("NP.1"/"NP.2"); matches the generated Instrument
         acquisition_type=nwbfile.stimulus_notes,  # TODO - assert correct field for this data and present in both functional connectivity and brain observatory datasets
         notes=None,

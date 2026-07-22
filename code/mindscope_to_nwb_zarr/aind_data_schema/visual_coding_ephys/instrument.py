@@ -1,10 +1,12 @@
 """Generates Allen Brain Observatory Neuropixels Instrument"""
 
+import json
 import pandas as pd
 
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
+from pynwb import NWBFile
 
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema_models.organizations import Organization
@@ -55,11 +57,43 @@ EXPERIMENT_METADATA_PATH = (
     / "neuropixels_vc_experiment_metadata.csv"
 )
 
+# Maps the NWB subject_id to the 6-digit mouse id. Keyed by the NWB subject_id, which
+# is present for all 58 sessions (unlike the experiment CSV, which omits 819701982).
+SUBJECT_MAPPING_PATH = (
+    Path(__file__).parent.parent.parent.parent
+    / "reference"
+    / "visual_coding_ephys_subject_mapping.json"
+)
+
 
 @lru_cache(maxsize=1)
 def _load_experiment_metadata() -> pd.DataFrame:
     """Load the per-session experiment metadata CSV, indexed by session id."""
     return pd.read_csv(EXPERIMENT_METADATA_PATH).set_index("session_id")
+
+
+@lru_cache(maxsize=None)
+def _load_subject_mapping(path: str) -> dict:
+    """Load the NWB subject_id -> 6-digit mouse id mapping from the JSON (cached)."""
+    with open(path, 'r') as f:
+        return json.load(f)
+
+
+def get_mouse_id(nwbfile: NWBFile, subject_mapping_path=None) -> str:
+    """Return the 6-digit mouse id for a session's subject.
+
+    Looked up from the subject mapping by the NWB ``subject_id``, which is present and
+    correct for all 58 sessions (the experiment CSV omits 819701982). The 6-digit mouse
+    id is what the AIND metadata service and the ethics review CSV are keyed by.
+    """
+    mapping = _load_subject_mapping(str(subject_mapping_path or SUBJECT_MAPPING_PATH))
+    subject_id = str(nwbfile.subject.subject_id)
+    mouse_id = mapping.get(subject_id)
+    if mouse_id is None:
+        raise KeyError(
+            f"No mouse id found for NWB subject_id {subject_id!r} in {SUBJECT_MAPPING_PATH}"
+        )
+    return mouse_id
 
 
 def get_experiment_metadata(session_id: int) -> pd.Series | None:

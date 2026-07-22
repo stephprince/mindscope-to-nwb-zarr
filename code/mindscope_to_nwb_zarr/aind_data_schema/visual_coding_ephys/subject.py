@@ -11,7 +11,10 @@ from aind_data_schema.core.subject import Subject
 from aind_data_schema.components.subjects import Housing, Sex, MouseSubject
 
 from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id, get_subject_date_of_birth
-from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import get_experiment_metadata
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
+    get_experiment_metadata,
+    _load_subject_mapping,
+)
 
 # Import the metadata service client
 import aind_metadata_service_client
@@ -42,8 +45,7 @@ def cross_check_mouse_id(nwbfile: NWBFile, session_info: pd.Series, subject_mapp
         return
     expected_mouse_id = str(experiment_metadata['mouse_id'])
 
-    with open(subject_mapping_path, 'r') as f:
-        subject_mapping = json.load(f)
+    subject_mapping = _load_subject_mapping(str(subject_mapping_path))
     nwb_subject_id = str(nwbfile.subject.subject_id)
     mapped_mouse_id = subject_mapping.get(nwb_subject_id)
 

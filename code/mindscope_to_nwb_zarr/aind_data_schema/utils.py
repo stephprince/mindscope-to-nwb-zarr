@@ -17,7 +17,50 @@ from aind_data_schema.core.acquisition import StimulusEpoch
 from mindscope_to_nwb_zarr.aind_data_schema.stimuli import OptotaggingStimulation
 
 from datetime import datetime, timezone, timedelta
+from functools import lru_cache
+from pathlib import Path
 from pynwb import NWBFile
+
+
+# CSV mapping subject (donor/mouse) id -> ethics (IACUC) review id, bundled in the repo.
+_ETHICS_REVIEW_CSV = Path(__file__).resolve().parents[2] / "reference" / "ethics_review_ids.csv"
+
+
+@lru_cache(maxsize=None)
+def _load_subject_to_ethics_review(csv_path: str) -> dict:
+    """Load the subject_id -> ethics_review_id mapping from the CSV (cached)."""
+    df = pd.read_csv(csv_path, usecols=["subject_id", "ethics_review_id"])
+    return dict(zip(df["subject_id"].astype(int), df["ethics_review_id"].astype(int)))
+
+
+def get_ethics_review_id(subject_id, csv_path=None) -> list[str]:
+    """Look up the ethics review id(s) for a subject.
+
+    Parameters
+    ----------
+    subject_id : int | str
+        The subject's donor/mouse id (e.g. ``"244896"``).
+    csv_path : str | Path, optional
+        Path to the subject->ethics_review_id mapping CSV. Defaults to the bundled copy.
+
+    Returns
+    -------
+    list[str]
+        A single-element list with the ethics review id as a string (the
+        Acquisition field is a list).
+
+    Raises
+    ------
+    KeyError
+        If the subject is not present in the mapping CSV.
+    """
+    mapping = _load_subject_to_ethics_review(str(csv_path or _ETHICS_REVIEW_CSV))
+    review_id = mapping.get(int(subject_id))
+    if review_id is None:
+        raise KeyError(
+            f"No ethics_review_id found for subject_id {subject_id!r} in {_ETHICS_REVIEW_CSV}"
+        )
+    return [str(review_id)]
 
 
 def get_subject_id(nwbfile: NWBFile, session_info: pd.Series = None) -> str:
