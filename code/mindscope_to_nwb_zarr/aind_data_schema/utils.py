@@ -63,6 +63,25 @@ def get_ethics_review_id(subject_id, csv_path=None) -> list[str]:
     return [str(review_id)]
 
 
+# Data asset name datetimes are timezone-free, e.g. "2018-06-27_14-07-11".
+DATA_ASSET_NAME_DATETIME_FORMAT = "%Y-%m-%d_%H-%M-%S"
+
+
+def build_data_asset_name(subject_id, acquisition_start_time: datetime,
+                          packaging_time: datetime) -> str:
+    """Build the data asset name ``<subject id>_<acquisition start>_nwb_<packaging date>``.
+
+    Both datetimes are formatted timezone-free as ``YYYY-MM-DD_hh-mm-ss``. The packaging
+    date is when the asset is produced (typically ``datetime.now()``).
+    """
+    fmt = DATA_ASSET_NAME_DATETIME_FORMAT
+    return (
+        f"{subject_id}"
+        f"_{acquisition_start_time.strftime(fmt)}"
+        f"_nwb_{packaging_time.strftime(fmt)}"
+    )
+
+
 def get_subject_id(nwbfile: NWBFile, session_info: pd.Series = None) -> str:
     """Get the subject ID from the NWB file, cross-checked with the session info. e.g., "457841".
     """
@@ -141,35 +160,6 @@ def get_curriculum_status(session_info: pd.Series):
     return json.dumps(curriculum_dict, cls=NumpyJsonEncoder)
 
 
-def get_brain_locations(nwbfile: NWBFile, device) -> list[CCFv3]:
-    """Convert location names to CCFv3 brain structures.
-
-    For VIS regions that don't have an exact match in CCFv3, this function
-    falls back to the generic VIS structure.
-    """
-    # get locations from nwbfile
-    locations = (nwbfile.electrodes.to_dataframe()
-                .query('group_name == @device.name')['location'].unique().tolist())
-    locations = [l for l in locations if l]  # Filter out empty strings
-
-    # extract CCFv3 structures
-    all_structures = []
-    for location in locations:
-        location_upper = location.upper()
-        structure = getattr(CCFv3, location_upper, None)
-
-        if structure is not None:
-            all_structures.append(structure)
-        else:
-            pass
-
-    # warn if missing any
-    if len(all_structures) != len(locations):
-        warnings.warn(f"All probe locations not found in CCFv3 enum: {locations}")
-
-    return all_structures
-
-
 # ---------------------------------------------------------------------------
 # Neuropixels probe geometry for the Allen Brain Observatory rig.
 #
@@ -199,9 +189,10 @@ PROBE_OFFSETS = {
     'F': [-0.77094, -0.14997, -1.33436, 0],
 }
 
-# Cortical visual area each probe targets. Each probe targets a single area; the
-# structures a probe merely passes through are recorded in the NWB electrodes table,
-# not listed here (they are recorded, not targeted).
+# Intended cortical visual area each probe targets, from the brain observatory
+# probe-config reference. Each probe targets a single area; this is the *intended*
+# target, not the structures actually recorded from (those stay in the NWB electrodes
+# table and are not listed as targeted).
 PROBE_TARGETED_STRUCTURES = {
     'A': CCFv3.by_acronym('VISam'),
     'B': CCFv3.by_acronym('VISpm'),
@@ -320,26 +311,22 @@ def build_probe_config(nwbfile: NWBFile, device, device_name: str = None) -> Pro
 
 
 def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
-    """Get probe configurations from NWB file.
+    """Get probe configurations for every EcephysProbe in the NWB file.
 
-    Extracts probe information including targeted brain structures from the NWB file's
-    electrode table and device information.
+    Each probe's targeted structure and position/orientation are the fixed intended
+    rig geometry keyed by probe letter (see ``build_probe_config``), not derived from
+    the recorded electrode locations.
 
     Parameters
     ----------
     nwbfile : NWBFile
-        The NWB file containing probe and electrode information
+        The NWB file containing the probe devices
 
     Returns
     -------
     list[ProbeConfig]
         List of probe configuration objects for each probe in the file
     """
-    # In visual coding ephys, multiple probes sometimes target the same structure, e.g.:
-    # session 746083955 (row 9): Multiple probes targeting same brain structure found: VISpm, VISpm, VISp, VISl, VISal, VISrl.
-    # session 751348571 (row 12): Multiple probes targeting same brain structure found: VISam, VISpm, VISp, VISl, VISrl, VISrl.
-    # session 754829445 (row 14): Multiple probes targeting same brain structure found: VISam, VISpm, VISp, VISl, VISrl, VISp.
-    # so not warning on duplicate targeted structures for now. @Saskia to verify this is expected behavior.
     return [
         build_probe_config(nwbfile, device)
         for device in nwbfile.devices.values()

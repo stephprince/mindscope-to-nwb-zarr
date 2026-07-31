@@ -139,9 +139,9 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
         Path to directory to save output JSON files
     """
     # Generate metadata models. The DataDescription name (also used as the per-session
-    # output folder name below) is set to the DANDI asset base name.
-    base_name = get_dandi_base_name(session_info)
-    data_description = generate_data_description(nwbfile, session_info, name=base_name)
+    # output folder name below) follows the shared convention
+    # <subject id>_<acquisition start>_nwb_<packaging date>.
+    data_description = generate_data_description(nwbfile, session_info)
     subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info)

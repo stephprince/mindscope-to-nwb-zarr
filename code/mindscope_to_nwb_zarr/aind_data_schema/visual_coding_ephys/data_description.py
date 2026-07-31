@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from datetime import timezone
+from datetime import datetime, timezone
 from pynwb import NWBFile
 
 from aind_data_schema_models.organizations import Organization
@@ -12,6 +12,10 @@ from aind_data_schema.components.identifiers import Person
 from aind_data_schema.core.data_description import Funding, DataDescription
 
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
+from mindscope_to_nwb_zarr.aind_data_schema.utils import build_data_asset_name
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
+    get_acquisition_start_time,
+)
 
 
 def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> DataDescription:
@@ -30,21 +34,34 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
     DataDescription
         AIND DataDescription data model populated with data from the NWB file
     """
+    subject_id = nwbfile.subject.subject_id  # 6-digit mouse ID
+
+    # Asset/folder name: <subject id>_<acquisition start>_nwb_<packaging date (now)>.
+    name = build_data_asset_name(
+        subject_id, get_acquisition_start_time(nwbfile, session_info), datetime.now()
+    )
+
+    tags = [
+        "mindscope",
+        f"session_id: {session_info['id']}",
+        f"specimen_id: {session_info['specimen_id']}",
+    ]
+
     return DataDescription(
         license=License.CC_BY_40,
-        subject_id=nwbfile.subject.subject_id,
+        subject_id=subject_id,
         creation_time=get_data_stream_end_time(nwbfile).replace(tzinfo=timezone.utc),
-        tags=[""], # TODO - add if needed
-        institution=Organization.AIBS,
-        funding_source=[Funding(funder=Organization.AI, # TODO - add if needed
-                                grant_number="", # TODO - add if needed
-                                fundee=[Person(name="Name")])], # TODO - add if needed
-        data_level=DataLevel.RAW,
+        name=name,
+        tags=tags,
+        institution=Organization.AI,
+        funding_source=[Funding(funder=Organization.AI)],
+        data_level=DataLevel.DERIVED,
         group=Group.EPHYS,
-        investigators=[Person(name="Name")], # TODO - where to pull from?
-        project_name="Visual Coding Neuropixels",
+        investigators=[
+            Person(name="Josh Siegle"),
+            Person(name="Xiaoxuan Jia"),
+            Person(name="Shawn Olsen"),
+        ],
+        project_name="Allen Brain Observatory - Visual Coding Neuropixels",
         modalities=get_modalities(nwbfile),
-        data_summary=("in vivo Neuropixels recordings from the Allen Brain Observatory "
-                      "to characterize neural coding in the visual cortex using a diverse "
-                      "range of visual stimuli") # TODO - update as needed
     )

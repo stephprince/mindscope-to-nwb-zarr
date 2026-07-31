@@ -4,7 +4,6 @@ import warnings
 import pandas as pd
 
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 from pynwb import NWBFile
 
 from aind_data_schema.components.identifiers import Code
@@ -44,15 +43,13 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument impor
     uses_optotagging_laser,
     optotagging_device_name,
     get_experiment_metadata,
+    get_acquisition_start_time,
     get_rig_id,
     get_mouse_id,
+    ACQUISITION_TIMEZONE,
     OPTOTAGGING_LASER_WAVELENGTH,
 )
 
-
-# The rig is at the Allen Institute in Seattle and the platform JSON timestamps are
-# naive local time, so they are interpreted as US Pacific to make them tz-aware.
-ACQUISITION_TIMEZONE = ZoneInfo("America/Los_Angeles")
 
 # Tolerance for cross-checking the computed acquisition end time (the last data
 # timestamp) against the CSV ExperimentCompleteTime. The last data sample can trail
@@ -191,8 +188,8 @@ def get_ephys_assembly_configs(nwbfile: NWBFile) -> list[EphysAssemblyConfig]:
                     device_name=ephys_assembly_name(letter),
                     manipulator=ManipulatorConfig(
                         device_name=manipulator_name(letter),
-                        coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # should be standardized (confirm relative to bregma, positions) @Saskia
-                        local_axis_positions=Translation(translation=[0, 0, 0]),  # TODO - fill in with correct positions @Saskia
+                        coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
+                        local_axis_positions=Translation(translation=[0, 0, 0]),
                     ),
                     probes=[build_probe_config(nwbfile, device, device_name=probe_name(letter))],
                 )
@@ -230,14 +227,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     # Ethics (IACUC) review id, keyed by the 6-digit mouse id from the subject mapping
     # (via the NWB subject_id, present for all 58 sessions incl. 819701982).
     ethics_review_id = get_ethics_review_id(get_mouse_id(nwbfile))
-    if experiment_metadata is not None:
-        acquisition_start_time = datetime.fromisoformat(
-            experiment_metadata['ExperimentStartTime']
-        ).replace(tzinfo=ACQUISITION_TIMEZONE)
-        experimenters = [experiment_metadata['operatorID']]
-    else:
-        acquisition_start_time = nwbfile.session_start_time
-        experimenters = []
+    # Corrected acquisition start (CSV ExperimentStartTime; NWB fallback for 819701982).
+    acquisition_start_time = get_acquisition_start_time(nwbfile, session_info)
+    experimenters = [experiment_metadata['operatorID']] if experiment_metadata is not None else []
 
     # End/stream/epoch times are NWB offsets re-anchored to the corrected start, since
     # the file's session_start_time is a packaging date (see acquisition_start_time).

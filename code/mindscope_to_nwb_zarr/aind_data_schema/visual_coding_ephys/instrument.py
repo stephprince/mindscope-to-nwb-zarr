@@ -3,9 +3,10 @@
 import json
 import pandas as pd
 
-from datetime import date
+from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from pynwb import NWBFile
 
 from aind_data_schema_models.modalities import Modality
@@ -106,6 +107,25 @@ def get_experiment_metadata(session_id: int) -> pd.Series | None:
     if session_id not in metadata.index:
         return None
     return metadata.loc[session_id]
+
+
+# The rig is at the Allen Institute in Seattle and the platform JSON timestamps are
+# naive local time, so they are interpreted as US Pacific to make them tz-aware.
+ACQUISITION_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def get_acquisition_start_time(nwbfile: NWBFile, session_info: pd.Series) -> datetime:
+    """Real acquisition start time for a session.
+
+    Read from the reference CSV ``ExperimentStartTime`` (naive Pacific -> tz-aware),
+    since the NWB ``session_start_time`` is a packaging date, not the acquisition time.
+    Falls back to ``nwbfile.session_start_time`` for session 819701982, which is absent
+    from the CSV.
+    """
+    metadata = get_experiment_metadata(int(session_info['id']))
+    if metadata is not None:
+        return datetime.fromisoformat(metadata['ExperimentStartTime']).replace(tzinfo=ACQUISITION_TIMEZONE)
+    return nwbfile.session_start_time
 
 
 def get_rig_id(session_id: int) -> str:

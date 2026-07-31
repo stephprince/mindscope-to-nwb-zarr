@@ -273,7 +273,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         specimen_id=None,
         acquisition_start_time=nwbfile.session_start_time,
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        protocol_id=[nwbfile.protocol],  # TODO is this correct? Example value 20160706_244896_3StimC @Saskia
+        protocol_id=[nwbfile.protocol],  # e.g., 20160706_244896_3StimC
         ethics_review_id=get_ethics_review_id(subject_id),
         # Match the instrument file's instrument_id (the rig name, e.g. "CAM2P.1").
         # Falls back to the NWB device name for sessions whose rig is unresolved.
