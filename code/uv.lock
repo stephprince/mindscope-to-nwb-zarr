@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "aind-metadata-service-client"
-version = "2.6.0"
+version = "2.9.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
@@ -54,9 +54,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/58/ca/691b5dcc76e74c13fde906921451e9123a52c458ecf53536baee08a50b81/aind_metadata_service_client-2.6.0.tar.gz", hash = "sha256:6a95a885b72eeb2aa57b5762ad11e1247ba629934b51eae2e7a2d3537ed2cbaa", size = 31813, upload-time = "2025-12-10T17:41:16.35Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/23/0586eef3e177593fdac2d549d51e12f4fab936634d51f16bfc2797ea457e/aind_metadata_service_client-2.9.4.tar.gz", hash = "sha256:14f4cb41a51272a85799652b9f13fc971e7d96c77c9916307564d2f5524bfa78", size = 32927, upload-time = "2026-07-27T22:49:18.007Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/af/62/d865ba5e60fe85f22e98f710145d9ee420faa0ad9c23aebdea86b6aefc76/aind_metadata_service_client-2.6.0-py3-none-any.whl", hash = "sha256:a53e972d8feaad2d3561049c1034e3ee7e912d1f61feb5a118ee7b5fb4149b07", size = 37190, upload-time = "2025-12-10T17:41:15.442Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/f2/8fe25bef8e7671de89567f87a0bb9a40b9f3263c90109f2cda5357ed6797/aind_metadata_service_client-2.9.4-py3-none-any.whl", hash = "sha256:09d8d1b330e1a8c2dc44e4f3e9f172d5936b6f141ba183376d43e8ffeb085c1f", size = 38044, upload-time = "2026-07-27T22:49:17.067Z" },
 ]
 
 [[package]]
@@ -792,7 +792,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aind-data-schema", specifier = "==2.8.1" },
-    { name = "aind-metadata-service-client", specifier = "==2.6.0" },
+    { name = "aind-metadata-service-client", specifier = "==2.9.4" },
     { name = "dandi", specifier = "==0.74.0" },
     { name = "hdmf", specifier = "==4.2.0" },
     { name = "hdmf-zarr", git = "https://github.com/hdmf-dev/hdmf-zarr?rev=a8ce49065ba03d894e6cfd3f7e6b58d7b37fbd9b" },
