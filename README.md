@@ -223,7 +223,8 @@ Subject and procedures metadata are fetched from the AIND metadata service by 6-
 
 Other per-session handling:
 - **Instrument (rig) resolution** — the rig (CAM2P.1–CAM2P.5) is resolved from the experiment's `storage_directory` (which embeds `ophys_session_<id>`) via `reference/ophys_session_screen_centers.csv`, and the original/final rig configuration is selected by acquisition date. Older experiments store only `ophys_experiment_<id>` (no recoverable session id), and some sessions ran on rigs without an instrument definition (e.g., CAM2P.6); for those, no instrument file is written, but the session's other metadata is still generated.
-- **Unrecorded laser power** — the two-photon laser power was adjusted per session and not recorded in the NWB, so it is left as a placeholder in the imaging config.
+- **Unrecorded laser power** — the two-photon laser power was adjusted per session and not recorded in the NWB, so it is a placeholder in the imaging config: `LaserConfig.power` is left `None` (optional), while `Plane.power` (a required field) is set to the sentinel `-1` percent to signal "unknown".
+- **Unrecorded emission wavelength** — the imaging plane's `emission_lambda` is stored as `NaN` for every session (only the 910 nm `excitation_lambda` is recorded), so the channel's `emission_wavelength` is left `None`.
 - **No eye/pupil or camera data** — eye-tracking/pupil data and the eye/body camera videos are not packaged in the DANDI NWB files, even though the cameras are described in the instrument.
 
 ### Visual Behavior Neuropixels

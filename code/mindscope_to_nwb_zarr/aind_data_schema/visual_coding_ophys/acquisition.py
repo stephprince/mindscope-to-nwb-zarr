@@ -1,7 +1,6 @@
 """Generates acquisition metadata from NWB files for visual coding ophys sessions"""
 
 import numpy as np
-import re
 import pandas as pd
 
 from datetime import timedelta
@@ -49,20 +48,26 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument impor
 def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     """Extract imaging plane metadata from an NWB file.
 
-    Args:
-        nwbfile: The NWB file to process.
-        session_info: Session metadata row from the ophys experiment metadata.
+    Parameters
+    ----------
+    nwbfile : NWBFile
+        The NWB file to process.
+    session_info : pd.Series
+        Session metadata row from the ophys experiment metadata.
 
-    Returns:
-        A dictionary containing imaging plane metadata.
+    Returns
+    -------
+    dict
+        Imaging plane metadata (imaging plane, dimensions, targeted structure, depth).
     """
     assert len(nwbfile.devices) == 3, "Expected three devices per NWB file: Camera, Microscope, and StimulusDisplay"
-    device = nwbfile.devices["Microscope"]
 
     assert len(nwbfile.imaging_planes) == 1, "Expected one imaging plane per NWB file"
     imaging_plane = next(iter(nwbfile.imaging_planes.values()))
 
-    imaging_plane_dimensions = [512, 512]  # Default dimensions
+    imaging_plane_dimensions = _get_imaging_dimensions(nwbfile)
+    assert imaging_plane_dimensions == [512, 512], \
+        f"Expected 512x512 imaging dimensions, got {imaging_plane_dimensions}"
     imaging_plane_depth = session_info['imaging_depth']
 
     targeted_structure_str = imaging_plane.location
@@ -75,7 +80,6 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     targeted_structure = CCFv3.by_acronym(targeted_structure_str)
 
     return dict(
-        device=device,
         imaging_plane=imaging_plane,
         imaging_plane_dimensions=imaging_plane_dimensions,
         imaging_plane_targeted_structure=targeted_structure,
@@ -84,8 +88,33 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     )
 
 
+def _get_imaging_dimensions(nwbfile: NWBFile) -> list[int]:
+    """Return the [height, width] FOV pixel dimensions from the max-intensity projection.
+
+    Read from the file (the ``maximum_intensity_projection`` summary image) rather than
+    assumed.
+
+    Raises
+    ------
+    ValueError
+        If no ``maximum_intensity_projection`` summary image is found.
+    """
+    for module in nwbfile.processing.values():
+        for interface in module.data_interfaces.values():
+            if type(interface).__name__ == "Images" and "maximum_intensity_projection" in interface.images:
+                return list(interface.images["maximum_intensity_projection"].data.shape)
+    raise ValueError(
+        "No 'maximum_intensity_projection' summary image found to derive imaging dimensions."
+    )
+
+
 def _get_emission_wavelength(imaging_plane) -> float | None:
-    """Get emission wavelength from imaging plane, returning None if not available or nan."""
+    """Get the emission wavelength (nm) from the imaging plane's optical channel.
+
+    The emission wavelength is not recorded in these NWB files (it is stored as NaN
+    for every session, unlike ``excitation_lambda`` which is 910 nm), so this returns
+    ``None`` -- a known-missing value, like the laser power. See the README.
+    """
     if not imaging_plane.optical_channel:
         return None
     emission_lambda = imaging_plane.optical_channel[0].emission_lambda
@@ -97,14 +126,20 @@ def _get_emission_wavelength(imaging_plane) -> float | None:
 def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict, microscope_name: str) -> ImagingConfig:
     """Create an imaging configuration for a visual coding ophys acquisition.
 
-    Args:
-        nwbfile: The NWB file to process.
-        imaging_plane_info: Dictionary containing imaging plane metadata.
-        microscope_name: Name of the instrument's microscope device this config
-            points at (per-rig, e.g. "Nikon 1"); see ``microscope_name_for_experiment``.
+    Parameters
+    ----------
+    nwbfile : NWBFile
+        The NWB file to process.
+    imaging_plane_info : dict
+        Dictionary containing imaging plane metadata.
+    microscope_name : str
+        Name of the instrument's microscope device this config points at (per-rig,
+        e.g. "Nikon 1"); see ``microscope_name_for_experiment``.
 
-    Returns:
-        An ImagingConfig object representing the imaging configuration.
+    Returns
+    -------
+    ImagingConfig
+        The imaging configuration.
     """
     imaging_plane = imaging_plane_info["imaging_plane"]
     imaging_plane_dimensions = imaging_plane_info["imaging_plane_dimensions"]
@@ -266,11 +301,14 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     # Get subject ID from session metadata (external_donor_name is the 6-digit mouse ID)
     subject_id = session_info['specimen']['donor']['external_donor_name']
 
+    # The data stream end (last data timestamp) is also the acquisition end.
+    end_time = get_data_stream_end_time(nwbfile)
+
     acquisition = Acquisition(
         subject_id=subject_id,
         specimen_id=None,
         acquisition_start_time=nwbfile.session_start_time,
-        acquisition_end_time=get_data_stream_end_time(nwbfile),
+        acquisition_end_time=end_time,
         protocol_id=[nwbfile.protocol],  # e.g., 20160706_244896_3StimC
         ethics_review_id=get_ethics_review_id(subject_id),
         # The rig name (e.g. "CAM2P.1"), matching the generated Instrument's instrument_id.
@@ -283,7 +321,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),
-                stream_end_time=get_data_stream_end_time(nwbfile),
+                stream_end_time=end_time,
                 modalities=get_modalities(nwbfile),
                 code=None,
                 notes=None,
