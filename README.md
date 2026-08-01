@@ -205,6 +205,7 @@ See the changelog files in each dataset's `data_conversion` folder for full deta
 ## AIND Metadata Extraction
 
 ### All Datasets
+- The `BEHAVIOR_VIDEOS` modality is always included in the data stream and data description modalities (added unconditionally in `get_modalities`). Behavior videos (eye + body cameras) were recorded for every Allen Brain Observatory experiment, even when that camera data is not packaged in the NWB files.
 - Look into missing anesthesia duration information for some procedures.
 - Look into missing maternal/paternal genotype breeding info for some subjects.
 

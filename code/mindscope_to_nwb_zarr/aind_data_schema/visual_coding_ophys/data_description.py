@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pynwb import NWBFile
 
 from aind_data_schema_models.organizations import Organization
@@ -14,14 +14,10 @@ from aind_data_schema.core.data_description import Funding, DataDescription
 
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
 from mindscope_to_nwb_zarr.aind_data_schema.utils import build_data_asset_name
-from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
-    extract_ophys_session_id,
-)
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import extract_ophys_session_id
 
 
-def generate_data_description(
-    nwbfile: NWBFile, session_info: pd.Series
-) -> DataDescription:
+def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> DataDescription:
     """
     Generate a DataDescription model from an NWB file and session metadata.
 
@@ -61,7 +57,7 @@ def generate_data_description(
     return DataDescription(
         license=License.CC_BY_40,
         subject_id=subject_id,
-        creation_time=get_data_stream_end_time(nwbfile).replace(tzinfo=timezone.utc),
+        creation_time=get_data_stream_end_time(nwbfile),
         name=name,
         tags=tags,
         institution=Organization.AI,

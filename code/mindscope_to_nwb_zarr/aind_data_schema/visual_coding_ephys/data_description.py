@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pynwb import NWBFile
 
 from aind_data_schema_models.organizations import Organization
@@ -16,6 +16,7 @@ from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_en
 from mindscope_to_nwb_zarr.aind_data_schema.utils import build_data_asset_name
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
     get_acquisition_start_time,
+    get_mouse_id,
 )
 
 
@@ -35,12 +36,14 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
     DataDescription
         AIND DataDescription data model populated with data from the NWB file
     """
-    subject_id = nwbfile.subject.subject_id  # 6-digit mouse ID
+    subject_id = get_mouse_id(nwbfile)  # 6-digit mouse ID (the NWB subject_id is a 9-digit LIMS id)
+
+    # Corrected acquisition start (Pacific, from the reference CSV; NWB fallback for the
+    # CSV-absent session). Reused for the asset name and to re-anchor creation_time.
+    acquisition_start_time = get_acquisition_start_time(nwbfile, session_info)
 
     # Asset/folder name: <subject id>_<acquisition start>_nwb_<packaging date (now)>.
-    name = build_data_asset_name(
-        subject_id, get_acquisition_start_time(nwbfile, session_info), datetime.now()
-    )
+    name = build_data_asset_name(subject_id, acquisition_start_time, datetime.now())
 
     tags = [
         "mindscope",
@@ -51,7 +54,10 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
     return DataDescription(
         license=License.CC_BY_40,
         subject_id=subject_id,
-        creation_time=get_data_stream_end_time(nwbfile).replace(tzinfo=timezone.utc),
+        # creation_time = acquisition end, kept in Pacific for internal consistency with
+        # the acquisition datetimes. The NWB session_start_time is a packaging date, so
+        # re-anchor the NWB offsets to the corrected start (matches acquisition_end_time).
+        creation_time=get_data_stream_end_time(nwbfile, session_start_time=acquisition_start_time),
         name=name,
         tags=tags,
         institution=Organization.AI,

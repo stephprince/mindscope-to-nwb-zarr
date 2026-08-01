@@ -20,7 +20,7 @@ from aind_data_schema.components.configs import (
     LightEmittingDiodeConfig,
 )
 from aind_data_schema.components.coordinates import Translation, CoordinateSystemLibrary
-from aind_data_schema_models.units import SizeUnit, MassUnit
+from aind_data_schema_models.units import SizeUnit
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
 from mindscope_to_nwb_zarr.pynwb_utils import (
@@ -250,7 +250,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     )
 
     acquisition = Acquisition(
-        subject_id=nwbfile.subject.subject_id,
+        subject_id=get_mouse_id(nwbfile),  # 6-digit mouse ID (the NWB subject_id is a 9-digit LIMS id)
         acquisition_start_time=acquisition_start_time,  # from reference CSV (platform JSON)
         acquisition_end_time=acquisition_end_time,  # NWB offset re-anchored to the corrected start
         experimenters=experimenters,  # operatorID from reference CSV
@@ -280,10 +280,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         ],
         stimulus_epochs=get_stimulation_epochs(nwbfile, session_info, session_start_time=acquisition_start_time),
         subject_details=AcquisitionSubjectDetails(
-            animal_weight_prior=None,  # TODO - pull in extra info if available - likely not available @Saskia
-            animal_weight_post=None,
-            weight_unit=MassUnit.G,
-            mouse_platform_name="Running Wheel",
+            mouse_platform_name="MindScope Running Disc",  # matches the Disc device in the instrument; de Vries et al. describe a rotating disk
         ),
     )
 

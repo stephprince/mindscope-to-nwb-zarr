@@ -30,7 +30,7 @@ from aind_data_schema.components.coordinates import (
     Scale,
 )
 from aind_data_schema.components.stimulus import VisualStimulation
-from aind_data_schema_models.units import SizeUnit, FrequencyUnit, MassUnit, PowerUnit
+from aind_data_schema_models.units import SizeUnit, FrequencyUnit, PowerUnit
 from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.stimulus_modality import StimulusModality
 
@@ -313,10 +313,6 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         ],
         stimulus_epochs=get_stimulus_epochs(nwbfile, session_info),
         subject_details=AcquisitionSubjectDetails(
-            animal_weight_prior=None,  # NOTE: Animal weight was not recorded
-            animal_weight_post=None,
-            weight_unit=MassUnit.G,
-            anaesthesia=None,
             mouse_platform_name="MindScope Running Disc",  # matches the Disc device in the instrument; de Vries et al. describe a rotating disk
         ),
     )
