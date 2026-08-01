@@ -8,6 +8,7 @@ from pynwb import NWBFile
 from aind_data_schema_models.organizations import Organization
 from aind_data_schema_models.data_name_patterns import DataLevel, Group
 from aind_data_schema_models.licenses import License
+from aind_data_schema_models.registries import Registry
 from aind_data_schema.components.identifiers import Person
 from aind_data_schema.core.data_description import Funding, DataDescription
 
@@ -68,9 +69,9 @@ def generate_data_description(
         data_level=DataLevel.DERIVED,
         group=Group.OPHYS,
         investigators=[
-            Person(name="Saskia de Vries"),
-            Person(name="Jerome Lecoq"),
-            Person(name="Michael Buice"),
+            Person(name="Saskia de Vries", registry=Registry.ORCID, registry_identifier="0000-0002-3704-3499"),
+            Person(name="Jerome Lecoq", registry=Registry.ORCID, registry_identifier="0000-0002-0131-0938"),
+            Person(name="Michael Buice", registry=Registry.ORCID, registry_identifier="0000-0002-2196-1498"),
         ],
         project_name="Allen Brain Observatory - Visual Coding Ophys",
         modalities=get_modalities(nwbfile),

@@ -8,6 +8,7 @@ from pynwb import NWBFile
 from aind_data_schema_models.organizations import Organization
 from aind_data_schema_models.data_name_patterns import DataLevel, Group
 from aind_data_schema_models.licenses import License
+from aind_data_schema_models.registries import Registry
 from aind_data_schema.components.identifiers import Person
 from aind_data_schema.core.data_description import Funding, DataDescription
 
@@ -58,9 +59,9 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
         data_level=DataLevel.DERIVED,
         group=Group.EPHYS,
         investigators=[
-            Person(name="Josh Siegle"),
-            Person(name="Xiaoxuan Jia"),
-            Person(name="Shawn Olsen"),
+            Person(name="Josh Siegle", registry=Registry.ORCID, registry_identifier="0000-0002-7736-4844"),
+            Person(name="Xiaoxuan Jia", registry=Registry.ORCID, registry_identifier="0000-0001-5484-9331"),
+            Person(name="Shawn Olsen", registry=Registry.ORCID, registry_identifier="0000-0002-9568-7057"),
         ],
         project_name="Allen Brain Observatory - Visual Coding Neuropixels",
         modalities=get_modalities(nwbfile),
