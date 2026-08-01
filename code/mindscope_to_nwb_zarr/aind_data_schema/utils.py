@@ -408,6 +408,9 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
         "image_name": None,
         "image_set": None,
         "stimulus_name": None,
+        # Visual Coding ophys stores its single "epochs" table with a stimulus_type
+        # column (the ordered list of stimuli in the session); keep it as a parameter.
+        "stimulus_type": None,
         "stimulus_block": None,
         "color": None,
         "opacity": None,
@@ -431,19 +434,36 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
             if param_unit is not None:
                 parameters.update({f"{param_key}_unit": param_unit})
 
+    # The stimulus template names come from the 'stimulus_name' column when present
+    # (ephys/behavior presentation tables). The Visual Coding ophys "epochs" table has
+    # no such column, so there are no per-presentation template names.
+    stimulus_template_name = (
+        intervals_table['stimulus_name'].unique().tolist()
+        if 'stimulus_name' in intervals_table.columns else []
+    )
     visual_stimulation = VisualStimulation(
         stimulus_name=table_key,
         stimulus_parameters=parameters,
-        stimulus_template_name=intervals_table['stimulus_name'].unique().tolist(),
+        stimulus_template_name=stimulus_template_name,
         notes=None,
     )
     return visual_stimulation
 
 
-def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, intervals_table: pd.DataFrame,
-                                         nwbfile: NWBFile, session_info: pd.Series = None,
-                                         session_start_time: datetime = None) -> StimulusEpoch:
-    """Convert intervals table to a StimulusEpoch object.
+def convert_intervals_to_visual_stimulus_epoch(stimulus_name: str, table_key: str, intervals_table: pd.DataFrame,
+                                               nwbfile: NWBFile, session_info: pd.Series = None,
+                                               session_start_time: datetime = None,
+                                               active_devices: list = None,
+                                               extra_parameters: dict = None,
+                                               stimulus_template_name: list = None,
+                                               notes: str = None) -> StimulusEpoch:
+    """Build a single visual ``StimulusEpoch`` from one stimulus-presentation intervals table.
+
+    The epoch's modality is always ``StimulusModality.VISUAL`` and its parameters are
+    extracted as a ``VisualStimulation`` (see ``get_visual_stimulation_parameters``), so
+    this helper is only for visual stimulus tables. Non-visual stimulation (e.g.
+    optogenetic tagging in the Neuropixels datasets) is built as its own epoch by the
+    caller and does not go through here.
 
     Parameters
     ----------
@@ -462,6 +482,20 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
         are seconds relative to the session start; defaults to
         ``nwbfile.session_start_time``. Pass a corrected value when the file's
         session_start_time is a packaging date rather than the real acquisition time.
+    active_devices : list, optional
+        Device names to record as active for this epoch (must match instrument
+        components). Defaults to ``["None"]`` when not provided; the Visual Coding
+        ophys pipeline passes the stimulus monitor (e.g. ``["Stimulus Screen"]``).
+    extra_parameters : dict, optional
+        Additional stimulus parameters to merge into the ``VisualStimulation``
+        ``stimulus_parameters`` (e.g. per-block metadata not present as columns of
+        ``intervals_table``). Keys here take precedence over extracted ones.
+    stimulus_template_name : list, optional
+        Overrides the ``VisualStimulation`` ``stimulus_template_name`` (e.g. the
+        referenced template for a natural-scenes/movie block). When ``None``, the value
+        extracted from ``intervals_table`` is kept.
+    notes : str, optional
+        Free-text notes for the epoch (e.g. the stimulus description from the NWB).
 
     Returns
     -------
@@ -470,6 +504,18 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
     """
     if session_start_time is None:
         session_start_time = nwbfile.session_start_time
+    if active_devices is None:
+        active_devices = ["None"]
+
+    visual_stimulation = get_visual_stimulation_parameters(table_key, intervals_table).model_dump()
+    if stimulus_template_name is not None:
+        visual_stimulation['stimulus_template_name'] = stimulus_template_name
+    if extra_parameters:
+        visual_stimulation['stimulus_parameters'] = {
+            **visual_stimulation['stimulus_parameters'],
+            **extra_parameters,
+        }
+
     return StimulusEpoch(
         stimulus_start_time=timedelta(seconds=intervals_table['start_time'].values[0]) + session_start_time,
         stimulus_end_time=timedelta(seconds=intervals_table['stop_time'].values[-1]) + session_start_time,
@@ -482,11 +528,11 @@ def convert_intervals_to_stimulus_epochs(stimulus_name: str, table_key: str, int
                 name="PsychoPy",
                 version=None,
             ),  # TODO - from whitepaper, add version if available @Saskia
-            parameters=get_visual_stimulation_parameters(table_key, intervals_table).model_dump(),
+            parameters=visual_stimulation,
         ),
         stimulus_modalities=[StimulusModality.VISUAL],
-        notes=None,
-        active_devices=["None"],
+        notes=notes,
+        active_devices=active_devices,
         performance_metrics=None,  # TODO - see if these are accessible anywhere?
         training_protocol_name=session_info["session_type"] if session_info is not None else None,  # e.g., "TRAINING_0_gratings_autorewards_15min"
         curriculum_status=get_curriculum_status(session_info) if session_info is not None else None,

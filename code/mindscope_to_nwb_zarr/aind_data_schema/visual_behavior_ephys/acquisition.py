@@ -36,7 +36,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_individual_reward_volume,
     get_probe_configs,
     get_optostimulation_parameters,
-    convert_intervals_to_stimulus_epochs,
+    convert_intervals_to_visual_stimulus_epoch,
     EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
 
@@ -67,7 +67,7 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
         elif table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations":
             active_intervals = intervals_table.to_dataframe().query('active == True')
             stimulus_name = "Change detection - Active"
-            stim_epoch = convert_intervals_to_stimulus_epochs(
+            stim_epoch = convert_intervals_to_visual_stimulus_epoch(
                 stimulus_name=stimulus_name,
                 table_key=table_key,
                 intervals_table=active_intervals,
@@ -79,7 +79,7 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
             passive_intervals = intervals_table.to_dataframe().query('active == False')
             if len(passive_intervals) > 0:
                 stimulus_name = "Change detection - Passive replay"
-                stim_epoch = convert_intervals_to_stimulus_epochs(
+                stim_epoch = convert_intervals_to_visual_stimulus_epoch(
                     stimulus_name=stimulus_name,
                     table_key=table_key,
                     intervals_table=passive_intervals,
@@ -90,7 +90,7 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
         else:
             # Convert table key to formatted stimulus name
             stimulus_name = table_key.replace('_', ' ').title()
-            stim_epoch = convert_intervals_to_stimulus_epochs(
+            stim_epoch = convert_intervals_to_visual_stimulus_epoch(
                 stimulus_name=stimulus_name,
                 table_key=table_key,
                 intervals_table=intervals_table.to_dataframe(),

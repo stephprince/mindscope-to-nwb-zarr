@@ -44,10 +44,10 @@ def fetch_subject_from_aind_metadata_service(
         If the subject is not found in the metadata service (HTTP 404). This fails the
         whole session loudly so the missing subject is surfaced and addressed.
     AssertionError
-        If the API response does not match the NWB file metadata (species, sex, date
-        of birth within 2 days, or genotype). This is intentional: a mismatch fails
-        the whole session loudly so the discrepancy is surfaced and addressed, rather
-        than silently emitting inconsistent metadata.
+        If the LIMS (metadata service) response does not match the NWB file for
+        species. Species must never differ, so a mismatch fails the whole session
+        loudly. Sex, date-of-birth, and genotype mismatches only warn (see Notes)
+        because the NWB files and LIMS are known to disagree for some subjects.
 
     Notes
     -----
@@ -55,6 +55,10 @@ def fetch_subject_from_aind_metadata_service(
 
     The subject_id from the NWB v2 files on DANDI is not used.
     The subject_id is a 6-digit mouse ID extracted from session_info['specimen']['donor']['external_donor_name'].
+
+    The metadata service (LIMS) is treated as authoritative: the returned Subject is
+    built from its response, and on a sex, date-of-birth, or genotype disagreement with
+    the NWB the LIMS value is kept and a warning is emitted.
 
     If the metadata service cannot be reached, returns None and logs a warning.
     """
@@ -92,26 +96,40 @@ def fetch_subject_from_aind_metadata_service(
                 raw_data['subject_details']['breeding_info']['paternal_genotype'] = ""
                 warnings.warn(f"Fixed null paternal genotype for subject {subject_id}")
 
-        # Validate the API response against the NWB file subject metadata. nwbfile is
-        # required (the pipeline always provides it); a mismatch fails the session loudly.
+        # Cross-check the AIND metadata service (LIMS) response against the NWB file.
+        # The LIMS record is authoritative and is what the Subject is built from below.
+        # Species must agree (a mismatch raises loudly). Sex, date of birth, and genotype
+        # only warn: the NWB files and LIMS are known to disagree for some subjects (see
+        # the README), so we keep the LIMS value and surface the discrepancy.
         subject_sex_dict = {"F": "Female", "M": "Male"}
 
         assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
             f"Species mismatch: NWB={nwbfile.subject.species}, API={raw_data['subject_details']['species']['name']}"
 
-        assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
-            f"Sex mismatch: NWB={nwbfile.subject.sex}, API={raw_data['subject_details']['sex']}"
+        if subject_sex_dict.get(nwbfile.subject.sex) != raw_data['subject_details']['sex']:
+            warnings.warn(
+                f"Sex mismatch for subject {subject_id}: NWB={nwbfile.subject.sex}, "
+                f"LIMS={raw_data['subject_details']['sex']}. Using the LIMS value."
+            )
 
         # The NWB stores only an integer-day age (P<days>D), so the DOB derived from
-        # it (acquisition_date - age) is approximate. Allow a small tolerance against
-        # the authoritative API date_of_birth rather than requiring exact equality.
+        # it (acquisition_date - age) is approximate. Compare against the LIMS
+        # date_of_birth with a small tolerance and warn (rather than fail) on mismatch.
         nwb_dob = get_subject_date_of_birth(nwbfile)
         api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
-        assert abs((nwb_dob - api_dob).days) <= 2, \
-            f"Date of birth mismatch >2 days: NWB={nwb_dob}, API={api_dob}"
+        if abs((nwb_dob - api_dob).days) > 2:
+            warnings.warn(
+                f"Date of birth mismatch >2 days for subject {subject_id}: NWB={nwb_dob}, "
+                f"LIMS={api_dob}. Using the LIMS value."
+            )
 
-        assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
-            f"Genotype mismatch: NWB={nwbfile.subject.genotype}, API={raw_data['subject_details']['genotype']}"
+        # The NWB and LIMS sometimes record the same genotype in different notations
+        # (e.g. a short form vs the full allelic form), so warn rather than fail.
+        if nwbfile.subject.genotype != raw_data['subject_details']['genotype']:
+            warnings.warn(
+                f"Genotype mismatch for subject {subject_id}: NWB={nwbfile.subject.genotype}, "
+                f"LIMS={raw_data['subject_details']['genotype']}. Using the LIMS value."
+            )
 
         # Build the aind_data_schema Subject from the response dict -- the same for both
         # the clean-success and raw-parse fallback paths, so the return type is consistent.

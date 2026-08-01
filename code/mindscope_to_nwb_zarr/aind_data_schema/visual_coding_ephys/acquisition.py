@@ -33,7 +33,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     probe_letter_from_device_name,
     get_optostimulation_parameters,
     get_ethics_review_id,
-    convert_intervals_to_stimulus_epochs,
+    convert_intervals_to_visual_stimulus_epoch,
     EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
@@ -133,7 +133,7 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series,
         stimulus_name = table_key.replace('_', ' ').title()
 
         intervals_table_filtered = intervals_table.to_dataframe()
-        stim_epoch = convert_intervals_to_stimulus_epochs(
+        stim_epoch = convert_intervals_to_visual_stimulus_epoch(
             stimulus_name=stimulus_name,
             table_key=table_key,
             intervals_table=intervals_table_filtered,

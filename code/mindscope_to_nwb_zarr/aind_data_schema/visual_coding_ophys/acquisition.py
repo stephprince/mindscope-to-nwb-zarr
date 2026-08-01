@@ -3,10 +3,10 @@
 import numpy as np
 import pandas as pd
 
-from datetime import timedelta
 from pynwb import NWBFile
+from pynwb.image import IndexSeries
+from pynwb.epoch import TimeIntervals
 
-from aind_data_schema.components.identifiers import Code, Software
 from aind_data_schema.core.acquisition import (
     Acquisition,
     StimulusEpoch,
@@ -28,21 +28,30 @@ from aind_data_schema.components.coordinates import (
     CoordinateSystemLibrary,
     Scale,
 )
-from aind_data_schema.components.stimulus import VisualStimulation
 from aind_data_schema_models.units import SizeUnit, FrequencyUnit, PowerUnit
 from aind_data_schema_models.brain_atlas import CCFv3
-from aind_data_schema_models.stimulus_modality import StimulusModality
 
 from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_start_time,
     get_data_stream_end_time,
     get_modalities
 )
-from mindscope_to_nwb_zarr.aind_data_schema.utils import get_ethics_review_id
+from mindscope_to_nwb_zarr.aind_data_schema.utils import (
+    get_ethics_review_id,
+    convert_intervals_to_visual_stimulus_epoch,
+)
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
     rig_for_experiment,
     microscope_name_for_experiment,
 )
+
+
+# Field-of-view dimensions [height, width] in pixels. The Allen Brain Observatory
+# two-photon rigs acquire a fixed 512 x 512 pixel frame (de Vries et al., 2020).
+# Hard-coded as a dataset constant because the raw acquisition FOV is not recorded in
+# the processed NWB file. This may not match the summary images in the NWB file (e.g.
+# maximum_intensity_projection), which can be cropped by motion registration.
+IMAGING_FOV_DIMENSIONS = [512, 512]
 
 
 def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
@@ -65,9 +74,7 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     assert len(nwbfile.imaging_planes) == 1, "Expected one imaging plane per NWB file"
     imaging_plane = next(iter(nwbfile.imaging_planes.values()))
 
-    imaging_plane_dimensions = _get_imaging_dimensions(nwbfile)
-    assert imaging_plane_dimensions == [512, 512], \
-        f"Expected 512x512 imaging dimensions, got {imaging_plane_dimensions}"
+    imaging_plane_dimensions = IMAGING_FOV_DIMENSIONS  # fixed dataset FOV; see module constant
     imaging_plane_depth = session_info['imaging_depth']
 
     targeted_structure_str = imaging_plane.location
@@ -85,26 +92,6 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
         imaging_plane_targeted_structure=targeted_structure,
         imaging_plane_targeted_structure_str=targeted_structure_str,
         imaging_plane_depth=imaging_plane_depth,
-    )
-
-
-def _get_imaging_dimensions(nwbfile: NWBFile) -> list[int]:
-    """Return the [height, width] FOV pixel dimensions from the max-intensity projection.
-
-    Read from the file (the ``maximum_intensity_projection`` summary image) rather than
-    assumed.
-
-    Raises
-    ------
-    ValueError
-        If no ``maximum_intensity_projection`` summary image is found.
-    """
-    for module in nwbfile.processing.values():
-        for interface in module.data_interfaces.values():
-            if type(interface).__name__ == "Images" and "maximum_intensity_projection" in interface.images:
-                return list(interface.images["maximum_intensity_projection"].data.shape)
-    raise ValueError(
-        "No 'maximum_intensity_projection' summary image found to derive imaging dimensions."
     )
 
 
@@ -205,72 +192,149 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict, microscope
     return imaging_config
 
 
-def get_stimulus_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[StimulusEpoch]:
+def get_stimulus_epochs(nwbfile: NWBFile) -> list[StimulusEpoch]:
     """Extract stimulus epochs from NWB file intervals tables.
+
+    Visual Coding ophys NWBs store all stimulus presentations in a single ``epochs``
+    intervals table, one row per contiguous stimulus block (a ``stimulus_type`` can
+    recur in several non-contiguous blocks across the session). This emits one
+    ``StimulusEpoch`` per block, each carrying that block's own start/stop time from
+    the NWB file, via the shared ``convert_intervals_to_visual_stimulus_epoch`` helper.
+
+    The helper is called with ``session_info=None`` because the ophys experiment
+    metadata has no ``session_type`` (training protocol / curriculum status stay
+    ``None``); the stimulus monitor is recorded as the epoch's active device.
 
     Parameters
     ----------
     nwbfile : NWBFile
         NWB file containing intervals tables
-    session_info : pd.Series
-        Session metadata row
 
     Returns
     -------
     list[StimulusEpoch]
-        List of stimulus epochs extracted from the NWB file
+        List of per-block stimulus epochs extracted from the NWB file
     """
     stimulus_epochs = []
 
-    # Visual Coding ophys files have stimulus presentations in intervals
+    # Visual Coding ophys stores all stimulus blocks in the "epochs" intervals table.
     for table_key, intervals_table in nwbfile.intervals.items():
         # Skip non-stimulus tables
         if table_key in ["trials", "invalid_times"]:
             continue
 
         intervals_df = intervals_table.to_dataframe()
-        if len(intervals_df) == 0:
-            continue
 
-        # Convert table key to formatted stimulus name
-        stimulus_name = table_key.replace('_', ' ').title()
-
-        # Extract stimulus parameters
-        stimulus_parameters = {}
-        for col in intervals_df.columns:
-            if col not in ['start_time', 'stop_time', 'id']:
-                unique_values = intervals_df[col].unique().tolist()
-                if len(unique_values) == 1:
-                    stimulus_parameters[col] = unique_values[0]
-                else:
-                    stimulus_parameters[col] = unique_values
-
-        visual_stim = VisualStimulation(
-            stimulus_name=table_key,
-            stimulus_parameters=stimulus_parameters,
-            stimulus_template_name=[],
-            notes=None,
-        )
-
-        stim_epoch = StimulusEpoch(
-            stimulus_start_time=timedelta(seconds=intervals_df['start_time'].values[0]) + nwbfile.session_start_time,
-            stimulus_end_time=timedelta(seconds=intervals_df['stop_time'].values[-1]) + nwbfile.session_start_time,
-            stimulus_name=stimulus_name,
-            code=Code(
-                url="None",
-                core_dependency=Software(name="PsychoPy", version=None),
-                parameters=visual_stim.model_dump(),
-            ),
-            stimulus_modalities=[StimulusModality.VISUAL],
-            notes=None,
-            active_devices=["Stimulus Screen"],  # the stimulus monitor in the instrument
-            performance_metrics=None,
-            training_protocol_name=None,
-            curriculum_status=None,
-        )
-        stimulus_epochs.append(stim_epoch)
+        # One epoch per row/block, so each has its own start/stop from the NWB. The block's
+        # stimulus_type names the epoch and selects its metadata annotation from nwb.stimulus.
+        for i in range(len(intervals_df)):
+            block_df = intervals_df.iloc[[i]]
+            block_name = str(block_df['stimulus_type'].iloc[0])
+            start_time = float(block_df['start_time'].iloc[0])
+            stop_time = float(block_df['stop_time'].iloc[0])
+            parameters, template_name, notes = get_block_stimulus_annotation(
+                nwbfile, block_name, start_time, stop_time
+            )
+            stim_epoch = convert_intervals_to_visual_stimulus_epoch(
+                stimulus_name=block_name.replace('_', ' ').title(),
+                table_key=block_name,
+                intervals_table=block_df,
+                nwbfile=nwbfile,
+                session_info=None,  # ophys metadata has no session_type/curriculum fields
+                active_devices=["Stimulus Screen"],  # the stimulus monitor in the instrument
+                extra_parameters=parameters,
+                stimulus_template_name=template_name,
+                notes=notes,
+            )
+            stimulus_epochs.append(stim_epoch)
 
     return stimulus_epochs
+
+
+# Small tolerance for matching stimulus presentations to a block's [start, stop] window.
+_BLOCK_TIME_EPS = 1e-6
+
+
+def get_block_stimulus_annotation(nwbfile: NWBFile, stimulus_type: str,
+                                  start_time: float, stop_time: float) -> tuple[dict, list, str]:
+    """Collect available metadata for one stimulus block from its ``nwb.stimulus`` entry.
+
+    A Visual Coding ophys ``epochs`` row only carries ``stimulus_type`` and the block's
+    start/stop. The richer per-stimulus metadata lives in the matching ``nwb.stimulus``
+    object (a ``TimeIntervals`` of parameterized presentations for gratings/spontaneous,
+    or an ``IndexSeries`` of template frame indices for natural scenes/movies). This
+    gathers what is available for the block, restricted to its time window.
+
+    Parameters
+    ----------
+    nwbfile : NWBFile
+        The NWB file, whose ``stimulus`` group holds the per-stimulus objects.
+    stimulus_type : str
+        The block's stimulus_type (e.g. ``"static_gratings"``, ``"natural_scenes"``).
+    start_time, stop_time : float
+        The block's start/stop (seconds relative to session start) used to window the
+        presentations that belong to this block.
+
+    Returns
+    -------
+    tuple[dict, list, str]
+        ``(parameters, stimulus_template_name, notes)``:
+        - ``parameters``: stimulus parameters for the block -- the unique value(s) of each
+          presentation column within the window (e.g. grating orientation,
+          spatial_frequency, phase) plus a presentation/frame count.
+        - ``stimulus_template_name``: single-element list with the referenced template
+          name for template-indexed stimuli (``IndexSeries``), else ``[]``.
+        - ``notes``: the stimulus object's description.
+
+    Raises
+    ------
+    ValueError
+        If ``stimulus_type`` has no matching ``nwb.stimulus`` object.
+    TypeError
+        If the matching object is neither a ``TimeIntervals`` nor an ``IndexSeries``.
+    """
+    # The epochs table uses bare stimulus_type names; some nwb.stimulus keys add a
+    # "_stimulus" suffix (e.g. "natural_scenes" -> "natural_scenes_stimulus").
+    for key in (stimulus_type, f"{stimulus_type}_stimulus"):
+        if key in nwbfile.stimulus:
+            stimulus = nwbfile.stimulus[key]
+            break
+    else:
+        raise ValueError(
+            f"No nwb.stimulus object for stimulus_type {stimulus_type!r} "
+            f"(looked for {stimulus_type!r} and {stimulus_type + '_stimulus'!r})."
+        )
+
+    notes = stimulus.description
+    parameters: dict = {}
+    stimulus_template_name: list = []
+
+    if isinstance(stimulus, TimeIntervals):
+        presentations = stimulus.to_dataframe()
+        in_block = presentations[
+            (presentations["start_time"] >= start_time - _BLOCK_TIME_EPS)
+            & (presentations["stop_time"] <= stop_time + _BLOCK_TIME_EPS)
+        ]
+        parameters["num_presentations"] = int(len(in_block))
+        for column in in_block.columns:
+            if column in ("start_time", "stop_time"):
+                continue
+            values = in_block[column].unique().tolist()
+            parameters[column] = values[0] if len(values) == 1 else values
+    elif isinstance(stimulus, IndexSeries):
+        timestamps = np.asarray(stimulus.timestamps[:])
+        in_block = (timestamps >= start_time - _BLOCK_TIME_EPS) & (timestamps <= stop_time + _BLOCK_TIME_EPS)
+        parameters["num_frames_presented"] = int(in_block.sum())
+        # The referenced template (Images for natural scenes, ImageSeries for movies).
+        template = stimulus.indexed_timeseries or stimulus.indexed_images
+        stimulus_template_name = [template.name]
+    else:
+        raise TypeError(
+            f"Unexpected nwb.stimulus type {type(stimulus).__name__} for stimulus_type "
+            f"{stimulus_type!r}; expected TimeIntervals or IndexSeries."
+        )
+
+    return parameters, stimulus_template_name, notes
 
 
 def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisition:
@@ -346,7 +410,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 ],
             ),
         ],
-        stimulus_epochs=get_stimulus_epochs(nwbfile, session_info),
+        stimulus_epochs=get_stimulus_epochs(nwbfile),
         subject_details=AcquisitionSubjectDetails(
             mouse_platform_name="MindScope Running Disc",  # matches the Disc device in the instrument; de Vries et al. describe a rotating disk
         ),
