@@ -2,6 +2,7 @@
 /data/
 /results/
 /scratch/
+/code/scratch/
 metadata/metadata.yml
 
 # Project data
