@@ -144,7 +144,7 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
     data_description = generate_data_description(nwbfile, session_info)
     subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
-    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
+    procedures = fetch_procedures_from_aind_metadata_service(session_info)
     # instrument is None when the session's rig cannot be resolved (older
     # experiments with no ophys_session_id in storage_directory) or the rig has no
     # instrument definition. Only the instrument file is then omitted (via the

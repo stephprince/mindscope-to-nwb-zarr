@@ -40,6 +40,9 @@ def fetch_subject_from_aind_metadata_service(
 
     Raises
     ------
+    RuntimeError
+        If the subject is not found in the metadata service (HTTP 404). This fails the
+        whole session loudly so the missing subject is surfaced and addressed.
     AssertionError
         If the API response does not match the NWB file metadata (species, sex, date
         of birth within 2 days, or genotype). This is intentional: a mismatch fails
@@ -50,7 +53,8 @@ def fetch_subject_from_aind_metadata_service(
     -----
     The API endpoint used is GET /api/v2/subject/{subject_id}
 
-    The subject_id is extracted from session_info['specimen']['donor']['external_donor_name'].
+    The subject_id from the NWB v2 files on DANDI is not used.
+    The subject_id is a 6-digit mouse ID extracted from session_info['specimen']['donor']['external_donor_name'].
 
     If the metadata service cannot be reached, returns None and logs a warning.
     """
@@ -64,16 +68,18 @@ def fetch_subject_from_aind_metadata_service(
     with aind_metadata_service_client.ApiClient(configuration) as api_client:
         api_instance = aind_metadata_service_client.DefaultApi(api_client)
 
-        raw_data = None
         try:
             subject_response = api_instance.get_subject(subject_id=subject_id)
             raw_data = subject_response.model_dump() if hasattr(subject_response, 'model_dump') else subject_response
-            subject = subject_response
         except Urllib3HTTPError as e:
-            warnings.warn(f"Warning: Could not connect to AIND metadata service at {api_host}: {e}")
+            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
             return None
         except ApiException as e:
-            print(f"Warning: Validation error for subject {subject_id}, attempting to parse raw response")
+            if e.status == 404:
+                raise RuntimeError(
+                    f"Subject {subject_id} not found in the AIND metadata service (HTTP 404)."
+                ) from e
+            warnings.warn(f"Validation error for subject {subject_id}, attempting to parse raw response")
 
             response = api_instance.get_subject_without_preload_content(subject_id=subject_id)
             raw_data = json.loads(response.data.decode('utf-8'))
@@ -86,27 +92,27 @@ def fetch_subject_from_aind_metadata_service(
                 raw_data['subject_details']['breeding_info']['paternal_genotype'] = ""
                 warnings.warn(f"Fixed null paternal genotype for subject {subject_id}")
 
-            subject = Subject(**raw_data)
+        # Validate the API response against the NWB file subject metadata. nwbfile is
+        # required (the pipeline always provides it); a mismatch fails the session loudly.
+        subject_sex_dict = {"F": "Female", "M": "Male"}
 
-        # Validate API response against NWB file
-        if nwbfile is not None and raw_data is not None:
-            subject_sex_dict = {"F": "Female", "M": "Male"}
+        assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
+            f"Species mismatch: NWB={nwbfile.subject.species}, API={raw_data['subject_details']['species']['name']}"
 
-            assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
-                f"Species mismatch: NWB={nwbfile.subject.species}, API={raw_data['subject_details']['species']['name']}"
+        assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
+            f"Sex mismatch: NWB={nwbfile.subject.sex}, API={raw_data['subject_details']['sex']}"
 
-            assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
-                f"Sex mismatch: NWB={nwbfile.subject.sex}, API={raw_data['subject_details']['sex']}"
+        # The NWB stores only an integer-day age (P<days>D), so the DOB derived from
+        # it (acquisition_date - age) is approximate. Allow a small tolerance against
+        # the authoritative API date_of_birth rather than requiring exact equality.
+        nwb_dob = get_subject_date_of_birth(nwbfile)
+        api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
+        assert abs((nwb_dob - api_dob).days) <= 2, \
+            f"Date of birth mismatch >2 days: NWB={nwb_dob}, API={api_dob}"
 
-            # The NWB stores only an integer-day age (P<days>D), so the DOB derived from
-            # it (acquisition_date - age) is approximate. Allow a small tolerance against
-            # the authoritative API date_of_birth rather than requiring exact equality.
-            nwb_dob = get_subject_date_of_birth(nwbfile)
-            api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
-            assert abs((nwb_dob - api_dob).days) <= 2, \
-                f"Date of birth mismatch >2 days: NWB={nwb_dob}, API={api_dob}"
+        assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
+            f"Genotype mismatch: NWB={nwbfile.subject.genotype}, API={raw_data['subject_details']['genotype']}"
 
-            assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
-                f"Genotype mismatch: NWB={nwbfile.subject.genotype}, API={raw_data['subject_details']['genotype']}"
-
-        return subject
+        # Build the aind_data_schema Subject from the response dict -- the same for both
+        # the clean-success and raw-parse fallback paths, so the return type is consistent.
+        return Subject(**raw_data)
