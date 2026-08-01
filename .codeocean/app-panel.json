@@ -14,7 +14,7 @@
 		{
 			"id": "CewKNE6rJidobUVN",
 			"name": "Generate AIND metadata and not Zarr files",
-			"param_name": "metadata",
+			"param_name": "metadata_only",
 			"type": "list",
 			"value_type": "boolean",
 			"default_value": "False",
