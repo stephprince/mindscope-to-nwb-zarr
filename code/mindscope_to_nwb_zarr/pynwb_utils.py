@@ -85,7 +85,11 @@ def get_modalities(nwbfile: NWBFile) -> list[Modality]:
 
     if nwbfile.imaging_planes and len(nwbfile.imaging_planes) > 0:
         modalities.add(Modality.POPHYS)
-    
+
+    # Behavior videos (eye + body cameras) were recorded for every Allen Brain
+    # Observatory experiment, even when that camera data is not packaged in the NWB.
+    modalities.add(Modality.BEHAVIOR_VIDEOS)
+
     return list(modalities)
 
 

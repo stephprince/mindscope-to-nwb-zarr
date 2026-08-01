@@ -308,6 +308,9 @@ def build_instrument(rig_name: str, version: str) -> Instrument:
     spec = RIG_SPECS[rig_name]
     modification_date = spec["original_date"] if version == "original" else spec["final_date"]
 
+    # Laser, Objective, Detector, then (after the monitor) Disc, cameras, dichroic.
+    shared_components = _build_shared_components()
+
     return Instrument(
         location="Unknown",
         instrument_id=rig_name,
@@ -318,9 +321,9 @@ def build_instrument(rig_name: str, version: str) -> Instrument:
         temperature_control=None,
         components=[
             Microscope(name=RIG_MICROSCOPE_NAMES[rig_name], **spec["microscope"]),
-            *_build_shared_components()[:3],  # Laser, Objective, Detector
+            *shared_components[:3],  # Laser, Objective, Detector
             _build_monitor(version),
-            *_build_shared_components()[3:],  # Disc, cameras, dichroic
+            *shared_components[3:],  # Disc, cameras, dichroic
         ],
     )
 

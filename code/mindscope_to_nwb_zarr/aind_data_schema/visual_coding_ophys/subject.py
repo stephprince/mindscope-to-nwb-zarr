@@ -36,7 +36,15 @@ def fetch_subject_from_aind_metadata_service(
     Returns
     -------
     Subject or None
-        Subject object if found, None otherwise
+        Subject object if found; None if the metadata service is unreachable.
+
+    Raises
+    ------
+    AssertionError
+        If the API response does not match the NWB file metadata (species, sex, date
+        of birth within 2 days, or genotype). This is intentional: a mismatch fails
+        the whole session loudly so the discrepancy is surfaced and addressed, rather
+        than silently emitting inconsistent metadata.
 
     Notes
     -----
@@ -44,10 +52,7 @@ def fetch_subject_from_aind_metadata_service(
 
     The subject_id is extracted from session_info['specimen']['donor']['external_donor_name'].
 
-    This function validates that the API response matches the NWB file metadata
-    (species, sex, date of birth, genotype).
-
-    If the API call fails or validation fails, returns None and logs a warning.
+    If the metadata service cannot be reached, returns None and logs a warning.
     """
     api_host = api_host if api_host else "http://aind-metadata-service"
 
