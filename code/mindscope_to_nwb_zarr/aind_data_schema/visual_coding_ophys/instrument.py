@@ -17,15 +17,13 @@ Everything else is shared, so the full set of instruments is built from a small
 specification table rather than duplicated by hand.
 
 Source: ``cam2p_{1..5}_{original,final}_instrument.py`` provided by the Allen
-Institute (in the ``aind_metadata`` drop). This module reproduces those files
-exactly; see ``scripts``-style verification in the project notes.
+Institute.
 
 Selection of original vs. final for a given session is by acquisition date: a
 session acquired on or after a rig's ``final_date`` uses the "final"
 configuration, otherwise "original".
 """
 
-import re
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -352,105 +350,114 @@ def get_instrument_for_session(rig_name: str, acquisition_date: date) -> Instrum
 
 
 # ---------------------------------------------------------------------------
-# Session -> rig resolution
+# Experiment -> rig resolution
 # ---------------------------------------------------------------------------
 #
-# The rig used for a session is looked up from the Allen Institute mapping CSV
-# (ophys_session_id -> rig_name). The conversion pipeline iterates ophys
-# *experiments*, so we first recover the ophys_session_id for an experiment from
-# its ``storage_directory``, which for the newer LIMS prod versions embeds an
-# ``ophys_session_<id>`` path component, e.g.::
-#
-#     /external/neuralcoding/prod38/specimen_639389525/ophys_session_653077024/ophys_experiment_653123586/
-#
-# Older experiments store only ``ophys_experiment_<id>`` (no session id), and
-# there is no local/public way to recover their ophys_session_id, so those
-# experiments cannot be assigned a rig and are skipped (return ``None``).
+# The rig used for a session is looked up from the Allen Institute mapping CSV,
+# keyed by ``ophys_experiment_id`` -- the conversion pipeline's iteration key
+# (``session_info['id']``, equal to ``nwbfile.session_id``). Keying by experiment
+# id resolves every experiment present in the CSV. If an experiment is absent from
+# the CSV or has no rig recorded, ``rig_for_experiment`` returns ``None`` and
+# ``generate_instrument`` raises -- every experiment is expected to resolve.
 
-# Mapping CSV bundled in the repo (also holds screen centers, added later).
-_DEFAULT_RIG_CSV = Path(__file__).resolve().parents[3] / "reference" / "ophys_session_screen_centers.csv"
-
-_OPHYS_SESSION_RE = re.compile(r"ophys_session_(\d+)")
-
-
-def extract_ophys_session_id(storage_directory) -> int | None:
-    """Recover the ophys_session_id from an experiment's ``storage_directory``.
-
-    Returns ``None`` if the path has no ``ophys_session_<id>`` component (older
-    LIMS prod versions), which means the session id is not recoverable locally.
-    """
-    if not storage_directory or not isinstance(storage_directory, str):
-        return None
-    match = _OPHYS_SESSION_RE.search(storage_directory)
-    return int(match.group(1)) if match else None
+# Mapping CSV bundled in the repo (also holds ophys_session_id and screen centers).
+_DEFAULT_RIG_CSV = Path(__file__).resolve().parents[3] / "reference" / "ophys_session_experiment_screen_centers.csv"
 
 
 @lru_cache(maxsize=None)
-def _load_session_to_rig(csv_path: str) -> dict:
-    """Load the ophys_session_id -> rig_name mapping from the CSV (cached)."""
-    df = pd.read_csv(csv_path, usecols=["ophys_session_id", "rig_name"])
-    df = df.dropna(subset=["ophys_session_id"])
-    return dict(zip(df["ophys_session_id"].astype(int), df["rig_name"]))
+def _load_experiment_to_rig() -> dict:
+    """Load the ophys_experiment_id -> rig_name mapping from the CSV (cached)."""
+    df = pd.read_csv(_DEFAULT_RIG_CSV, usecols=["ophys_experiment_id", "rig_name"])
+    df = df.dropna(subset=["ophys_experiment_id", "rig_name"])
+    return dict(zip(df["ophys_experiment_id"].astype(int), df["rig_name"]))
 
 
-def rig_for_experiment(session_info, rig_csv_path=None) -> str | None:
-    """Look up the rig_name for an ophys experiment, or ``None`` if unresolved.
+def rig_for_experiment(session_info) -> str:
+    """Look up the rig_name (e.g. "CAM2P.1") for an ophys experiment.
 
-    Parameters
-    ----------
-    session_info : Mapping
-        A row of the ophys experiment metadata (e.g. a ``pandas.Series``); must
-        provide ``storage_directory``.
-    rig_csv_path : str | Path, optional
-        Path to the session->rig mapping CSV. Defaults to the bundled copy.
+    ``session_info`` is a row of the ophys experiment metadata (e.g. a
+    ``pandas.Series``); it must provide ``id`` (the ophys_experiment_id). Every
+    experiment is in the CSV, so a missing one is an error rather than ``None``.
+
+    Raises
+    ------
+    ValueError
+        If the experiment has no rig in the CSV.
     """
-    session_id = extract_ophys_session_id(session_info.get("storage_directory"))
-    if session_id is None:
-        return None
-    mapping = _load_session_to_rig(str(rig_csv_path or _DEFAULT_RIG_CSV))
-    return mapping.get(session_id)
+    mapping = _load_experiment_to_rig()
+    experiment_id = int(session_info['id'])
+    if experiment_id not in mapping:
+        raise ValueError(
+            f"No rig found for ophys_experiment_id {experiment_id} in the CSV."
+        )
+    return mapping[experiment_id]
 
 
-def microscope_name_for_experiment(session_info, rig_csv_path=None) -> str | None:
+@lru_cache(maxsize=None)
+def _load_experiment_to_session_id() -> dict:
+    """Load the ophys_experiment_id -> ophys_session_id mapping from the CSV (cached)."""
+    df = pd.read_csv(_DEFAULT_RIG_CSV, usecols=["ophys_experiment_id", "ophys_session_id"])
+    df = df.dropna(subset=["ophys_experiment_id", "ophys_session_id"])
+    return dict(zip(df["ophys_experiment_id"].astype(int), df["ophys_session_id"].astype(int)))
+
+
+def ophys_session_id_for_experiment(session_info) -> int:
+    """Look up the ophys_session_id for an ophys experiment from the CSV.
+
+    Every experiment in the dataset has an ophys_session_id in the CSV, so a missing
+    one is treated as an error rather than silently omitted.
+
+    Raises
+    ------
+    ValueError
+        If the experiment has no ophys_session_id in the CSV.
+    """
+    mapping = _load_experiment_to_session_id()
+    experiment_id = int(session_info['id'])
+    if experiment_id not in mapping:
+        raise ValueError(
+            f"No ophys_session_id found for ophys_experiment_id {experiment_id} in the CSV."
+        )
+    return mapping[experiment_id]
+
+
+def microscope_name_for_experiment(session_info) -> str:
     """Resolve the microscope device name for an experiment's rig.
 
-    Looks up the internal ``CAM2P.N`` rig (see :func:`rig_for_experiment`) and maps
-    it to the microscope device name (e.g. ``"CAM2P.1" -> "Nikon 1"``) used by the
-    instrument and matched by the acquisition's ImagingConfig.device_name. Returns
-    ``None`` if the rig is unresolved or has no instrument definition.
+    Maps the rig (see :func:`rig_for_experiment`) to its microscope device name
+    (e.g. ``"CAM2P.1" -> "Nikon 1"``), matched by the acquisition's
+    ImagingConfig.device_name.
     """
-    rig_name = rig_for_experiment(session_info, rig_csv_path)
-    if rig_name is None:
-        return None
-    return RIG_MICROSCOPE_NAMES.get(rig_name)
+    return RIG_MICROSCOPE_NAMES[rig_for_experiment(session_info)]
 
 
-def generate_instrument(nwbfile, session_info, rig_csv_path=None) -> Instrument | None:
+def generate_instrument(session_info) -> Instrument:
     """Generate the AIND Instrument for an ophys experiment.
 
-    Resolves the rig from the session->rig mapping CSV (via the experiment's
-    ``storage_directory``) and selects the original/final configuration by
-    acquisition date. Returns ``None`` if the rig cannot be resolved or has no
-    instrument definition, so the caller can skip those experiments.
+    Resolves the rig from the experiment->rig mapping CSV (by ophys_experiment_id)
+    and selects the original/final configuration by acquisition date. Every
+    experiment in the dataset resolves to a rig with an instrument definition, so an
+    unresolved rig is treated as an error rather than silently skipped.
 
     Parameters
     ----------
-    nwbfile : NWBFile
-        The opened NWB file (kept for interface symmetry with the other
-        ``generate_*`` functions; the acquisition date is taken from
-        ``session_info``).
     session_info : pd.Series
         Session metadata row from the ophys experiment metadata.
-    rig_csv_path : str | Path, optional
-        Path to the session->rig mapping CSV. Defaults to the bundled copy.
+
+    Raises
+    ------
+    ValueError
+        If the experiment's rig is not in the CSV, or resolves to a rig with no
+        instrument definition. This fails the session loudly so the gap is surfaced.
     """
-    rig_name = rig_for_experiment(session_info, rig_csv_path)
-    if rig_name is None:
-        # ophys_session_id not recoverable from storage_directory (older data).
-        return None
+    experiment_id = int(session_info["id"])
+    rig_name = rig_for_experiment(session_info)
     if rig_name not in RIG_SPECS:
-        # e.g. CAM2P.6 / 3Pscope / DS.1 -- no instrument definition provided.
-        return None
+        # Rigs in the CSV without an instrument definition: CAM2P.6, 3Pscope, DS.1, MESO.1/.2.
+        raise ValueError(
+            f"ophys_experiment_id {experiment_id} is on rig {rig_name!r}, which has no "
+            f"instrument definition (known rigs: {sorted(RIG_SPECS)})."
+        )
 
     acquisition_date = pd.Timestamp(session_info["date_of_acquisition"]).date()
     return get_instrument_for_session(rig_name, acquisition_date)

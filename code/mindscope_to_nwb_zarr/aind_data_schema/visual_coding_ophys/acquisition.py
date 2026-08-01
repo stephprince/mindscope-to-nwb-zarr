@@ -63,7 +63,7 @@ def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
     imaging_plane = next(iter(nwbfile.imaging_planes.values()))
 
     imaging_plane_dimensions = [512, 512]  # Default dimensions
-    imaging_plane_depth = session_info.get('imaging_depth')
+    imaging_plane_depth = session_info['imaging_depth']
 
     targeted_structure_str = imaging_plane.location
     assert targeted_structure_str == session_info['targeted_structure']['acronym'], (
@@ -256,11 +256,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     """
     # Extract imaging plane info
     imaging_plane_info = get_imaging_plane_info(nwbfile, session_info)
-    device = imaging_plane_info["device"]
 
     # Per-rig microscope device name (e.g. "Nikon 1"), matching the instrument file.
-    # Falls back to the NWB device name for sessions whose rig is unresolved.
-    microscope_name = microscope_name_for_experiment(session_info) or device.name
+    microscope_name = microscope_name_for_experiment(session_info)
 
     # Create imaging config
     imaging_config = create_imaging_config(nwbfile, imaging_plane_info, microscope_name)
@@ -275,9 +273,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         acquisition_end_time=get_data_stream_end_time(nwbfile),
         protocol_id=[nwbfile.protocol],  # e.g., 20160706_244896_3StimC
         ethics_review_id=get_ethics_review_id(subject_id),
-        # Match the instrument file's instrument_id (the rig name, e.g. "CAM2P.1").
-        # Falls back to the NWB device name for sessions whose rig is unresolved.
-        instrument_id=rig_for_experiment(session_info) or device.name,
+        # The rig name (e.g. "CAM2P.1"), matching the generated Instrument's instrument_id.
+        instrument_id=rig_for_experiment(session_info),
         # The Allen "session_type": the stimulus_name from the experiment metadata
         # (e.g. "three_session_C"). No separate session_type field exists in the schema.
         acquisition_type=session_info['stimulus_name'],

@@ -14,7 +14,9 @@ from aind_data_schema.core.data_description import Funding, DataDescription
 
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
 from mindscope_to_nwb_zarr.aind_data_schema.utils import build_data_asset_name
-from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import extract_ophys_session_id
+from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
+    ophys_session_id_for_experiment,
+)
 
 
 def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> DataDescription:
@@ -41,18 +43,15 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
 
     # Tag the experiment with its Allen Brain Observatory LIMS IDs. The container and
     # ophys experiment IDs are direct columns of ophys_experiments.json (the experiment
-    # id equals nwbfile.session_id). The ophys session id is only recoverable from
-    # storage_directory for the newer LIMS prod layout, so it is omitted when absent.
+    # id equals nwbfile.session_id); the ophys session id comes from the rig CSV.
     tags = [
         "mindscope",
         f"specimen_id: {session_info['specimen_id']}",
         f"experiment_container_id: {session_info['experiment_container_id']}",
         f"ophys_experiment_id: {session_info['id']}",
+        f"ophys_session_id: {ophys_session_id_for_experiment(session_info)}",
         f"stimulus_name: {session_info['stimulus_name']}",
     ]
-    ophys_session_id = extract_ophys_session_id(session_info.get("storage_directory"))
-    if ophys_session_id is not None:
-        tags.append(f"ophys_session_id: {ophys_session_id}")
 
     return DataDescription(
         license=License.CC_BY_40,
