@@ -14,7 +14,7 @@ The two configurations differ only in the Monitor ``relative_position`` and
 ``transform`` (and the instrument ``modification_date``). Rigs also differ from
 one another only in the microscope (Nikon vs. Scientifica) and a one-line note.
 Everything else is shared, so the full set of instruments is built from a small
-specification table rather than duplicated by hand.
+specification table.
 
 Source: ``cam2p_{1..5}_{original,final}_instrument.py`` provided by the Allen
 Institute.
@@ -355,10 +355,8 @@ def get_instrument_for_session(rig_name: str, acquisition_date: date) -> Instrum
 #
 # The rig used for a session is looked up from the Allen Institute mapping CSV,
 # keyed by ``ophys_experiment_id`` -- the conversion pipeline's iteration key
-# (``session_info['id']``, equal to ``nwbfile.session_id``). Keying by experiment
-# id resolves every experiment present in the CSV. If an experiment is absent from
-# the CSV or has no rig recorded, ``rig_for_experiment`` returns ``None`` and
-# ``generate_instrument`` raises -- every experiment is expected to resolve.
+# (``session_info['id']``, equal to ``nwbfile.session_id``). Every experiment in the
+# dataset is present in the CSV; a missing one raises (see the functions below).
 
 # Mapping CSV bundled in the repo (also holds ophys_session_id and screen centers).
 _DEFAULT_RIG_CSV = Path(__file__).resolve().parents[3] / "reference" / "ophys_session_experiment_screen_centers.csv"
@@ -377,7 +375,7 @@ def rig_for_experiment(session_info) -> str:
 
     ``session_info`` is a row of the ophys experiment metadata (e.g. a
     ``pandas.Series``); it must provide ``id`` (the ophys_experiment_id). Every
-    experiment is in the CSV, so a missing one is an error rather than ``None``.
+    experiment in the dataset is in the CSV.
 
     Raises
     ------
@@ -404,8 +402,7 @@ def _load_experiment_to_session_id() -> dict:
 def ophys_session_id_for_experiment(session_info) -> int:
     """Look up the ophys_session_id for an ophys experiment from the CSV.
 
-    Every experiment in the dataset has an ophys_session_id in the CSV, so a missing
-    one is treated as an error rather than silently omitted.
+    Every experiment in the dataset has an ophys_session_id in the CSV.
 
     Raises
     ------
@@ -436,8 +433,7 @@ def generate_instrument(session_info) -> Instrument:
 
     Resolves the rig from the experiment->rig mapping CSV (by ophys_experiment_id)
     and selects the original/final configuration by acquisition date. Every
-    experiment in the dataset resolves to a rig with an instrument definition, so an
-    unresolved rig is treated as an error rather than silently skipped.
+    experiment in the dataset resolves to a rig with an instrument definition.
 
     Parameters
     ----------
