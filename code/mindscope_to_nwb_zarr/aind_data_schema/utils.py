@@ -90,8 +90,14 @@ def get_subject_id(nwbfile: NWBFile, session_info: pd.Series = None) -> str:
     return nwbfile.subject.subject_id
 
 
-def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
+def get_subject_date_of_birth(nwbfile: NWBFile, acquisition_start_time: datetime = None) -> datetime.date:
     """Calculate the animal's date of birth from age and acquisition date in NWB file.
+
+    The age stored in the NWB file (``P<days>D``) is relative to acquisition, so the DOB
+    is ``acquisition_start_time - age``. By default the anchor is
+    ``nwbfile.session_start_time``; pass ``acquisition_start_time`` to re-anchor to a
+    corrected start (e.g. when the file's session_start_time is a packaging date rather
+    than the real acquisition time, as for the Visual Coding Neuropixels files).
     """
     # Extract age in days from NWB file subject.age field
     age_str = nwbfile.subject.age
@@ -102,8 +108,9 @@ def get_subject_date_of_birth(nwbfile: NWBFile) -> datetime.date:
     age_in_days = int(match.group(1))
 
     # Calculate date of birth by subtracting age from acquisition date
-    acquisition_datetime = nwbfile.session_start_time
-    date_of_birth = (acquisition_datetime - timedelta(days=age_in_days)).date()
+    if acquisition_start_time is None:
+        acquisition_start_time = nwbfile.session_start_time
+    date_of_birth = (acquisition_start_time - timedelta(days=age_in_days)).date()
 
     return date_of_birth
 
