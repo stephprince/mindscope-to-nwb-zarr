@@ -98,6 +98,35 @@ def get_optotagging_config(session_id: int) -> LaserConfig | LightEmittingDiodeC
     return LightEmittingDiodeConfig(device_name=device_name)
 
 
+def _warn_on_interleaved_stimulus_epochs(stimulus_epochs: list[StimulusEpoch], session_id: int) -> None:
+    """Warn if any visual stimulus epochs overlap in time.
+
+    Each visual stimulus epoch spans its intervals table from the first presentation to
+    the last (see ``get_stimulation_epochs``). When a stimulus recurs in non-contiguous
+    blocks (interleaved with other stimuli), that whole-table span overlaps other
+    stimuli's spans. The epochs are not yet split into per-block epochs, so this only
+    warns; the overlap can be addressed in a future run if it proves to matter.
+    """
+    spans = sorted(
+        ((e.stimulus_start_time, e.stimulus_end_time, e.stimulus_name) for e in stimulus_epochs),
+        key=lambda span: span[0],
+    )
+    interleaved = []
+    running_end = None
+    for start, end, name in spans:
+        if running_end is not None and start < running_end:
+            interleaved.append(name)
+        if running_end is None or end > running_end:
+            running_end = end
+    if interleaved:
+        warnings.warn(
+            f"Session {session_id}: stimulus epochs interleave in time "
+            f"({', '.join(interleaved)}). Each stimulus intervals table is emitted as one "
+            f"epoch spanning its full extent, so non-contiguous blocks overlap other "
+            f"stimuli. Epochs are not yet split into per-block epochs."
+        )
+
+
 def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series,
                            session_start_time: datetime = None) -> list[StimulusEpoch]:
     """
@@ -142,6 +171,9 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series,
             session_start_time=session_start_time,
         )
         stimulation_epochs.append(stim_epoch)
+
+    # Warn if these whole-table visual epochs overlap (interleaved stimulus blocks).
+    _warn_on_interleaved_stimulus_epochs(stimulation_epochs, int(session_info['id']))
 
     if 'optotagging' in nwbfile.processing:
         optogenetic_stimulation = nwbfile.processing['optotagging']['optogenetic_stimulation']
@@ -188,6 +220,9 @@ def get_ephys_assembly_configs(nwbfile: NWBFile) -> list[EphysAssemblyConfig]:
                     device_name=ephys_assembly_name(letter),
                     manipulator=ManipulatorConfig(
                         device_name=manipulator_name(letter),
+                        # From Saskia: Since the probe config coordinates that Josh provided
+                        # have the full transform in the global space, the manipulator
+                        # coordinates are largely meaningless.
                         coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
                         local_axis_positions=Translation(translation=[0, 0, 0]),
                     ),
@@ -256,7 +291,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         experimenters=experimenters,  # operatorID from reference CSV
         ethics_review_id=ethics_review_id,  # IACUC review id, looked up by mouse id (all 58 sessions)
         instrument_id=instrument_id,  # actual rig ("NP.1"/"NP.2"); matches the generated Instrument
-        acquisition_type=nwbfile.stimulus_notes,  # TODO - assert correct field for this data and present in both functional connectivity and brain observatory datasets
+        acquisition_type=nwbfile.stimulus_notes,  # e.g. "brain_observatory_1.1" / "functional_connectivity"; asserted == session_info['session_type'] upstream
         notes=None,
         coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         # calibrations=[],
@@ -272,8 +307,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 active_devices=active_devices,
                 configurations=[
                     *ephys_assembly_configs,
-                    # 473 nm laser for sessions with id >= 789848216, else 465 nm LED.
-                    get_optotagging_config(session_id),  # TODO - should this go here or in the stimulation epochs configuration field?
+                    # The optotagging light-source config lives on the "Optotagging"
+                    # stimulus epoch (see get_stimulation_epochs), not on the data stream.
                     # no lick spout / reward was included in these experiments
                 ],
              ),

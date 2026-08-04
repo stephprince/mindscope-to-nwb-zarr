@@ -11,7 +11,7 @@ from pynwb import NWBFile
 
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema_models.organizations import Organization
-from aind_data_schema_models.units import FrequencyUnit, SizeUnit
+from aind_data_schema_models.units import FrequencyUnit, SizeUnit, UnitlessUnit
 from aind_data_schema_models.devices import CameraTarget
 from aind_data_schema_models.coordinates import AnatomicalRelative
 
@@ -97,16 +97,57 @@ def get_mouse_id(nwbfile: NWBFile, subject_mapping_path=None) -> str:
     return mouse_id
 
 
+# Two sessions have a bad LIMS platform JSON. Their timestamps are corrected on read
+# rather than by editing the reference CSV (see the README):
+#
+# 750749662 - the JSON duplicated session 750332458's, so its start/complete dates are
+#   750332458's (2018-09-10). The filename (750749662_412792_20180911_platformD1.json)
+#   and the true acquisition put it on 2018-09-11; the date is corrected, times kept.
+# 840012044 - the wrong JSON was copied, giving a start only ~2 min before the end. The
+#   end is roughly correct, so the start is moved back to end - the session's real data
+#   span measured from the NWB (get_latest_time = 165.5 min), i.e. 2019-03-21T13:51:15.
+_DUPLICATE_PLATFORM_JSON_SESSION_ID = 750749662
+_DUPLICATE_PLATFORM_JSON_CORRECT_DATE = date(2018, 9, 11)
+_WRONG_PLATFORM_JSON_SESSION_ID = 840012044
+_WRONG_PLATFORM_JSON_CORRECT_START = "2019-03-21T13:51:15"
+
+
+def _replace_date_keep_time(iso_timestamp: str, new_date: date) -> str:
+    """Return an ISO timestamp with its date replaced by ``new_date``, keeping the time."""
+    dt = datetime.fromisoformat(iso_timestamp)
+    return dt.replace(year=new_date.year, month=new_date.month, day=new_date.day).isoformat()
+
+
 def get_experiment_metadata(session_id: int) -> pd.Series | None:
     """Return the reference experiment metadata row for a session.
 
     Returns ``None`` for sessions absent from the CSV. One session (819701982)
     has no entry, so callers must fall back to values derivable from the NWB file.
+
+    Two sessions are special-cased because their reference CSV rows were transcribed from
+    the wrong platform JSON (the reference CSV itself is left untouched):
+
+    - 750749662: the JSON duplicated session 750332458's, so its start/complete dates are
+      2018-09-10; corrected to 2018-09-11 on read (time-of-day kept).
+    - 840012044: the wrong JSON gave a start only ~2 min before the end. The end is
+      roughly correct, so ExperimentStartTime is moved back to the session's real data
+      span measured from the NWB (get_latest_time, 165.5 min) -> 2019-03-21T13:51:15.
     """
     metadata = _load_experiment_metadata()
     if session_id not in metadata.index:
         return None
-    return metadata.loc[session_id]
+    row = metadata.loc[session_id]
+    if session_id == _DUPLICATE_PLATFORM_JSON_SESSION_ID:
+        # Copy so the cached DataFrame is never mutated.
+        row = row.copy()
+        for col in ("ExperimentStartTime", "ExperimentCompleteTime"):
+            row[col] = _replace_date_keep_time(row[col], _DUPLICATE_PLATFORM_JSON_CORRECT_DATE)
+    elif session_id == _WRONG_PLATFORM_JSON_SESSION_ID:
+        # Copy so the cached DataFrame is never mutated. Only the start is wrong; the
+        # end (ExperimentCompleteTime) is kept.
+        row = row.copy()
+        row["ExperimentStartTime"] = _WRONG_PLATFORM_JSON_CORRECT_START
+    return row
 
 
 # The rig is at the Allen Institute in Seattle and the platform JSON timestamps are
@@ -240,7 +281,9 @@ base_components = [
         viewing_distance_unit="centimeter",
         relative_position=[AnatomicalRelative.ANTERIOR, AnatomicalRelative.RIGHT],
         contrast=30,
+        contrast_unit=UnitlessUnit.PERCENT,
         brightness=50,
+        brightness_unit=UnitlessUnit.PERCENT,
         coordinate_system=CoordinateSystemLibrary.SIPE_MONITOR_RTF,
         transform=[
             Rotation(angles=[45, 90, 0]),
@@ -348,7 +391,7 @@ def build_instrument(session_id: int) -> Instrument:
         components=[*base_components, light_source],
     )
 
-def generate_instrument(nwbfile=None, session_info=None) -> Instrument:
+def generate_instrument(session_info) -> Instrument:
     """Return the AIND Instrument for a Visual Coding Neuropixels session.
 
     The ``instrument_id`` is the session's actual rig ("NP.1" or "NP.2", from the
@@ -356,8 +399,7 @@ def generate_instrument(nwbfile=None, session_info=None) -> Instrument:
     absent from the CSV). Each rig is reconstructed in one of two states: the
     optotagging light source was changed from a 465 nm LED to a 473 nm laser starting
     with session 789848216. Both rig and state are selected from the session id
-    (``session_info['id']``). The ``nwbfile`` parameter is accepted only for
-    interface symmetry with the other ``generate_*`` functions.
+    (``session_info['id']``).
     """
     return build_instrument(int(session_info["id"]))
 

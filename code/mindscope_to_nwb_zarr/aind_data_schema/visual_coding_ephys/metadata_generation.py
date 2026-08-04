@@ -51,7 +51,7 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
     subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info, subject_mapping_path=SUBJECT_MAPPING_PATH)
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = fetch_procedures_from_aind_metadata_service(nwbfile, subject_mapping_path=SUBJECT_MAPPING_PATH)
-    instrument = generate_instrument(nwbfile, session_info)
+    instrument = generate_instrument(session_info)
     metadata_models = [data_description, subject, acquisition, procedures, instrument]
     
     # Save the metadata files
