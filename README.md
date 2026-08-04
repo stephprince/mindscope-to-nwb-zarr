@@ -116,6 +116,7 @@ mindscope-to-nwb-zarr/
 | `scripts/get_mouse_ids_from_allensdk.py` | Download mouse ID metadata from AllensSDK |
 | `scripts/metadata_from_allensdk.py` | Extract metadata directly from AllensSDK |
 | `scripts/nwb_cached_specs_to_json.py` | Export NWB specification metadata to JSON |
+| `scripts/run_all_vc_ophys.py` | Batch-generate AIND metadata for all Visual Coding 2P ophys sessions (streams from DANDI; use ≤3 workers) |
 
 
 ## Conversion Process
@@ -216,6 +217,42 @@ See the changelog files in each dataset's `data_conversion` folder for full deta
 - The experiment start time, rig ID, and operator ID for the acquisition metadata come from `code/reference/neuropixels_vc_experiment_metadata.csv` (transcribed from the original platform JSON files), because the NWB `session_start_time` is a packaging date rather than the true acquisition time (e.g., session 715093703 reads 2019-01-19 in the NWB file but the experiment actually ran 2018-06-27, ~205 days earlier). NWB-derived stream and stimulus-epoch times are re-anchored to the CSV start time. The rig ID (`"NP.1"`/`"NP.2"`) sets the acquisition `instrument_id` and the generated `Instrument.instrument_id`, so they match. One session, **819701982**, is missing from this CSV, so it falls back to the NWB `session_start_time` (the packaging date), the fallback instrument ID `"NP"`, and no operator. Its experiment start time, rig ID, and operator should be filled in if the platform JSON becomes available.
 
 ### Visual Coding Ophys
+
+**Batch metadata generation.** AIND metadata was generated successfully for **all 1518** Visual Coding 2P ophys experiments (DANDI dandiset 000728), streamed from DANDI (no download), by `code/scripts/run_all_vc_ophys.py`. Every session produced the full five-file set (data description, subject, acquisition, procedures, instrument). Run it with **≤3 workers**: the AIND metadata service returns empty response bodies under higher concurrency (its `procedures` endpoint is slow), which surfaces as `JSONDecodeError`; at 3 workers all sessions succeed. (Transient network/service errors during a run retry and resolve, and are not listed here.)
+
+The following warnings are expected and hold across the dataset:
+
+- **AIND schema deprecations** (every session) — `aind-data-schema` emits `DeprecationWarning`s as `coordinate_system` is migrated to `global_coordinate_system` / `local_coordinate_system`; pynwb/hdmf also emits a deprecated-`Device.manufacturer` warning while reading each NWB. Benign upstream schema churn.
+- **Reproducibility note** (nearly every session) — `Neither commit_hash nor version provided for Code`, emitted by `aind-data-schema` once per stimulus `Code` block. The Visual Coding stimulus code has no recorded version, so this is expected.
+- **Null breeding genotypes fixed** — `maternal_genotype` and/or `paternal_genotype` are null in most service records but are required schema fields, so they are set to `""` ("unknown"); the fix is logged per subject. Most subjects also hit a subject-record validation fallback (the raw service response is parsed), which is expected and drives these fixes.
+- **Checks that never triggered in this dataset** — across all 1518 sessions, none required the **missing anaesthesia duration** fix or the **Craniotomy position type** fix (see the procedures patches below), and none produced a **date-of-birth difference** warning (every LIMS DOB agrees with the NWB-derived DOB within the ±2-day tolerance). These handlers exist but were not exercised here.
+
+**NWB-vs-LIMS subject mismatches.** LIMS is authoritative; the pipeline keeps the LIMS value and warns. Subject IDs (6-digit mouse / `external_donor_name`) with one example DANDI NWB file for lookup:
+
+*Sex mismatch — NWB records Male, LIMS records Female:*
+
+| subject | example NWB file |
+|---|---|
+| 232269 | `sub-501800347_ses-509959266-StimB_behavior+image+ophys.nwb` |
+| 232270 | `sub-501800590_ses-510234687-StimA_behavior+image+ophys.nwb` |
+| 243303 | `sub-516024042_ses-530026508-StimC_behavior+image+ophys.nwb` |
+| 252106 | `sub-521948687_ses-531346896-StimC_behavior+image+ophys.nwb` |
+
+*Genotype mismatch — NWB short form vs LIMS full allelic form (same transgenes). Subjects 222426, 229109, 233215 differ only by trailing whitespace in the LIMS value:*
+
+| subject | example NWB file |
+|---|---|
+| 222426 | `sub-495727015_ses-502793808-StimA_behavior+image+ophys.nwb` |
+| 229109 | `sub-501228870_ses-504809131-StimC_behavior+image+ophys.nwb` |
+| 232269 | `sub-501800347_ses-509959266-StimB_behavior+image+ophys.nwb` |
+| 232270 | `sub-501800590_ses-510234687-StimA_behavior+image+ophys.nwb` |
+| 233215 | `sub-503292442_ses-512326618-StimA_behavior+image+ophys.nwb` |
+| 243303 | `sub-516024042_ses-530026508-StimC_behavior+image+ophys.nwb` |
+| 252105 | `sub-522150294_ses-531126287-StimB_behavior+image+ophys.nwb` |
+| 252106 | `sub-521948687_ses-531346896-StimC_behavior+image+ophys.nwb` |
+
+**Sessions with 0 stimulus epochs** — 34 of the 1518 sessions produce no `StimulusEpoch`. Stimulus epochs are built one-per-block from the NWB `epochs` intervals table; in these 34 files that table — in fact the entire `intervals` group (`epochs`, `trials`, `invalid_times`) — is **absent** (`nwbfile.epochs is None` and `nwbfile.intervals` is empty). The per-presentation stimulus objects themselves are still present under `nwb.stimulus` (drifting/static gratings, natural scenes/movies, spontaneous, etc.), so the stimuli were shown; only the block-timing table used to enumerate epochs is missing. This is a source-data gap in those specific DANDI NWB files, not a property of the session type — the 34 span all four types (`three_session_A` ×21, `three_session_C2` ×8, `three_session_C` ×3, `three_session_B` ×2). All five metadata files are still written normally; the acquisition file simply has an empty `stimulus_epochs` list. The missing `intervals`/`epochs` group in these files should be investigated against the source data.
+
 Subject and procedures metadata are fetched from the AIND metadata service by 6-digit mouse ID (`external_donor_name`). Some legacy records do not validate against the current schema, so the raw service response is parsed and known data issues are patched during generation:
 - **Missing breeding genotypes** — `maternal_genotype` and/or `paternal_genotype` are sometimes null in the service record, but both are required (`str`) fields in the schema (confirmed still required as of `aind-data-schema` 2.8.1). When null, they are set to `""` — an empty string standing in for "unknown", not a real (empty) genotype.
 - **Missing anaesthesia duration** — a Surgery whose `anaesthesia` has no `duration` is given `duration = 0.0`.
