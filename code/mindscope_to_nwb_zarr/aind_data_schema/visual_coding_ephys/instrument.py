@@ -284,7 +284,7 @@ base_components = [
         contrast_unit=UnitlessUnit.PERCENT,
         brightness=50,
         brightness_unit=UnitlessUnit.PERCENT,
-        coordinate_system=CoordinateSystemLibrary.SIPE_MONITOR_RTF,
+        local_coordinate_system=CoordinateSystemLibrary.SIPE_MONITOR_RTF,
         transform=[
             Rotation(angles=[45, 90, 0]),
             Translation(translation=[86.2, 118.6, 31.6]),
@@ -384,7 +384,7 @@ def build_instrument(session_id: int) -> Instrument:
         location="325",
         instrument_id=get_rig_id(session_id),
         modification_date=modification_date,
-        coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
+        global_coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         modalities=[Modality.ECEPHYS, Modality.BEHAVIOR_VIDEOS],
         notes="Created several years posthoc from incomplete records. Much information is missing.",
         temperature_control=None,

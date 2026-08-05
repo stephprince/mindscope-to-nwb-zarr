@@ -381,7 +381,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         # (e.g. "three_session_C"). No separate session_type field exists in the schema.
         acquisition_type=session_info['stimulus_name'],
         notes=None,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
+        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),

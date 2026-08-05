@@ -223,7 +223,7 @@ def get_ephys_assembly_configs(nwbfile: NWBFile) -> list[EphysAssemblyConfig]:
                         # From Saskia: Since the probe config coordinates that Josh provided
                         # have the full transform in the global space, the manipulator
                         # coordinates are largely meaningless.
-                        coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
+                        local_coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,
                         local_axis_positions=Translation(translation=[0, 0, 0]),
                     ),
                     probes=[build_probe_config(nwbfile, device, device_name=probe_name(letter))],
@@ -293,7 +293,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         instrument_id=instrument_id,  # actual rig ("NP.1"/"NP.2"); matches the generated Instrument
         acquisition_type=nwbfile.stimulus_notes,  # e.g. "brain_observatory_1.1" / "functional_connectivity"; asserted == session_info['session_type'] upstream
         notes=None,
-        coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
+        global_coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         # calibrations=[],
         # maintenance=[],
         data_streams=[

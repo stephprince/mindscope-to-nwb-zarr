@@ -172,7 +172,7 @@ def _build_monitor(version: str) -> Monitor:
         contrast_unit=UnitlessUnit.PERCENT,
         brightness=50,
         brightness_unit=UnitlessUnit.PERCENT,
-        coordinate_system=CoordinateSystemLibrary.SIPE_MONITOR_RTF,
+        local_coordinate_system=CoordinateSystemLibrary.SIPE_MONITOR_RTF,
         transform=monitor_version["transform"],
     )
 
@@ -313,7 +313,7 @@ def build_instrument(rig_name: str, version: str) -> Instrument:
         location="Unknown",
         instrument_id=rig_name,
         modification_date=modification_date,
-        coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
+        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         modalities=[Modality.POPHYS, Modality.BEHAVIOR_VIDEOS],
         notes=spec["notes"],
         temperature_control=None,

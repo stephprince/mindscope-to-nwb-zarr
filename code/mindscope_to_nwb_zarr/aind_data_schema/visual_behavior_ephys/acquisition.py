@@ -152,7 +152,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description,
         notes=None,
-        coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
+        global_coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         # coordinate system info might not be available, will check @Saskia
         # calibrations=[],  # TODO - add if available - will be difficult to find, probably not
         # maintenance=[],
@@ -176,7 +176,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                         device_name="EPHYS_1",
                         manipulator=ManipulatorConfig(
                             device_name="Manipulator_1",  # TODO - fill in with correct information
-                            coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # should be standardized (confirm relative to bregma, positions) @Saskia
+                            local_coordinate_system=CoordinateSystemLibrary.MPM_MANIP_RFB,  # should be standardized (confirm relative to bregma, positions) @Saskia
                             local_axis_positions=Translation(translation=[0, 0, 0],),  # TODO - fill in with correct positions @Saskia
                         ),
                         probes=get_probe_configs(nwbfile),

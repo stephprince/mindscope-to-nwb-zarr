@@ -195,7 +195,7 @@ behavior_camera_instrument = Instrument(
     instrument_id="BehaviorMonitoringRig",
     modification_date=date.today(),  # TODO: update as needed
     modalities=[Modality.BEHAVIOR_VIDEOS],
-    coordinate_system=instrument_coordinate_system,
+    global_coordinate_system=instrument_coordinate_system,
     components=[
         # Behavior monitoring camera assembly
         behavior_camera_assembly,

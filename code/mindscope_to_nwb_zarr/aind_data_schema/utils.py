@@ -311,7 +311,7 @@ def build_probe_config(nwbfile: NWBFile, device, device_name: str = None) -> Pro
     return ProbeConfig(
         device_name=device_name if device_name is not None else device.name,
         primary_targeted_structure=PROBE_TARGETED_STRUCTURES[letter],
-        coordinate_system=PROBE_COORDINATE_SYSTEM,
+        local_coordinate_system=PROBE_COORDINATE_SYSTEM,
         transform=build_probe_transform(letter),
         notes=PROBE_TRANSFORM_NOTES,
     )
