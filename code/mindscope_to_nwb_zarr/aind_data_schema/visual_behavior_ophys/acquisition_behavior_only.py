@@ -37,6 +37,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_instrument_id,
     get_total_reward_volume,
     get_individual_reward_volume,
+    get_reward_volume_notes,
     get_curriculum_status,
     get_ethics_review_id,
 )
@@ -123,6 +124,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 volume=individual_reward_volume,
                 volume_unit=VolumeUnit.ML,
                 relative_position=["Anterior"],  # TODO - what is the correct information here
+                notes=get_reward_volume_notes(nwbfile),  # lists all volumes if more than one was used
             )
         )
 
@@ -138,9 +140,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description, # TODO - confirm consistent across experiments or if better option
         notes=None,
-        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARID,
-        # instrument and acquisition do not have the same coordinate system. 
-        # For Ophys, it will define the location of the imaging FOV in a way that can be entered. Saskia will check.
+        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),
@@ -172,7 +172,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 )),
                 stimulus_name="Change detection natural images",
                 code=Code(
-                    url="TODO",  # TODO add URL to stimulus code
+                    url="Unknown",  # TODO add URL to stimulus code
+                    version="Unknown", # TODO add version to stimulus code
                     # TODO add code parameters if available, but it seems like it is not available
                     parameters=visual_stimulation,
                 ),

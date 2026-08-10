@@ -46,6 +46,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_instrument_id,
     get_total_reward_volume,
     get_individual_reward_volume,
+    get_reward_volume_notes,
     get_ethics_review_id,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument import (
@@ -480,7 +481,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                 volume=individual_reward_volume,
                 volume_unit=VolumeUnit.ML,
                 relative_position=["Anterior"],
-                notes="",  # TODO - write that reward volume was both x and y
+                notes=get_reward_volume_notes(nwbfile),  # lists all volumes if more than one was used
             )
         )
 
@@ -496,9 +497,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description,
         notes=None,
-        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct system library. depends on the transform
-        # instrument and acquisition do not have the same coordinate system. 
-        # For Ophys, it will define the location of the imaging FOV in a way that can be entered. Saskia will check.
+        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),

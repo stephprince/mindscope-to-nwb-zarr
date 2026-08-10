@@ -146,15 +146,34 @@ def get_total_reward_volume(nwbfile: NWBFile) -> float | None:
 
 
 def get_individual_reward_volume(nwbfile: NWBFile) -> float | None:
+    """Smallest non-zero per-trial reward volume, or None if the session gave no rewards.
+
+    A session may use more than one distinct reward volume; the smallest is recorded as
+    the representative LickSpoutConfig.volume and the full set is documented separately
+    via ``get_reward_volume_notes``.
+    """
     if 'reward_volume' in nwbfile.trials.colnames:
         volumes = nwbfile.intervals['trials'].to_dataframe()['reward_volume'].unique()
         volumes = volumes[volumes > 0]
-        if len(volumes) > 1:
-            warnings.warn(f"Multiple non-zero reward volumes found: {volumes}. Using the smallest one: {volumes.min()}.")
-        elif len(volumes) == 0:
+        if len(volumes) == 0:
             return None
         return float(volumes.min())
-    
+
+    return None
+
+
+def get_reward_volume_notes(nwbfile: NWBFile) -> str | None:
+    """Notes listing all reward volumes when a session used more than one, else None.
+
+    ``get_individual_reward_volume`` records only the smallest, so this documents the
+    full sorted set on the LickSpoutConfig (e.g. "Multiple reward volumes used: [0.005,
+    0.007]"). Returns None for a session with a single (or no) non-zero reward volume.
+    """
+    if 'reward_volume' in nwbfile.trials.colnames:
+        volumes = nwbfile.intervals['trials'].to_dataframe()['reward_volume'].unique()
+        volumes = sorted(float(v) for v in volumes[volumes > 0])
+        if len(volumes) > 1:
+            return f"Multiple reward volumes used: {volumes}"
     return None
 
 
