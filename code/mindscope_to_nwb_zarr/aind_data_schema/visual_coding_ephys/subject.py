@@ -21,6 +21,59 @@ import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
+from mindscope_to_nwb_zarr.aind_data_schema.metadata_service_cache import (
+    load_cached, store_cached, SUBJECT,
+)
+
+
+def _fetch_subject_raw(subject_id: str, api_host: str) -> Optional[dict]:
+    """Fetch the raw subject response dict from the AIND metadata service.
+
+    Returns the JSON-safe raw_data dict that ``Subject(**raw_data)`` is built from (after
+    the genotype fixups), or None if the service is unreachable. Raises RuntimeError if
+    the subject is not found (HTTP 404). Does not touch the cache; callers cache the result.
+    """
+    configuration = aind_metadata_service_client.Configuration(host=api_host)
+
+    with aind_metadata_service_client.ApiClient(configuration) as api_client:
+        api_instance = aind_metadata_service_client.DefaultApi(api_client)
+
+        try:
+            subject_response = api_instance.get_subject(subject_id=subject_id)
+            # Dump in JSON mode so this clean path yields the same JSON-native types
+            # (dates/enums as strings) as the raw-parse fallback below. Otherwise the
+            # string-based cross-checks (date_of_birth strptime, sex, genotype) would
+            # crash or spuriously mismatch on native date/enum objects.
+            if hasattr(subject_response, 'model_dump'):
+                return subject_response.model_dump(mode='json')
+            return subject_response
+        except Urllib3HTTPError as e:
+            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
+            return None
+        except ApiException as e:
+            if e.status == 404:
+                raise RuntimeError(
+                    f"Subject {subject_id} not found in the AIND metadata service (HTTP 404)."
+                ) from e
+            warnings.warn(f"Validation error for subject {subject_id}, attempting to parse raw response")
+
+            response = api_instance.get_subject_without_preload_content(subject_id=subject_id)
+            raw_data = json.loads(response.data.decode('utf-8'))
+
+            # Fix null maternal/paternal genotype within breeding_info, when present.
+            # breeding_info itself is nullable in the schema and is null for many subjects
+            # (see the top-level genotype backfill in the public function); guard against
+            # that so we do not call .get on None.
+            breeding_info = raw_data.get('subject_details', {}).get('breeding_info')
+            if breeding_info is not None:
+                if breeding_info.get('maternal_genotype') is None:
+                    breeding_info['maternal_genotype'] = ""
+                    warnings.warn(f"Fixed null maternal genotype for subject {subject_id}")
+                if breeding_info.get('paternal_genotype') is None:
+                    breeding_info['paternal_genotype'] = ""
+                    warnings.warn(f"Fixed null paternal genotype for subject {subject_id}")
+            return raw_data
+
 
 def cross_check_mouse_id(nwbfile: NWBFile, session_info: pd.Series, subject_mapping_path: str) -> None:
     """Fail loudly if the 6-digit mouse id is inconsistent across the reference sources.
@@ -126,98 +179,70 @@ def fetch_subject_from_aind_metadata_service(
     # metadata service is keyed by.
     subject_id = get_mouse_id(nwbfile, subject_mapping_path)
 
-    configuration = aind_metadata_service_client.Configuration(host=api_host)
-
-    with aind_metadata_service_client.ApiClient(configuration) as api_client:
-        api_instance = aind_metadata_service_client.DefaultApi(api_client)
-
-        try:
-            subject_response = api_instance.get_subject(subject_id=subject_id)
-            # Dump in JSON mode so this clean path yields the same JSON-native types
-            # (dates/enums as strings) as the raw-parse fallback below. Otherwise the
-            # string-based cross-checks (date_of_birth strptime, sex, genotype) would
-            # crash or spuriously mismatch on native date/enum objects.
-            raw_data = subject_response.model_dump(mode='json') if hasattr(subject_response, 'model_dump') else subject_response
-        except Urllib3HTTPError as e:
-            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
+    # Cache the metadata-service response by (6-digit) subject_id: it does not change
+    # between runs and the same subject recurs across sessions (see metadata_service_cache).
+    # On a miss, fetch and cache; on an unreachable service the fetcher returns None.
+    raw_data = load_cached(SUBJECT, subject_id)
+    if raw_data is None:
+        raw_data = _fetch_subject_raw(subject_id, api_host)
+        if raw_data is None:
             return None
-        except ApiException as e:
-            if e.status == 404:
-                raise RuntimeError(
-                    f"Subject {subject_id} not found in the AIND metadata service (HTTP 404)."
-                ) from e
-            warnings.warn(f"Validation error for subject {subject_id}, attempting to parse raw response")
+        store_cached(SUBJECT, subject_id, raw_data)
 
-            response = api_instance.get_subject_without_preload_content(subject_id=subject_id)
-            raw_data = json.loads(response.data.decode('utf-8'))
+    # Cross-check the AIND metadata service (LIMS) response against the NWB file.
+    # The LIMS record is authoritative and is what the Subject is built from below.
+    # Species must agree (a mismatch raises loudly). Sex, date of birth, and genotype
+    # only warn: the NWB files and LIMS are known to disagree for some subjects, so we
+    # keep the LIMS value and surface the discrepancy.
+    subject_sex_dict = {"F": "Female", "M": "Male"}
 
-            # Fix null maternal/paternal genotype within breeding_info, when present.
-            # breeding_info itself is nullable in the schema and is null for many subjects
-            # (see the top-level genotype backfill below); guard against that so we do not
-            # call .get on None.
-            breeding_info = raw_data.get('subject_details', {}).get('breeding_info')
-            if breeding_info is not None:
-                if breeding_info.get('maternal_genotype') is None:
-                    breeding_info['maternal_genotype'] = ""
-                    warnings.warn(f"Fixed null maternal genotype for subject {subject_id}")
-                if breeding_info.get('paternal_genotype') is None:
-                    breeding_info['paternal_genotype'] = ""
-                    warnings.warn(f"Fixed null paternal genotype for subject {subject_id}")
+    assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
+        f"Species mismatch: NWB={nwbfile.subject.species}, API={raw_data['subject_details']['species']['name']}"
 
-        # Cross-check the AIND metadata service (LIMS) response against the NWB file.
-        # The LIMS record is authoritative and is what the Subject is built from below.
-        # Species must agree (a mismatch raises loudly). Sex, date of birth, and genotype
-        # only warn: the NWB files and LIMS are known to disagree for some subjects, so we
-        # keep the LIMS value and surface the discrepancy.
-        subject_sex_dict = {"F": "Female", "M": "Male"}
+    if subject_sex_dict.get(nwbfile.subject.sex) != raw_data['subject_details']['sex']:
+        warnings.warn(
+            f"Sex mismatch for subject {subject_id}: NWB={nwbfile.subject.sex}, "
+            f"LIMS={raw_data['subject_details']['sex']}. Using the LIMS value."
+        )
 
-        assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
-            f"Species mismatch: NWB={nwbfile.subject.species}, API={raw_data['subject_details']['species']['name']}"
+    # The NWB stores only an integer-day age (P<days>D), so the DOB derived from it
+    # (acquisition_start - age) is approximate. The NWB session_start_time is a
+    # packaging date, so anchor to the corrected acquisition start from the reference
+    # CSV. Compare against the LIMS date_of_birth with a tolerance and warn (not fail).
+    acquisition_start_time = get_acquisition_start_time(nwbfile, session_info)
+    nwb_dob = get_subject_date_of_birth(nwbfile, acquisition_start_time)
+    api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
+    if abs((nwb_dob - api_dob).days) > 2:
+        warnings.warn(
+            f"Date of birth mismatch >2 days for subject {subject_id}: NWB={nwb_dob}, "
+            f"LIMS={api_dob}. Using the LIMS value."
+        )
 
-        if subject_sex_dict.get(nwbfile.subject.sex) != raw_data['subject_details']['sex']:
-            warnings.warn(
-                f"Sex mismatch for subject {subject_id}: NWB={nwbfile.subject.sex}, "
-                f"LIMS={raw_data['subject_details']['sex']}. Using the LIMS value."
+    # Genotype. LIMS is authoritative when it has a value, but it leaves genotype null
+    # for ~half the Neuropixels subjects (wildtype mice) while the NWB records it (e.g.
+    # "wt/wt"). When LIMS is null, backfill from the NWB -- the value is not actually
+    # missing, only absent from LIMS -- and fail loudly only if it is missing from both
+    # sources. When both are present but differ (known notation differences), keep the
+    # LIMS value and warn. See the README (Visual Coding Neuropixels genotype handling).
+    lims_genotype = raw_data['subject_details']['genotype']
+    nwb_genotype = nwbfile.subject.genotype
+    if lims_genotype is None:
+        if not nwb_genotype:
+            raise RuntimeError(
+                f"Genotype for subject {subject_id} is missing from both the AIND metadata "
+                f"service and the NWB file."
             )
+        raw_data['subject_details']['genotype'] = nwb_genotype
+        warnings.warn(
+            f"Genotype is null in LIMS for subject {subject_id}; backfilled from the NWB "
+            f"file: {nwb_genotype!r}."
+        )
+    elif nwb_genotype != lims_genotype:
+        warnings.warn(
+            f"Genotype mismatch for subject {subject_id}: NWB={nwb_genotype}, "
+            f"LIMS={lims_genotype}. Using the LIMS value."
+        )
 
-        # The NWB stores only an integer-day age (P<days>D), so the DOB derived from it
-        # (acquisition_start - age) is approximate. The NWB session_start_time is a
-        # packaging date, so anchor to the corrected acquisition start from the reference
-        # CSV. Compare against the LIMS date_of_birth with a tolerance and warn (not fail).
-        acquisition_start_time = get_acquisition_start_time(nwbfile, session_info)
-        nwb_dob = get_subject_date_of_birth(nwbfile, acquisition_start_time)
-        api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
-        if abs((nwb_dob - api_dob).days) > 2:
-            warnings.warn(
-                f"Date of birth mismatch >2 days for subject {subject_id}: NWB={nwb_dob}, "
-                f"LIMS={api_dob}. Using the LIMS value."
-            )
-
-        # Genotype. LIMS is authoritative when it has a value, but it leaves genotype null
-        # for ~half the Neuropixels subjects (wildtype mice) while the NWB records it (e.g.
-        # "wt/wt"). When LIMS is null, backfill from the NWB -- the value is not actually
-        # missing, only absent from LIMS -- and fail loudly only if it is missing from both
-        # sources. When both are present but differ (known notation differences), keep the
-        # LIMS value and warn. See the README (Visual Coding Neuropixels genotype handling).
-        lims_genotype = raw_data['subject_details']['genotype']
-        nwb_genotype = nwbfile.subject.genotype
-        if lims_genotype is None:
-            if not nwb_genotype:
-                raise RuntimeError(
-                    f"Genotype for subject {subject_id} is missing from both the AIND metadata "
-                    f"service and the NWB file."
-                )
-            raw_data['subject_details']['genotype'] = nwb_genotype
-            warnings.warn(
-                f"Genotype is null in LIMS for subject {subject_id}; backfilled from the NWB "
-                f"file: {nwb_genotype!r}."
-            )
-        elif nwb_genotype != lims_genotype:
-            warnings.warn(
-                f"Genotype mismatch for subject {subject_id}: NWB={nwb_genotype}, "
-                f"LIMS={lims_genotype}. Using the LIMS value."
-            )
-
-        # Build the aind_data_schema Subject from the response dict -- the same for both
-        # the clean-success and raw-parse fallback paths, so the return type is consistent.
-        return Subject(**raw_data)
+    # Build the aind_data_schema Subject from the response dict -- the same for both
+    # the clean-success and raw-parse fallback paths, so the return type is consistent.
+    return Subject(**raw_data)
