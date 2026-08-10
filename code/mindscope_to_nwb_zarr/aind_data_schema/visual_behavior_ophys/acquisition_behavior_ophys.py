@@ -93,10 +93,11 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
             f"Unexpected single-plane imaging_rate: {imaging_plane.imaging_rate}"
     else:
         # Mesoscope per-plane frame rate depends on the number of scanned planes / scan
-        # configuration. Across the full dataset the multi-plane rate is either 11 Hz
-        # (standard 8-plane sessions) or 9 Hz (reduced-plane sessions); assert that known
-        # set. The actual rate flows through to the ImagingConfig SamplingStrategy.frame_rate.
-        assert imaging_plane.imaging_rate in (9, 11), \
+        # configuration. Across the full dataset the multi-plane rate takes one of four
+        # values -- 11 Hz (standard 8-plane) and 9/6/5 Hz (other plane counts / configs) --
+        # so assert that known set. The actual rate flows through to the ImagingConfig
+        # SamplingStrategy.frame_rate.
+        assert imaging_plane.imaging_rate in (5, 6, 9, 11), \
             f"Unexpected multi-plane imaging_rate: {imaging_plane.imaging_rate}"
 
     assert len(imaging_plane.optical_channel) == 1
