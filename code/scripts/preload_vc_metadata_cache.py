@@ -87,17 +87,22 @@ def preload_one(kind: str, subject_id: str, force: bool) -> tuple[str, str, str]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", choices=["ophys", "ephys", "both"], default="both",
+                        help="which Visual Coding pipeline's subjects to preload (default both)")
     parser.add_argument("--workers", type=int, default=4,
                         help="parallel fetch threads (default 4; keep low for the metadata service)")
     parser.add_argument("--force", action="store_true",
                         help="refetch and overwrite even if already cached")
     args = parser.parse_args()
 
-    subject_ids = unique_subject_ids()
-    n_ophys = len(ophys_subject_ids())
-    n_ephys = len(ephys_subject_ids())
+    if args.dataset == "ophys":
+        subject_ids = sorted(ophys_subject_ids())
+    elif args.dataset == "ephys":
+        subject_ids = sorted(ephys_subject_ids())
+    else:
+        subject_ids = unique_subject_ids()
     tasks = [(kind, sid) for sid in subject_ids for kind in (SUBJECT, PROCEDURES)]
-    print(f"Subjects: {len(subject_ids)} unique (ophys {n_ophys}, ephys {n_ephys}) | "
+    print(f"Dataset: {args.dataset} | subjects: {len(subject_ids)} | "
           f"fetches: {len(tasks)} (subject + procedures) | workers: {args.workers}", flush=True)
     print(f"Cache dir: {cache_dir()}", flush=True)
 
