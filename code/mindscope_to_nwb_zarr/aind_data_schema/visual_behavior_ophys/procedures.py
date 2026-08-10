@@ -9,6 +9,9 @@ from typing import Optional
 from aind_data_schema.core.procedures import Procedures
 
 from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id
+from mindscope_to_nwb_zarr.aind_data_schema.metadata_service_cache import (
+    load_cached, store_cached, PROCEDURES,
+)
 
 import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
@@ -39,6 +42,42 @@ def _fix_procedures_validation_issues(subject_procedures: list) -> None:
                     if isinstance(position, str):
                         subject_procedures[i]['procedures'][j]['position'] = [position]
                         warnings.warn(f"Fixed Craniotomy position from string '{position}' to list [{position}]")
+
+
+def _fetch_procedures_raw(subject_id: str, api_host: str) -> Optional[dict]:
+    """Fetch the raw procedures response dict from the AIND metadata service.
+
+    Returns the JSON-safe raw_data dict that ``Procedures(**raw_data)`` is built from
+    (after the known-validation-issue fixups), or None if the service is unreachable.
+    Raises RuntimeError if the procedures are not found (HTTP 404). Does not touch the
+    cache; callers cache the result.
+    """
+    configuration = aind_metadata_service_client.Configuration(host=api_host)
+
+    with aind_metadata_service_client.ApiClient(configuration) as api_client:
+        api_instance = aind_metadata_service_client.DefaultApi(api_client)
+
+        try:
+            procedures_response = api_instance.get_procedures(subject_id=subject_id)
+            if hasattr(procedures_response, 'model_dump'):
+                return procedures_response.model_dump(mode="json")
+            return procedures_response
+        except Urllib3HTTPError as e:
+            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
+            return None
+        except ApiException as e:
+            if e.status == 404:
+                raise RuntimeError(
+                    f"Procedures for subject {subject_id} not found in the AIND metadata service (HTTP 404)."
+                ) from e
+            warnings.warn(f"Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
+
+            response = api_instance.get_procedures_without_preload_content(subject_id=subject_id)
+            raw_data = json.loads(response.data.decode('utf-8'))
+
+            # Fix known validation issues in procedures data (in place)
+            _fix_procedures_validation_issues(raw_data['subject_procedures'])
+            return raw_data
 
 
 def fetch_procedures_from_aind_metadata_service(
@@ -85,30 +124,17 @@ def fetch_procedures_from_aind_metadata_service(
     # 6-digit mouse ID from the NWB file, cross-checked against session_info['mouse_id'].
     subject_id = get_subject_id(nwbfile, session_info)
 
-    configuration = aind_metadata_service_client.Configuration(host=api_host)
-
-    with aind_metadata_service_client.ApiClient(configuration) as api_client:
-        api_instance = aind_metadata_service_client.DefaultApi(api_client)
-
-        try:
-            procedures_response = api_instance.get_procedures(subject_id=subject_id)
-            raw_data = procedures_response.model_dump() if hasattr(procedures_response, 'model_dump') else procedures_response
-        except Urllib3HTTPError as e:
-            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
+    # The procedures record for a subject does not change between runs and the same
+    # subject recurs across many sessions, so cache it by subject_id (see
+    # metadata_service_cache). On a miss, fetch and cache; on an unreachable service the
+    # fetcher returns None and we propagate that (no caching of a failure).
+    raw_data = load_cached(PROCEDURES, subject_id)
+    if raw_data is None:
+        raw_data = _fetch_procedures_raw(subject_id, api_host)
+        if raw_data is None:
             return None
-        except ApiException as e:
-            if e.status == 404:
-                raise RuntimeError(
-                    f"Procedures for subject {subject_id} not found in the AIND metadata service (HTTP 404)."
-                ) from e
-            warnings.warn(f"Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
+        store_cached(PROCEDURES, subject_id, raw_data)
 
-            response = api_instance.get_procedures_without_preload_content(subject_id=subject_id)
-            raw_data = json.loads(response.data.decode('utf-8'))
-
-            # Fix known validation issues in procedures data (in place)
-            _fix_procedures_validation_issues(raw_data['subject_procedures'])
-
-        # Build the aind_data_schema Procedures from the response dict -- the same for both
-        # the clean-success and raw-parse fallback paths, so the return type is consistent.
-        return Procedures(**raw_data)
+    # Build the aind_data_schema Procedures from the response dict -- the same for both
+    # the clean-success and raw-parse fallback paths, so the return type is consistent.
+    return Procedures(**raw_data)
