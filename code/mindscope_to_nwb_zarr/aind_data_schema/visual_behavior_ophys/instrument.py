@@ -407,16 +407,9 @@ def build_2p_instrument(equipment_name: str) -> Instrument:
 # Mesoscope instrument (MESO.1)
 # ---------------------------------------------------------------------------
 
-_MESO_CAMERA_COORDINATE_SYSTEM = CoordinateSystem(
-    name="SIPE_CAMERA_RBF",
-    origin=Origin.FRONT_CENTER,
-    axes=[
-        Axis(name=AxisName.X, direction=Direction.LR),
-        Axis(name=AxisName.Y, direction=Direction.UD),
-        Axis(name=AxisName.Z, direction=Direction.BF),
-    ],
-    axis_unit=SizeUnit.MM,
-)
+# The mesoscope monitoring cameras are expressed in the standard SIPE camera frame
+# (front-center origin, RBF axes); use the shared library definition.
+_MESO_CAMERA_COORDINATE_SYSTEM = CoordinateSystemLibrary.SIPE_CAMERA_RBF
 
 
 def _build_meso_camera(name: str) -> Camera:
