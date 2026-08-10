@@ -457,12 +457,31 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
 
     subject_id = get_subject_id(nwbfile, session_info=session_info)
 
+    # Only include a LickSpoutConfig when a per-reward volume is available. Passive (and
+    # other no-reward) ophys sessions deliver no rewards, so get_individual_reward_volume
+    # returns None; LickSpoutConfig.volume is a required float and None fails validation,
+    # which would fail the whole session. The total reward consumed (0.0 in that case)
+    # is still recorded in subject_details below.
+    individual_reward_volume = get_individual_reward_volume(nwbfile)
+    reward_configs = []
+    if individual_reward_volume is not None:
+        reward_configs.append(
+            LickSpoutConfig(  # Lick spout is specific to the rig; see the reward spout / solenoid in the instrument
+                device_name="Reward Spout",
+                solution=Liquid.WATER,
+                solution_valence=Valence.POSITIVE,
+                volume=individual_reward_volume,
+                volume_unit=VolumeUnit.ML,
+                relative_position=["Anterior"],
+                notes="",  # TODO - write that reward volume was both x and y
+            )
+        )
+
     acquisition = Acquisition(
         subject_id=subject_id,
         specimen_id=None,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        # experimenters=None,
         # protocol.io DOI is not recorded in these NWB files (nwbfile.protocol is None
         # for all VB sub-experiment types); keep None until a protocol id is available.
         protocol_id=[nwbfile.protocol] if nwbfile.protocol else None,
@@ -473,8 +492,6 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct system library. depends on the transform
         # instrument and acquisition do not have the same coordinate system. 
         # For Ophys, it will define the location of the imaging FOV in a way that can be entered. Saskia will check.
-        # calibrations=None,  # will be difficult to find, so leave out
-        # maintenance=None,
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),
@@ -489,26 +506,14 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                     STIMULUS_MONITOR_NAME,     # visual stimulus screen
                     *behavior_video_devices,
                     device_names["reward_spout"],
-                    # Water rewards were delivered through the reward spout via a solenoid
-                    # (NI Research #161K011); see the reward spout / lick sensor in the instrument.
                 ],
                 configurations=[
                     imaging_config,
                     # No DetectorConfig is fabricated for the behavior cameras: the NWB
                     # does not record a true camera exposure time, and the cameras' frame
                     # rates are already on the instrument (30 Hz single-plane / 60 Hz
-                    # mesoscope). A fixed 33 ms "exposure" would be wrong for the 60 Hz
-                    # mesoscope cameras anyway.
-                    # TODO: Some sessions have no rewards
-                    # LickSpoutConfig(  # Lick spout is specific to the rig
-                    #     device_name="Lick_Spout_1",  # placeholder
-                    #     solution=Liquid.WATER,
-                    #     solution_valence=Valence.POSITIVE,
-                    #     volume=get_individual_reward_volume(nwbfile),
-                    #     volume_unit=VolumeUnit.ML,
-                    #     relative_position=["Anterior"],
-                    #     notes="",  # TODO - write that reward volume was both x and y
-                    # )
+                    # mesoscope).
+                    *reward_configs,  # LickSpoutConfig, only when a reward volume exists
                 ],
             ),
         ],
@@ -516,7 +521,6 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         stimulus_epochs=[
             # TODO consult StimulusEpoch objects from acquisition_visual_behavior_ophys_behavior.py
         ], 
-        # manipulations=None,
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,

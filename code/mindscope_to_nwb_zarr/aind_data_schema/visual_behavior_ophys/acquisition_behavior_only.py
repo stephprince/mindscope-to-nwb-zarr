@@ -116,8 +116,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     reward_configs = []
     if individual_reward_volume is not None:
         reward_configs.append(
-            LickSpoutConfig(  # Lick spout is specific to the rig
-                device_name="Reward Spout",  # placeholder
+            LickSpoutConfig(
+                device_name="Reward Spout",
                 solution=Liquid.WATER,
                 solution_valence=Valence.POSITIVE,
                 volume=individual_reward_volume,
@@ -131,7 +131,6 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         specimen_id=None,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        # experimenters=None, # TODO - determine where to extract
         # protocol.io DOI is not recorded in these NWB files (nwbfile.protocol is None
         # for all VB sub-experiment types); keep None until a protocol id is available.
         protocol_id=[nwbfile.protocol] if nwbfile.protocol else None,
@@ -139,11 +138,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description, # TODO - confirm consistent across experiments or if better option
         notes=None,
-        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARID, # TODO - determine correct system library
+        global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARID,
         # instrument and acquisition do not have the same coordinate system. 
         # For Ophys, it will define the location of the imaging FOV in a way that can be entered. Saskia will check.
-        # calibrations=None,  # will be difficult to find, so leave out
-        # maintenance=None,
         data_streams=[
             DataStream(
                 stream_start_time=get_data_stream_start_time(nwbfile),
@@ -188,7 +185,6 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 curriculum_status=get_curriculum_status(session_info)
             ),
         ], 
-        # manipulations=None, # TODO - think this is None (seems to be injections)
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,
