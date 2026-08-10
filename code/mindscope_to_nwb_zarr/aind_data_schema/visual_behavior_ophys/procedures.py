@@ -27,6 +27,12 @@ def _fix_procedures_validation_issues(subject_procedures: list) -> None:
     subject_procedures : list
         The subject_procedures list from the API response; modified in place.
     """
+    # Known start_dates among this subject's surgeries, used to impute a missing one below.
+    known_start_dates = [
+        p.get('start_date') for p in subject_procedures
+        if p.get('object_type') == 'Surgery' and p.get('start_date')
+    ]
+
     for i, procedure in enumerate(subject_procedures):
         # Fix Surgery procedures
         if procedure.get('object_type') == 'Surgery':
@@ -34,14 +40,29 @@ def _fix_procedures_validation_issues(subject_procedures: list) -> None:
                 subject_procedures[i]['anaesthesia']['duration'] = 0.0
                 warnings.warn("Fixed missing anaesthesia.duration, set to 0.0")
 
+            # Surgery.start_date is required; LIMS occasionally leaves it null. Impute from
+            # another surgery of the same subject (the best available anchor) and warn.
+            if procedure.get('start_date') is None and known_start_dates:
+                subject_procedures[i]['start_date'] = known_start_dates[0]
+                warnings.warn(
+                    f"Fixed missing Surgery.start_date, imputed {known_start_dates[0]} from "
+                    f"another surgery of the same subject (real date unknown)"
+                )
+
             # Fix procedures within Surgery
             for j, surgery_proc in enumerate(procedure['procedures']):
-                # Fix Craniotomy position (should be list or Translation object, not string)
-                if surgery_proc.get('object_type') == 'Craniotomy' and 'position' in surgery_proc:
-                    position = surgery_proc['position']
+                if surgery_proc.get('object_type') == 'Craniotomy':
+                    position = surgery_proc.get('position')
+                    # Craniotomy position should be a list (or Translation), not a string.
                     if isinstance(position, str):
                         subject_procedures[i]['procedures'][j]['position'] = [position]
                         warnings.warn(f"Fixed Craniotomy position from string '{position}' to list [{position}]")
+                    # A Circle craniotomy requires a position; LIMS occasionally leaves it
+                    # null. Impute the dataset norm (["Left"]); every other cached craniotomy
+                    # uses it and coordinate_system_name is already present on the record.
+                    elif position is None and surgery_proc.get('craniotomy_type') == 'Circle':
+                        subject_procedures[i]['procedures'][j]['position'] = ["Left"]
+                        warnings.warn('Fixed missing Circle Craniotomy.position, imputed ["Left"] (dataset norm)')
 
 
 def _fetch_procedures_raw(subject_id: str, api_host: str) -> Optional[dict]:
@@ -74,9 +95,8 @@ def _fetch_procedures_raw(subject_id: str, api_host: str) -> Optional[dict]:
 
             response = api_instance.get_procedures_without_preload_content(subject_id=subject_id)
             raw_data = json.loads(response.data.decode('utf-8'))
-
-            # Fix known validation issues in procedures data (in place)
-            _fix_procedures_validation_issues(raw_data['subject_procedures'])
+            # Note: known-validation-issue fixups are applied at build time (in the public
+            # function), not here, so they also cover the clean-path and cache-hit responses.
             return raw_data
 
 
@@ -135,6 +155,11 @@ def fetch_procedures_from_aind_metadata_service(
             return None
         store_cached(PROCEDURES, subject_id, raw_data)
 
-    # Build the aind_data_schema Procedures from the response dict -- the same for both
-    # the clean-success and raw-parse fallback paths, so the return type is consistent.
+    # Apply known-validation-issue fixups at build time (not before caching) so the cache
+    # holds the raw service response and any updated fixups apply on the next run without
+    # re-fetching. This also covers responses that arrived via the clean (non-fallback)
+    # API path, which previously skipped the fixups.
+    _fix_procedures_validation_issues(raw_data['subject_procedures'])
+
+    # Build the aind_data_schema Procedures from the (fixed) response dict.
     return Procedures(**raw_data)
