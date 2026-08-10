@@ -46,6 +46,14 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_instrument_id,
     get_total_reward_volume,
     get_individual_reward_volume,
+    get_ethics_review_id,
+)
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument import (
+    DETECTOR_NAME,
+    LASER_NAME,
+    STIMULUS_MONITOR_NAME,
+    microscope_name_for_equipment,
+    ophys_device_names,
 )
 
 
@@ -97,7 +105,11 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
     # NOTE: This is not always (512, 512) as described in the white paper
     imaging_plane_dimensions = [int(imaging_plane_description_re_match.group(1)), int(imaging_plane_description_re_match.group(2))]
     if is_single_plane:
-        assert imaging_plane_dimensions in ([447, 512], [512, 512]), f"Unexpected imaging plane dimensions for single-plane NWB file: {imaging_plane_dimensions}"
+        # Single-plane FOV height is always 512; the width is (roughly) rig-specific and
+        # varies across sessions (observed 447, 449, 451, 452 for CAM2P.5/.4/.3), so
+        # validate structurally rather than against a fixed allowlist.
+        assert imaging_plane_dimensions[1] == 512 and 0 < imaging_plane_dimensions[0] <= 512, \
+            f"Unexpected imaging plane dimensions for single-plane NWB file: {imaging_plane_dimensions}"
     else:
         assert imaging_plane_dimensions == [512, 512], f"Unexpected imaging plane dimensions for multi-plane NWB file: {imaging_plane_dimensions}"
 
@@ -204,13 +216,13 @@ def create_imaging_config(microscope_name: str, imaging_plane: ImagingPlane, dim
                 channel_name="Green channel",
                 intended_measurement=imaging_plane.indicator,
                 detector=DetectorConfig(
-                    device_name="PMT 1", # TODO: This should correspond to a device
-                    exposure_time=0.1, 
+                    device_name=DETECTOR_NAME,  # "PMT" in the instrument (2P + mesoscope)
+                    exposure_time=0.1,
                     trigger_type=TriggerType.INTERNAL,
                 ),
                 light_sources=[
                     LaserConfig(
-                        device_name="Laser A (Ti:Sapphire laser (Chameleon Vision, Coherent))",
+                        device_name=LASER_NAME,  # "Ti-Saph" in the instrument
                         wavelength=imaging_plane.excitation_lambda,
                         wavelength_unit=SizeUnit.NM,
                         power=None,  # NOTE: Laser power was adjusted per session and was not recorded in the NWB files
@@ -355,8 +367,11 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
             )
             planes.append(plane)
 
-            imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]
-            imaging_plane_targeted_structure = imaging_plane_group[0]["imaging_plane_targeted_structure"]
+            # Second plane of the coupled pair: use the *second* plane's own depth and
+            # targeted structure (coupled planes are imaged simultaneously at two
+            # different depths, so this must index [1], not [0]).
+            imaging_plane_depth = imaging_plane_group[1]["imaging_plane_depth"]
+            imaging_plane_targeted_structure = imaging_plane_group[1]["imaging_plane_targeted_structure"]
             plane = CoupledPlane(
                 depth=imaging_plane_depth,
                 depth_unit=SizeUnit.UM,
@@ -397,14 +412,17 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
     nwbfile = nwbfiles[0]
     session_info = session_infos[0]
 
-    # this script is for behavior + ophys sessions for the visual behavior ophys project
-    assert set(get_modalities(nwbfile)) == set([Modality.POPHYS, Modality.BEHAVIOR])
+    # this script is for behavior + ophys sessions for the visual behavior ophys project.
+    # get_modalities always adds BEHAVIOR_VIDEOS (eye/body cameras were always recorded).
+    assert set(get_modalities(nwbfile)) == {Modality.POPHYS, Modality.BEHAVIOR, Modality.BEHAVIOR_VIDEOS}
 
     assert len(nwbfile.devices) == 1
     device = next(iter(nwbfile.devices.values()))
 
-    # TODO the microscope name will need to match the device name defined in the instrument file
-    microscope_name = device.name  # such as CAM2P.3 or MESO.1
+    # The instrument names the microscope per-rig (e.g. "Scientifica 1", "Multiscope"),
+    # not by equipment id; map the NWB device name (== equipment_name) to that name so the
+    # ImagingConfig.device_name points at the instrument's microscope component.
+    microscope_name = microscope_name_for_equipment(device.name)  # e.g. "Scientifica 1" or "Multiscope"
 
     # Determine if single-plane or multi-plane based on device
     if re.match(r"CAM2P\.\d", device.name):
@@ -414,7 +432,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         assert device.description == "Allen Brain Observatory - Scientifica 2P Rig"
         assert device.manufacturer == "Scientifica"
         imaging_plane_info = process_nwb_imaging_plane(nwbfile, session_info, is_single_plane)
-        imaging_config = get_single_plane_imaging_config(device.name, imaging_plane_info)
+        imaging_config = get_single_plane_imaging_config(microscope_name, imaging_plane_info)
     elif device.name == "MESO.1":
         # multi-plane ophys sessions use the Mesoscope rig
         is_single_plane = False
@@ -426,18 +444,29 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         for nwbfile_plane, session_info_plane in zip(nwbfiles, session_infos):
             imaging_plane_info = process_nwb_imaging_plane(nwbfile_plane, session_info_plane, is_single_plane)
             imaging_plane_info_all.append(imaging_plane_info)
-        imaging_config = get_multiplane_imaging_config(device.name, imaging_plane_info_all)
+        imaging_config = get_multiplane_imaging_config(microscope_name, imaging_plane_info_all)
     else:
         raise ValueError(f"Unknown device: {device.name}")
 
+    # Device names to reference in the configs below, matching the instrument built for
+    # this rig (single-plane 2P vs mesoscope); see instrument.ophys_device_names.
+    device_names = ophys_device_names(is_single_plane)
+    behavior_video_devices = [device_names["body_camera"], device_names["eye_camera"]]
+    if "face_camera" in device_names:  # mesoscope also has a face camera
+        behavior_video_devices.append(device_names["face_camera"])
+
+    subject_id = get_subject_id(nwbfile, session_info=session_info)
+
     acquisition = Acquisition(
-        subject_id=get_subject_id(nwbfile, session_info=session_info),
+        subject_id=subject_id,
         specimen_id=None,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
         # experimenters=None,
-        protocol_id=None,
-        ethics_review_id=None,  # TODO @Saskia
+        # protocol.io DOI is not recorded in these NWB files (nwbfile.protocol is None
+        # for all VB sub-experiment types); keep None until a protocol id is available.
+        protocol_id=[nwbfile.protocol] if nwbfile.protocol else None,
+        ethics_review_id=get_ethics_review_id(subject_id),
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description,
         notes=None,
@@ -453,30 +482,23 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                 modalities=get_modalities(nwbfile),
                 code=None,
                 notes=None,
-                active_devices=[  # Instruments need to be defined
+                active_devices=[
                     microscope_name,
-                    "BehaviorCamera",
-                    "EyeCamera",
-                    "Lick_Spout_1",  # placeholder - this falls into devices involved in stimulus
-                    # ^^ Water rewards were delivered using a solenoid (NI Research, #161K011) 
-                    # to deliver a calibrated volume of fluid (5-10µL) through a blunted, 82mm 
-                    # 18g hypodermic needle (Hamilton) mounted to an air cylinder with stroke 
-                    # of 67mm, and positioned approximately 2-3 mm away from the animal’s mouth. 
-                    # The lick spout system is electrically connected to an Arduino for 
-                    # capacitive change lick detection. This system is mounted on a custom XYZ 
-                    # automated linear stage with 13mm travel in each axis enabling customizable 
-                    # and repeatable placement of the lickspout for each mouse during experimental 
-                    # sessions which span many days and across multiple scientific instruments. 
-                    # The lickspout retracts for safe load and unload of the mouse.
+                    device_names["laser"],     # excitation laser ("Ti-Saph")
+                    device_names["detector"],  # detector ("PMT")
+                    STIMULUS_MONITOR_NAME,     # visual stimulus screen
+                    *behavior_video_devices,
+                    device_names["reward_spout"],
+                    # Water rewards were delivered through the reward spout via a solenoid
+                    # (NI Research #161K011); see the reward spout / lick sensor in the instrument.
                 ],
                 configurations=[
                     imaging_config,
-                    DetectorConfig(
-                        device_name="BehaviorCamera",
-                        exposure_time=33,
-                        exposure_time_unit=TimeUnit.MS,
-                        trigger_type=TriggerType.INTERNAL,
-                    ),
+                    # No DetectorConfig is fabricated for the behavior cameras: the NWB
+                    # does not record a true camera exposure time, and the cameras' frame
+                    # rates are already on the instrument (30 Hz single-plane / 60 Hz
+                    # mesoscope). A fixed 33 ms "exposure" would be wrong for the 60 Hz
+                    # mesoscope cameras anyway.
                     # TODO: Some sessions have no rewards
                     # LickSpoutConfig(  # Lick spout is specific to the rig
                     #     device_name="Lick_Spout_1",  # placeholder
@@ -500,7 +522,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
             animal_weight_post=None,
             weight_unit=MassUnit.G,
             anaesthesia=None,
-            mouse_platform_name="Mindscope Disc",  # instrument will correspond to this
+            mouse_platform_name=device_names["running_disc"],  # matches the instrument's Disc
             reward_consumed_total=get_total_reward_volume(nwbfile),
             reward_consumed_unit=VolumeUnit.ML
         ),

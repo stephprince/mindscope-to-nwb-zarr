@@ -38,6 +38,11 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_total_reward_volume,
     get_individual_reward_volume,
     get_curriculum_status,
+    get_ethics_review_id,
+)
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument import (
+    REWARD_SPOUT_NAME,
+    RUNNING_DISC_NAME,
 )
 
 
@@ -94,19 +99,43 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     Acquisition
         AIND Acquisition data model populated with data from the NWB file
     """
-    # this script is for behavior only files for the visual behavior ophys experiments
-    assert get_modalities(nwbfile) == [Modality.BEHAVIOR]
+    # this script is for behavior only files for the visual behavior ophys experiments.
+    # get_modalities always adds BEHAVIOR_VIDEOS (eye/body cameras were always recorded).
+    assert set(get_modalities(nwbfile)) == {Modality.BEHAVIOR, Modality.BEHAVIOR_VIDEOS}
 
     visual_stimulation = get_visual_stimulation(nwbfile, session_info)
 
+    subject_id = get_subject_id(nwbfile, session_info=session_info)
+
+    # Only include a LickSpoutConfig when a per-reward volume is available. Passive (and
+    # other no-reward) sessions deliver no rewards, so get_individual_reward_volume
+    # returns None; LickSpoutConfig.volume is a required float and None fails validation,
+    # which would fail the whole session. The total reward consumed (0.0 in that case)
+    # is still recorded in subject_details below.
+    individual_reward_volume = get_individual_reward_volume(nwbfile)
+    reward_configs = []
+    if individual_reward_volume is not None:
+        reward_configs.append(
+            LickSpoutConfig(  # Lick spout is specific to the rig
+                device_name="Reward Spout",  # placeholder
+                solution=Liquid.WATER,
+                solution_valence=Valence.POSITIVE,
+                volume=individual_reward_volume,
+                volume_unit=VolumeUnit.ML,
+                relative_position=["Anterior"],  # TODO - what is the correct information here
+            )
+        )
+
     acquisition = Acquisition(
-        subject_id=get_subject_id(nwbfile, session_info=session_info),
+        subject_id=subject_id,
         specimen_id=None,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
         # experimenters=None, # TODO - determine where to extract
-        protocol_id=None,
-        ethics_review_id=None,  # TODO get from Saskia
+        # protocol.io DOI is not recorded in these NWB files (nwbfile.protocol is None
+        # for all VB sub-experiment types); keep None until a protocol id is available.
+        protocol_id=[nwbfile.protocol] if nwbfile.protocol else None,
+        ethics_review_id=get_ethics_review_id(subject_id),
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
         acquisition_type=nwbfile.session_description, # TODO - confirm consistent across experiments or if better option
         notes=None,
@@ -122,20 +151,10 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 modalities=get_modalities(nwbfile),
                 code=None,
                 notes=None,
-                active_devices=[  # Instruments need to be defined
-                    "Lick_Spout_1",  # placeholder
+                active_devices=[
+                    REWARD_SPOUT_NAME,  # "Reward Spout" in the instrument
                 ],
-                configurations=[
-                    # TODO: some sessions have no rewards
-                    # LickSpoutConfig(  # Lick spout is specific to the rig
-                    #     device_name="Lick_Spout_1",  # placeholder
-                    #     solution=Liquid.WATER,
-                    #     solution_valence=Valence.POSITIVE,
-                    #     volume=get_individual_reward_volume(nwbfile),
-                    #     volume_unit=VolumeUnit.ML,
-                    #     relative_position=["Anterior"], # TODO - what is the correct information here
-                    # )
-                ],
+                configurations=reward_configs,
             ),
         ],
         # TODO - handle different stimulus sets for the different training stages
@@ -175,7 +194,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
             animal_weight_post=None,
             weight_unit=MassUnit.G,
             anaesthesia=None,
-            mouse_platform_name="Running Wheel", # TODO - determine where to extract if needed
+            mouse_platform_name=RUNNING_DISC_NAME,  # matches the instrument's Disc
             reward_consumed_total=get_total_reward_volume(nwbfile), # TODO - check if calculation is sufficient
             reward_consumed_unit=VolumeUnit.ML
         ),

@@ -1,27 +1,26 @@
-"""Generates an example JSON file for visual behavior ophys subject"""
+"""Generates subject metadata from NWB files for visual behavior ophys sessions"""
 
-# NOTE: This is the same as for visual behavior ephys
-
-import pandas as pd
+import json
 import warnings
+import pandas as pd
+from datetime import datetime
 from pynwb import NWBFile
 from typing import Optional
 
-from aind_data_schema_models.organizations import Organization
-from aind_data_schema_models.species import Species, Strain
 from aind_data_schema.core.subject import Subject
-from aind_data_schema.components.subjects import Housing, Sex, MouseSubject
 
 from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id, get_subject_date_of_birth
 
-# Import the metadata service client
 import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
-import json
 
 
-def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.Series, api_host: Optional[str] = None) -> Optional[Subject]:
+def fetch_subject_from_aind_metadata_service(
+    nwbfile: NWBFile,
+    session_info: pd.Series,
+    api_host: Optional[str] = None,
+) -> Optional[Subject]:
     """
     Fetch subject metadata from AIND metadata service API
 
@@ -30,25 +29,43 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
     nwbfile : NWBFile
         The NWB file containing subject information for validation
     session_info : pd.Series
-        Series containing session information to extract subject ID
+        Series containing session information (from the behavior session or ophys
+        experiment table)
     api_host : str, optional
         The API host URL. Defaults to "http://aind-metadata-service"
 
     Returns
     -------
     Subject or None
-        Subject object if found, None otherwise
+        Subject object if found; None if the metadata service is unreachable.
+
+    Raises
+    ------
+    RuntimeError
+        If the subject is not found in the metadata service (HTTP 404). This fails the
+        whole session loudly so the missing subject is surfaced and addressed.
+    AssertionError
+        If the LIMS (metadata service) response does not match the NWB file for
+        species. Species must never differ, so a mismatch fails the whole session
+        loudly. Sex, date-of-birth, and genotype mismatches only warn (see Notes)
+        because the NWB files and LIMS are known to disagree for some subjects.
 
     Notes
     -----
     The API endpoint used is GET /api/v2/subject/{subject_id}
 
-    This function validates that the API response matches the NWB file metadata
-    (species, sex, date of birth, genotype).
+    The subject_id is the 6-digit mouse ID from the NWB file, cross-checked against
+    session_info['mouse_id'] (see ``get_subject_id``).
 
-    If the API call fails or validation fails, returns None and logs a warning.
+    The metadata service (LIMS) is treated as authoritative: the returned Subject is
+    built from its response, and on a sex, date-of-birth, or genotype disagreement with
+    the NWB the LIMS value is kept and a warning is emitted.
+
+    If the metadata service cannot be reached, returns None and logs a warning.
     """
     api_host = api_host if api_host else "http://aind-metadata-service"
+
+    # 6-digit mouse ID from the NWB file, cross-checked against session_info['mouse_id'].
     subject_id = get_subject_id(nwbfile, session_info)
 
     configuration = aind_metadata_service_client.Configuration(host=api_host)
@@ -56,48 +73,65 @@ def fetch_subject_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.
     with aind_metadata_service_client.ApiClient(configuration) as api_client:
         api_instance = aind_metadata_service_client.DefaultApi(api_client)
 
-        # there are known validation issues with old subject data, try to get the content here but accept the raw response if needed
-        raw_data = None
         try:
             subject_response = api_instance.get_subject(subject_id=subject_id)
-            # Extract raw data for validation (convert to dict if needed)
             raw_data = subject_response.model_dump() if hasattr(subject_response, 'model_dump') else subject_response
-            subject = subject_response
         except Urllib3HTTPError as e:
-            warnings.warn(f"Warning: Could not connect to AIND metadata service at {api_host}: {e}")
+            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
             return None
         except ApiException as e:
-            # If validation fails, try to get the raw response
-            print(f"Warning: Validation error for subject {subject_id}, attempting to parse raw response")
+            if e.status == 404:
+                raise RuntimeError(
+                    f"Subject {subject_id} not found in the AIND metadata service (HTTP 404)."
+                ) from e
+            warnings.warn(f"Validation error for subject {subject_id}, attempting to parse raw response")
 
-            # Get raw response without preload content validation
             response = api_instance.get_subject_without_preload_content(subject_id=subject_id)
             raw_data = json.loads(response.data.decode('utf-8'))
 
-            # Try to create Subject object from raw data, fixing known issues
-            # Fix null maternal_genotype issue
+            # Fix null genotype issues
             if raw_data.get('subject_details', {}).get('breeding_info', {}).get('maternal_genotype') is None:
                 raw_data['subject_details']['breeding_info']['maternal_genotype'] = ""
-                warnings.warn(f"Fixed null maternal genotype for subject {subject_id} in metadata service response. Setting to empty string.")
+                warnings.warn(f"Fixed null maternal genotype for subject {subject_id}")
+            if raw_data.get('subject_details', {}).get('breeding_info', {}).get('paternal_genotype') is None:
+                raw_data['subject_details']['breeding_info']['paternal_genotype'] = ""
+                warnings.warn(f"Fixed null paternal genotype for subject {subject_id}")
 
-            # Create Subject from the fixed data
-            subject = Subject(**raw_data)
+        # Cross-check the AIND metadata service (LIMS) response against the NWB file.
+        # The LIMS record is authoritative and is what the Subject is built from below.
+        # Species must agree (a mismatch raises loudly). Sex, date of birth, and genotype
+        # only warn: the NWB files and LIMS are known to disagree for some subjects, so we
+        # keep the LIMS value and surface the discrepancy.
+        subject_sex_dict = {"F": "Female", "M": "Male"}
 
-        # Validate API response against NWB file
-        if nwbfile is not None and raw_data is not None:
-            subject_sex_dict = {"F": "Female", "M": "Male"}
+        assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
+            f"Species mismatch: NWB={nwbfile.subject.species}, API={raw_data['subject_details']['species']['name']}"
 
-            assert nwbfile.subject.species == raw_data['subject_details']['species']['name'], \
-                f"Species mismatch between NWB file ({nwbfile.subject.species}) and metadata service ({raw_data['subject_details']['species']['name']})"
+        if subject_sex_dict.get(nwbfile.subject.sex) != raw_data['subject_details']['sex']:
+            warnings.warn(
+                f"Sex mismatch for subject {subject_id}: NWB={nwbfile.subject.sex}, "
+                f"LIMS={raw_data['subject_details']['sex']}. Using the LIMS value."
+            )
 
-            assert subject_sex_dict.get(nwbfile.subject.sex) == raw_data['subject_details']['sex'], \
-                f"Sex mismatch between NWB file ({nwbfile.subject.sex}) and metadata service ({raw_data['subject_details']['sex']})"
+        # The NWB stores only an integer-day age (P<days>D), so the DOB derived from
+        # it (acquisition_date - age) is approximate. Compare against the LIMS
+        # date_of_birth with a small tolerance and warn (rather than fail) on mismatch.
+        nwb_dob = get_subject_date_of_birth(nwbfile)
+        api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
+        if abs((nwb_dob - api_dob).days) > 2:
+            warnings.warn(
+                f"Date of birth mismatch >2 days for subject {subject_id}: NWB={nwb_dob}, "
+                f"LIMS={api_dob}. Using the LIMS value."
+            )
 
-            assert get_subject_date_of_birth(nwbfile).strftime("%Y-%m-%d") == raw_data['subject_details']['date_of_birth'], \
-                f"Date of birth mismatch between NWB file ({get_subject_date_of_birth(nwbfile)}) and metadata service ({raw_data['subject_details']['date_of_birth']})"
+        # The NWB and LIMS sometimes record the same genotype in different notations
+        # (e.g. a short form vs the full allelic form), so warn rather than fail.
+        if nwbfile.subject.genotype != raw_data['subject_details']['genotype']:
+            warnings.warn(
+                f"Genotype mismatch for subject {subject_id}: NWB={nwbfile.subject.genotype}, "
+                f"LIMS={raw_data['subject_details']['genotype']}. Using the LIMS value."
+            )
 
-            assert nwbfile.subject.genotype == raw_data['subject_details']['genotype'], \
-                f"Genotype mismatch between NWB file ({nwbfile.subject.genotype}) and metadata service ({raw_data['subject_details']['genotype']})"
-
-        return subject
-
+        # Build the aind_data_schema Subject from the response dict -- the same for both
+        # the clean-success and raw-parse fallback paths, so the return type is consistent.
+        return Subject(**raw_data)

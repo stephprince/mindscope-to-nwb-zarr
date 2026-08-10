@@ -1,4 +1,24 @@
-"""AIND metadata Instrument file for behavior and eye monitoring camera hardware"""
+"""AIND metadata Instrument file for behavior and eye monitoring camera hardware
+
+NOTE: This is a standalone, unused first draft. Git history
+shows it was added fresh on 2025-12-12 (commit 08833b6) in the aind-capsule-template
+boilerplate style; it is NOT derived from the visual coding pipeline (visual coding
+ophys has no camera/LED instrument analog). Its device names (``BehaviorCamera``,
+``EyeCamera``, ``BehaviorCameraAssembly``, ...) were placeholders.
+
+Its camera/filter hardware already matches the builders here (785 nm behavior
+shortpass, 850 nm eye bandpass, FF750-SDi02 dichroic). What it has that these
+builders do NOT yet model, and that are candidates to fold in later:
+  * IR illumination LEDs -- 740 nm behavior LED (+747 nm bandpass) and 850 nm eye
+    LED (+lens). These real illuminators are absent from all three builders and the
+    reference files.
+  * Richer camera/lens metadata -- camera gain and exposure notes; lens focal
+    length / aperture / working distance / magnification.
+Several of those values are still TODO/uncertain there (LED manufacturer/model, gain),
+so they should be incorporated selectively, not wholesale. The acquisition configs now
+reference the real device names defined in this module (see the name constants below),
+not the old placeholders.
+"""
 
 from datetime import date
 from decimal import Decimal
