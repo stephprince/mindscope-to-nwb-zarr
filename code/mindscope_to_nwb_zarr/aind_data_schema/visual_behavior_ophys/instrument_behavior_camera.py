@@ -94,22 +94,29 @@ behavior_camera_assembly = CameraAssembly(
     relative_position=[],  # TODO: add relative position if available
 )
 
-# Behavior Illumination LED with filter
+# Behavior Illumination LED with lens and filter
+# NOTE: Whitepaper says "Illumination: a 747+/-33 nm bandpass filter (Thorlabs, LB1092-B-ML)
+# in front of the LED prevented visible portion of the LED spectrum from reaching the mouse eye."
+# However, the Thorlabs LB1092-B-ML is a lens, not a filter. The 747+/-33 nm bandpass filter is 
+# likely a separate component (e.g., Semrock FF01-747/33-25).
 behavior_illumination_led = LightEmittingDiode(
     name="BehaviorIlluminationLED",
-    manufacturer=Organization.OTHER,  # TODO: Consider adding LED Engine Inc. to Organization enum
+    manufacturer=Organization.OTHER,
     model="LZ4-40R308-0000",
-    serial_number=None,  # TODO: add serial number if available
     wavelength=740,
     wavelength_unit=SizeUnit.NM,
     notes="LED Engine Inc. 740 nm illumination LED for behavior monitoring",
 )
 
+behavior_illumination_lens = Lens(
+    name="BehaviorIlluminationLens",
+    manufacturer=Organization.THORLABS,
+    model="LB1092-B-ML",
+    notes="Lens in front of behavior illumination LED",
+)
+
 behavior_illumination_filter = Filter(
     name="BehaviorIlluminationFilter",
-    manufacturer=Organization.THORLABS,
-    model="LB1092-B-ML",  # TODO: this is a lens model, confirm filter model
-    serial_number=None,  # TODO: add serial number if available
     filter_type=FilterType.BANDPASS,
     center_wavelength=747,
     wavelength_unit=SizeUnit.NM,
@@ -178,9 +185,8 @@ eye_camera_assembly = CameraAssembly(
 # Eye Illumination LED
 eye_illumination_led = LightEmittingDiode(
     name="EyeIlluminationLED",
-    manufacturer=Organization.OTHER,  # TODO: Consider adding LED Engine Inc. to Organization enum
+    manufacturer=Organization.OTHER,
     model="LZ1-10R602-0000",
-    serial_number=None,  # TODO: add serial number if available
     wavelength=850,
     wavelength_unit=SizeUnit.NM,
     notes="LED Engine Inc. 850 nm illumination LED for eye tracking",
@@ -190,7 +196,6 @@ eye_illumination_lens = Lens(
     name="EyeIlluminationLens",
     manufacturer=Organization.THORLABS,
     model="LB1092-B-ML",
-    serial_number=None,  # TODO: add serial number if available
     notes="Lens in front of eye illumination LED",
 )
 
