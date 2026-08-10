@@ -9,7 +9,7 @@ from aind_data_schema_models.brain_atlas import CCFv3
 from aind_data_schema_models.coordinates import AxisName, Direction, Origin
 from aind_data_schema.components.stimulus import VisualStimulation, PulseShape
 from aind_data_schema.components.configs import ProbeConfig
-from aind_data_schema.components.coordinates import Axis, CoordinateSystem, Rotation, Translation
+from aind_data_schema.components.coordinates import Axis, CoordinateSystem, CoordinateSystemLibrary, Rotation, Translation
 from aind_data_schema_models.units import AngleUnit, SizeUnit, TimeUnit
 from aind_data_schema_models.stimulus_modality import StimulusModality
 from aind_data_schema.components.identifiers import Software, Code
@@ -235,17 +235,10 @@ PROBE_INSERTION_DEPTH = [0, -3.5, 0, 3.5]
 
 # Ephys global (bregma-relative) coordinate system the probe transforms resolve into.
 # Ephys-specific: the ophys datasets position imaging planes in their own frames and
-# do not use this. See PROBE_COORDINATE_SYSTEM for the per-probe local frame.
-EPHYS_GLOBAL_COORDINATE_SYSTEM = CoordinateSystem(
-    name="BREGMA_RAS",
-    origin=Origin.BREGMA,
-    axis_unit=SizeUnit.MM,
-    axes=[
-        Axis(name=AxisName.ML, direction=Direction.LR),
-        Axis(name=AxisName.AP, direction=Direction.PA),
-        Axis(name=AxisName.SI, direction=Direction.IS),
-    ],
-)
+# do not use this. See PROBE_COORDINATE_SYSTEM for the per-probe local frame. Uses the
+# shared library BREGMA_RAS (bregma origin, ML/AP/SI = LR/PA/IS, mm); the library
+# PROBE_RUFD has no equivalent, so PROBE_COORDINATE_SYSTEM stays hand-defined below.
+EPHYS_GLOBAL_COORDINATE_SYSTEM = CoordinateSystemLibrary.BREGMA_RAS
 
 # Probe-local coordinate system (tip origin) that each ProbeConfig is expressed in.
 PROBE_COORDINATE_SYSTEM = CoordinateSystem(
@@ -405,6 +398,33 @@ def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, Optotag
         )
 
     return opto_stimulation
+
+
+def warn_if_too_few_presentations(stimulus_type: str, num_presentations: int,
+                                  expected_counts: dict) -> None:
+    """Warn if a parameterized stimulus table has fewer presentations than expected.
+
+    Some Allen Brain Observatory NWB files store truncated stimulus-presentation tables
+    (e.g. the Visual Coding 2P ``static_gratings`` table has only a few rows instead of
+    the full ~6000 individual grating presentations). ``expected_counts`` maps a
+    ``stimulus_type`` to its expected presentation count; only stimuli present in the map
+    are checked, so unknown/variable stimuli never warn.
+
+    Parameters
+    ----------
+    stimulus_type : str
+        The stimulus name (e.g. ``"static_gratings"``).
+    num_presentations : int
+        The number of presentation rows actually in the NWB stimulus table.
+    expected_counts : dict
+        Mapping of ``stimulus_type`` -> expected presentation count.
+    """
+    expected = expected_counts.get(stimulus_type)
+    if expected is not None and num_presentations < expected:
+        warnings.warn(
+            f"Stimulus '{stimulus_type}' has {num_presentations} presentations in the NWB "
+            f"file, fewer than the expected {expected} (the table may be truncated)."
+        )
 
 
 def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFrame) -> VisualStimulation:

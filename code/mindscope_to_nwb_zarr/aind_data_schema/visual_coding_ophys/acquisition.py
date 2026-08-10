@@ -39,6 +39,7 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_ethics_review_id,
     convert_intervals_to_visual_stimulus_epoch,
+    warn_if_too_few_presentations,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
     rig_for_experiment,
@@ -52,6 +53,17 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument impor
 # the processed NWB file. This may not match the summary images in the NWB file (e.g.
 # maximum_intensity_projection), which can be cropped by motion registration.
 IMAGING_FOV_DIMENSIONS = [512, 512]
+
+
+# Expected presentation counts for the parameterized (DynamicTable) stimuli in the Visual
+# Coding 2P protocol (de Vries et al., 2020). Used to warn when an NWB stimulus table is
+# truncated -- some files store only a few static_gratings rows instead of the full ~6000
+# individual grating presentations. Only DynamicTable stimuli are listed here; natural
+# scenes and movies are IndexSeries (frame-indexed), handled via num_frames/num_repeats.
+EXPECTED_PRESENTATIONS = {
+    "static_gratings": 6000,   # 6 orientations x 5 spatial frequencies x 4 phases x 50 + blank sweeps
+    "drifting_gratings": 628,  # 8 directions x 5 temporal frequencies x 15 + blank sweeps
+}
 
 
 def get_imaging_plane_info(nwbfile: NWBFile, session_info: pd.Series) -> dict:
@@ -311,6 +323,9 @@ def get_block_stimulus_annotation(nwbfile: NWBFile, stimulus_type: str,
 
     if isinstance(stimulus, TimeIntervals):
         presentations = stimulus.to_dataframe()
+        # Warn if this parameterized stimulus table is truncated (fewer presentations than
+        # the protocol delivered). Checked against the full table, not the per-block window.
+        warn_if_too_few_presentations(stimulus_type, len(presentations), EXPECTED_PRESENTATIONS)
         in_block = presentations[
             (presentations["start_time"] >= start_time - _BLOCK_TIME_EPS)
             & (presentations["stop_time"] <= stop_time + _BLOCK_TIME_EPS)
@@ -324,7 +339,22 @@ def get_block_stimulus_annotation(nwbfile: NWBFile, stimulus_type: str,
     elif isinstance(stimulus, IndexSeries):
         timestamps = np.asarray(stimulus.timestamps[:])
         in_block = (timestamps >= start_time - _BLOCK_TIME_EPS) & (timestamps <= stop_time + _BLOCK_TIME_EPS)
-        parameters["num_frames_presented"] = int(in_block.sum())
+        num_presented = int(in_block.sum())
+        if stimulus.indexed_timeseries is not None:
+            # Movie (indexed via an ImageSeries): num_frames is the movie length -- the
+            # number of distinct frames shown in this block -- and num_repeats is how many
+            # times the movie was shown in this block. A movie can span several epoch
+            # blocks (e.g. natural_movie_three is two blocks of 5 repeats), so both are
+            # per-block; num_frames * num_repeats == the frames presented in the block.
+            frame_indices = np.asarray(stimulus.data[:])[in_block]
+            num_frames = int(np.unique(frame_indices).size)
+            parameters["num_frames"] = num_frames
+            if num_frames:
+                parameters["num_repeats"] = num_presented // num_frames
+        else:
+            # Natural scenes / sparse noise (indexed via Images): not repeat-structured,
+            # so report the number of frame presentations in this epoch.
+            parameters["num_frames"] = num_presented
         # The referenced template (Images for natural scenes, ImageSeries for movies).
         template = stimulus.indexed_timeseries or stimulus.indexed_images
         stimulus_template_name = [template.name]

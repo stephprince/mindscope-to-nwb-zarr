@@ -34,6 +34,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_optostimulation_parameters,
     get_ethics_review_id,
     convert_intervals_to_visual_stimulus_epoch,
+    warn_if_too_few_presentations,
     EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
@@ -56,6 +57,20 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument impor
 # the platform's recorded completion by a little; a larger gap indicates a bad record
 # (e.g. session 840012044, whose CSV complete time is only ~2 min after its start).
 ACQUISITION_END_TIME_TOLERANCE = timedelta(minutes=10)
+
+
+# Expected per-stimulus presentation counts for the Visual Coding Neuropixels
+# "brain_observatory_1.1" protocol, used to warn when an NWB stimulus-presentation table
+# is truncated. Keyed by the stimulus name (the intervals table key with the trailing
+# "_presentations" removed). Only stimuli with a fixed, known count are listed; the
+# "functional_connectivity" protocol runs a different stimulus set with different counts,
+# so no expected counts are asserted for it (see get_stimulation_epochs).
+EXPECTED_PRESENTATIONS_BRAIN_OBSERVATORY = {
+    "static_gratings": 6000,
+    "drifting_gratings": 628,
+    "natural_scenes": 5950,
+    "flashes": 150,
+}
 
 
 def check_acquisition_end_time(acquisition_end_time: datetime, experiment_metadata: pd.Series,
@@ -153,6 +168,14 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series,
 
     stimulation_epochs = []
 
+    # Only the "brain_observatory_1.1" protocol has fixed, known presentation counts; the
+    # "functional_connectivity" protocol runs a different stimulus set, so skip the check
+    # there rather than warn spuriously.
+    expected_presentations = (
+        EXPECTED_PRESENTATIONS_BRAIN_OBSERVATORY
+        if nwbfile.stimulus_notes == "brain_observatory_1.1" else {}
+    )
+
     for table_key, intervals_table in nwbfile.intervals.items():
         # skip generic trials table that contains behavioral data and invalid_times sections
         if table_key in ["trials", "invalid_times"]:
@@ -162,6 +185,11 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series,
         stimulus_name = table_key.replace('_', ' ').title()
 
         intervals_table_filtered = intervals_table.to_dataframe()
+        # Warn if this stimulus-presentation table is truncated. The table key carries a
+        # "_presentations" suffix (e.g. "static_gratings_presentations"); strip it to match
+        # the expected-counts keys.
+        stimulus_type = table_key[:-len("_presentations")] if table_key.endswith("_presentations") else table_key
+        warn_if_too_few_presentations(stimulus_type, len(intervals_table_filtered), expected_presentations)
         stim_epoch = convert_intervals_to_visual_stimulus_epoch(
             stimulus_name=stimulus_name,
             table_key=table_key,
