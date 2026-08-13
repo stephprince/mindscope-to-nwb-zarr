@@ -11,10 +11,20 @@ Session structure (on DANDI):
     sub-{specimen_id}/
         sub-{specimen_id}_ses-{experiment_id}-{StimX}_behavior+image+ophys.nwb  - Processed data
         sub-{specimen_id}_ses-{experiment_id}-{StimX}_ophys.nwb                 - Raw 2p data
+
+Pipeline input:
+    A single zipped AIND metadata folder mounted at data/visual-coding-2p-metadata-only/,
+    named for the experiment's data asset. The metadata is unzipped into
+    results/<session name>/, the ophys experiment id is read from its data_description.json
+    tags (and used to look up the experiment row in ophys_experiments.json), the NWB files
+    are fetched from DANDI, and the Zarr store is written inside that folder as
+    results/<session name>/<session name>.nwb.zarr.
 """
 
-from pathlib import Path
+import json
 import re
+import zipfile
+from pathlib import Path
 
 from hdmf_zarr import ZarrDataIO
 from hdmf_zarr.nwb import NWBZarrIO
@@ -27,7 +37,9 @@ import quilt3 as q3
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-coding-ophys-inputs"
+# Mount point (on Code Ocean) of the metadata-only data asset: one zip per experiment, each
+# named for the experiment's AIND data asset (the zip's stem is the "session name").
+METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-2p-metadata-only"
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
@@ -266,51 +278,83 @@ def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> No
         stimulus_presentation.fields['indexed_images'] = images_container
 
 
+def _experiment_id_from_metadata(metadata_dir: Path) -> int:
+    """Resolve the ophys experiment id from an unzipped AIND metadata folder.
+
+    The ``data_description.json`` written by the metadata pipeline tags each asset with
+    ``"ophys_experiment_id: <id>"`` (see ``visual_coding_ophys/data_description.py``). This
+    reads that tag to recover the numeric experiment id used to look up the experiment row
+    (and thus the DANDI asset paths) for the conversion.
+    """
+    data_description_path = metadata_dir / "data_description.json"
+    if not data_description_path.exists():
+        raise RuntimeError(
+            f"data_description.json not found in {metadata_dir}; cannot resolve the experiment id."
+        )
+    with open(data_description_path) as f:
+        data_description = json.load(f)
+    for tag in data_description.get("tags", []):
+        if isinstance(tag, str) and tag.startswith("ophys_experiment_id:"):
+            return int(tag.split(":", 1)[1].strip())
+    raise RuntimeError(
+        f"No 'ophys_experiment_id: <id>' tag found in {data_description_path} "
+        f"(tags: {data_description.get('tags')})."
+    )
+
+
 def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
     """Convert NWB HDF5 file to Zarr.
 
-    Reads the input file from INPUT_FILE_DIR (a file named with a row index),
-    uses that index to look up the experiment in the ophys experiment metadata,
-    downloads the necessary NWB files from DANDI, modifies the NWBFile object
-    to update subject ID and stimulus template images, adds raw 2p data as
-    acquisition, and exports to Zarr format.
+    The pipeline input is a single zipped AIND metadata folder mounted at
+    ``METADATA_ZIP_DIR`` (``data/visual-coding-2p-metadata-only`` on Code Ocean), named for
+    the experiment's data asset. This unzips that metadata folder into
+    ``results_dir/<session name>/``, reads the ophys experiment id from the unzipped
+    ``data_description.json`` tags and looks up its row in ``ophys_experiments.json``,
+    downloads the processed + raw NWB files from DANDI, modifies the NWBFile object (subject
+    id, stimulus template images), adds the raw 2p data as acquisition, and exports to a Zarr
+    directory store inside that folder, ``results_dir/<session name>/<session name>.nwb.zarr``.
 
     Args:
-        results_dir: Directory to save the converted Zarr file.
+        results_dir: Directory to unzip the metadata into and to write the Zarr store.
         scratch_dir: Directory to download the NWB files to.
 
     Returns:
-        Path to the converted Zarr file.
+        Path to the converted Zarr directory store.
     """
-    # Confirm there is exactly one input file in the input directory
-    input_files = list(INPUT_FILE_DIR.iterdir())
-    if len(input_files) != 1:
-        raise RuntimeError(
-            f"Expected exactly one input file in {INPUT_FILE_DIR}, "
-            f"found {len(input_files)} files."
-        )
-    input_file = input_files[0]
+    # Each pipeline job mounts exactly one metadata zip.
+    zip_files = sorted(p for p in METADATA_ZIP_DIR.iterdir() if p.suffix == ".zip")
+    if not zip_files:
+        raise RuntimeError(f"No metadata zip found in {METADATA_ZIP_DIR}.")
+    metadata_zip = zip_files[0]
+    # The zip stem is the experiment's data asset name; the Zarr store is named after it.
+    session_name = metadata_zip.stem
+    print(f"Metadata zip: {metadata_zip.name} (session name: {session_name})")
 
-    # Parse row index from filename
-    row_index = int(input_file.name)
-    print(f"Processing row index {row_index} ...")
+    # Unzip the metadata folder into results/<session name>/.
+    metadata_out_dir = results_dir / session_name
+    metadata_out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Unzipping metadata into {metadata_out_dir} ...")
+    with zipfile.ZipFile(metadata_zip) as zf:
+        zf.extractall(metadata_out_dir)
 
-    # Download ophys experiment metadata from S3
+    # Resolve the ophys experiment id from the unzipped data description tags.
+    experiment_id = _experiment_id_from_metadata(metadata_out_dir)
+    print(f"Ophys experiment ID: {experiment_id}")
+
+    # Download the ophys experiment metadata from S3 and look up this experiment's row by id.
     print("Downloading ophys experiment metadata from S3 ...")
     b = q3.Bucket(S3_BUCKET)
     json_download_path = scratch_dir / "ophys_experiments.json"
     b.fetch(S3_METADATA_PATH, json_download_path.as_posix())
     ophys_experiment_metadata = pd.read_json(json_download_path)
-
-    # Get the row at the specified index
-    if row_index < 0 or row_index >= len(ophys_experiment_metadata):
+    matches = ophys_experiment_metadata[ophys_experiment_metadata['id'] == experiment_id]
+    if len(matches) != 1:
         raise RuntimeError(
-            f"Row index {row_index} out of range. "
-            f"Metadata has {len(ophys_experiment_metadata)} rows (0-{len(ophys_experiment_metadata)-1})."
+            f"Expected exactly one experiment with id {experiment_id} in {S3_METADATA_PATH}, "
+            f"found {len(matches)}."
         )
-    experiment_row = ophys_experiment_metadata.iloc[row_index]
-    experiment_id = experiment_row['id']
-    print(f"Experiment ID: {experiment_id}, stimulus_name: {experiment_row['stimulus_name']}")
+    experiment_row = matches.iloc[0]
+    print(f"stimulus_name: {experiment_row['stimulus_name']}")
 
     # Build DANDI asset paths from metadata
     processed_asset_path, raw_asset_path = get_dandi_asset_paths(experiment_row)
@@ -328,7 +372,6 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         base_nwbfile = processed_io.read()
 
         # Change subject ID to external donor name from metadata
-        old_subject_id = base_nwbfile.subject.subject_id
         new_subject_id = experiment_row['specimen']['donor']['external_donor_name']
         # WARNING: This approach modifies an attribute that should not be 
         # able to be reset. Validation should always be performed afterwards.
@@ -380,9 +423,9 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
                     )
                 base_nwbfile.add_acquisition(acq_data)
 
-            # Export to Zarr
-            new_base_filename = processed_file_path.stem.replace(old_subject_id, new_subject_id)
-            zarr_path = results_dir / "visual-coding-ophys" / f"{new_base_filename}.nwb.zarr"
+            # Export to Zarr. The store is named after the zipped session name and written
+            # inside the unzipped metadata folder so the metadata and Zarr live together.
+            zarr_path = metadata_out_dir / f"{session_name}.nwb.zarr"
             print(f"Exporting to Zarr file {zarr_path} ...")
             with NWBZarrIO(str(zarr_path), mode='w') as export_io:
                 export_io.export(src_io=processed_io, nwbfile=base_nwbfile, write_args=dict(link_data=False))
