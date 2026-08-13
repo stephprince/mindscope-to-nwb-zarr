@@ -47,7 +47,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-neuropixels-metadat
 # other job is a no-op (nothing downloaded or converted), so the pipeline can be validated
 # on a single session without spending compute on all 58. Set to None for production, where
 # every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = "386129_2018-06-27_14-07-11_nwb_2026-08-10_15-44-42.zip"
+TEST_ONLY_ZIP_NAME = None
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"
