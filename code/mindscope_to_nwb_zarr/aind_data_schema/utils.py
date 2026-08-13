@@ -353,8 +353,62 @@ def get_probe_configs(nwbfile: NWBFile) -> list[ProbeConfig]:
     ]
 
 
+# Optotagging pulse-train parameters from the technical whitepaper. The NWB optotagging
+# table records each pulse's start/stop time, ``duration`` and ``level`` (from which the
+# per-pulse durations and light levels below are read directly), but NOT the inter-pulse
+# interval or the raised-cosine ramp duration, so those two are taken from the whitepaper.
+# The inter-pulse interval is cross-checked against the observed pulse-onset timing (see
+# ``verify_optostimulation_timing``); the ramp duration has no counterpart in the file and
+# cannot be verified.
+OPTO_RAMP_DURATION_S = 0.0005
+OPTO_INTER_PULSE_INTERVAL_S = 1.5
+OPTO_INTER_PULSE_INTERVAL_DELAY_RANGE_S = (0.0, 0.5)
+# Tolerance (s) added to the whitepaper [interval, interval + max jitter] window when
+# checking the observed median pulse-onset gap; loose enough to avoid false positives from
+# the mixed pulse durations, tight enough to catch a grossly different timing.
+_OPTO_INTER_PULSE_INTERVAL_TOLERANCE_S = 0.5
+
+
+def verify_optostimulation_timing(optogenetic_stimulation) -> None:
+    """Warn if the whitepaper inter-pulse interval is inconsistent with the NWB opto timing.
+
+    The optotagging table records each pulse's ``start_time``/``stop_time`` but not the
+    inter-pulse interval itself, so ``OPTO_INTER_PULSE_INTERVAL_S`` (and its jitter range)
+    come from the whitepaper. This cross-checks that value against the data: the median gap
+    between consecutive pulse onsets should fall within the whitepaper window
+    ``[interval, interval + max jitter]`` widened by ``_OPTO_INTER_PULSE_INTERVAL_TOLERANCE_S``.
+    A larger deviation flags a session whose optotagging timing does not match the assumed
+    protocol. The raised-cosine ramp duration (``OPTO_RAMP_DURATION_S``) is not recorded
+    anywhere in the file and therefore cannot be verified.
+
+    Parameters
+    ----------
+    optogenetic_stimulation : TimeIntervals
+        The optogenetic stimulation time intervals from the NWB file.
+    """
+    starts = np.sort(optogenetic_stimulation.to_dataframe()['start_time'].to_numpy(dtype=float))
+    if starts.size < 2:
+        return  # need at least two pulses to measure an interval
+    median_onset_gap = float(np.median(np.diff(starts)))
+    low = OPTO_INTER_PULSE_INTERVAL_S - _OPTO_INTER_PULSE_INTERVAL_TOLERANCE_S
+    high = (OPTO_INTER_PULSE_INTERVAL_S + OPTO_INTER_PULSE_INTERVAL_DELAY_RANGE_S[1]
+            + _OPTO_INTER_PULSE_INTERVAL_TOLERANCE_S)
+    if not (low <= median_onset_gap <= high):
+        warnings.warn(
+            f"Optotagging inter-pulse interval from the whitepaper "
+            f"({OPTO_INTER_PULSE_INTERVAL_S}s + up to {OPTO_INTER_PULSE_INTERVAL_DELAY_RANGE_S[1]}s "
+            f"jitter) is inconsistent with the NWB optotagging timing: observed median pulse-onset "
+            f"gap is {median_onset_gap:.3f}s, outside the expected [{low:.3f}, {high:.3f}]s window."
+        )
+
+
 def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, OptotaggingStimulation]:
     """Extract optogenetic stimulation parameters from NWB optotagging data.
+
+    The per-pulse durations and light levels are read from the NWB optotagging table; the
+    ramp duration and inter-pulse interval are whitepaper constants (the table does not
+    record them). ``verify_optostimulation_timing`` cross-checks the inter-pulse interval
+    against the observed pulse-onset timing before the parameters are built.
 
     Parameters
     ----------
@@ -366,6 +420,8 @@ def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, Optotag
     dict[str, OptotaggingStimulation]
         Dictionary mapping stimulus names to OptotaggingStimulation objects
     """
+    # Cross-check the whitepaper inter-pulse interval against the recorded pulse timing.
+    verify_optostimulation_timing(optogenetic_stimulation)
     opto_stimulation = dict()
     opto_df = optogenetic_stimulation.to_dataframe()
     for stimulus_name, df in opto_df.groupby('stimulus_name'):
@@ -387,11 +443,11 @@ def get_optostimulation_parameters(optogenetic_stimulation) -> dict[str, Optotag
             pulse_shape=pulse_shape,
             pulse_durations=[np.round(p, 10) for p in pulse_durations],
             pulse_durations_unit=TimeUnit.S,
-            ramp_duration=0.0005, # from technical whitepaper
+            ramp_duration=OPTO_RAMP_DURATION_S, # from technical whitepaper; not recorded in the NWB, cannot be verified
             ramp_duration_unit=TimeUnit.S,
-            inter_pulse_interval=1.5,
+            inter_pulse_interval=OPTO_INTER_PULSE_INTERVAL_S,  # whitepaper; cross-checked in verify_optostimulation_timing
             inter_pulse_interval_unit=TimeUnit.S,
-            inter_pulse_interval_delay_range=(0, 0.5),
+            inter_pulse_interval_delay_range=OPTO_INTER_PULSE_INTERVAL_DELAY_RANGE_S,
             inter_pulse_interval_delay_range_unit=TimeUnit.S,
             light_levels=light_levels,
             condition_description=df['condition'].values[0],

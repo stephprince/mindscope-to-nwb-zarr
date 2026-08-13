@@ -1,6 +1,8 @@
 """Script to generate AIND data schema JSON files for visual coding ephys dataset"""
 
+import shutil
 import traceback
+import zipfile
 import pandas as pd
 
 from pathlib import Path
@@ -23,7 +25,37 @@ CODE_DIR = Path(__file__).parent.parent.parent.parent
 SUBJECT_MAPPING_PATH = CODE_DIR / "reference" / "visual_coding_ephys_subject_mapping.json"
 
 
-def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path) -> None:
+def zip_session_metadata(session_dir: Path, output_dir: Path) -> Path:
+    """Bundle a session's generated metadata files into a single zip and drop the folder.
+
+    ``write_standard_file`` writes the (up to five) metadata JSON files into
+    ``session_dir`` (named for the data asset). This zips those files into
+    ``output_dir/<session_dir.name>.zip`` and removes the now-redundant loose folder, so
+    ``output_dir`` ends up holding only one zip per session. The zip stores the JSON files
+    flat (no internal directory).
+
+    Parameters
+    ----------
+    session_dir : Path
+        Directory holding the session's written metadata JSON files.
+    output_dir : Path
+        Directory the per-session zip is written into.
+
+    Returns
+    -------
+    Path
+        Path to the created zip file.
+    """
+    zip_path = output_dir / f"{session_dir.name}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for json_file in sorted(session_dir.glob("*.json")):
+            zf.write(json_file, arcname=json_file.name)
+    shutil.rmtree(session_dir, ignore_errors=True)
+    return zip_path
+
+
+def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path,
+                              zip_output: bool = False) -> None:
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -35,6 +67,11 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
         Session metadata row from the session table
     output_dir : Path
         Path to directory to save output JSON files
+    zip_output : bool, optional
+        When True, the session's metadata files are bundled into a single
+        ``<data asset name>.zip`` in ``output_dir`` and the loose per-session folder is
+        removed (see ``zip_session_metadata``), so ``output_dir`` holds only one zip per
+        session. Defaults to False (the loose per-session folder is kept).
     """
     # Read NWB file
     nwbfile = read_nwb(nwb_file_path)
@@ -53,17 +90,22 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
     procedures = fetch_procedures_from_aind_metadata_service(nwbfile, subject_mapping_path=SUBJECT_MAPPING_PATH)
     instrument = generate_instrument(session_info)
     metadata_models = [data_description, subject, acquisition, procedures, instrument]
-    
+
     # Save the metadata files
-    Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)
+    session_dir = output_dir / data_description.name
+    session_dir.mkdir(parents=True, exist_ok=True)
     for model in metadata_models:
         if model is not None:
             serialized = model.model_dump_json()
             deserialized = model.model_validate_json(serialized)
-            deserialized.write_standard_file(output_directory=output_dir / data_description.name)
+            deserialized.write_standard_file(output_directory=session_dir)
+
+    # Optionally collapse the per-session folder into a single zip in output_dir.
+    if zip_output:
+        zip_session_metadata(session_dir, output_dir)
 
 
-def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
+def generate_all_session_metadata(data_dir: Path, results_dir: Path, zip_output: bool = False) -> None:
     """
     Iterate through all sessions in the mounted data directory and generate session metadata.
 
@@ -76,6 +118,10 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
         Path to data directory where S3 bucket is mounted
     results_dir : Path
         Path to directory to save output metadata JSON files
+    zip_output : bool, optional
+        When True, each session's metadata files are bundled into a single per-session zip
+        so the output directory holds only one zip per session (see
+        ``generate_session_metadata``). Defaults to False.
     """
     output_dir = results_dir / "visual-coding-neuropixels-metadata"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +153,7 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
                 nwb_file_path=nwb_file_path,
                 session_info=session_row,
                 output_dir=output_dir,
+                zip_output=zip_output,
             )
         except Exception as e:
             print(f"Error generating metadata for session {session_id}: {e}")

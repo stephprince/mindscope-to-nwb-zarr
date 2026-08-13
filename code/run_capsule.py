@@ -83,6 +83,12 @@ def run():
     else:
         raise ValueError(f"Unsupported dataset type: {dataset}")
 
+    # A conversion may be a no-op (e.g. a Visual Coding Ephys test job whose mounted zip is
+    # not the hardcoded target); there is nothing to inspect in that case.
+    if result_zarr_path is None:
+        print("No Zarr produced for this job (no-op); nothing to inspect.")
+        return
+
     # Validate and inspect resulting Zarr file
     inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
     print(f"Inspecting resulting Zarr file {result_zarr_path} ...")

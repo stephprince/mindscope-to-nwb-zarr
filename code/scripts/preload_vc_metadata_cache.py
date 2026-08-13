@@ -19,7 +19,7 @@ returns the same record), so a single fetcher pair is used for every subject.
 Usage
 -----
     uv run python scripts/preload_vc_metadata_cache.py
-    uv run python scripts/preload_vc_metadata_cache.py --workers 4
+    uv run python scripts/preload_vc_metadata_cache.py --workers 2
     uv run python scripts/preload_vc_metadata_cache.py --force   # refetch even if cached
 """
 import argparse
@@ -89,8 +89,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=["ophys", "ephys", "both"], default="both",
                         help="which Visual Coding pipeline's subjects to preload (default both)")
-    parser.add_argument("--workers", type=int, default=4,
-                        help="parallel fetch threads (default 4; keep low for the metadata service)")
+    parser.add_argument("--workers", type=int, default=3,
+                        help="parallel fetch threads (default 3; the metadata service empties "
+                             "responses above ~3 workers, so keep it low)")
     parser.add_argument("--force", action="store_true",
                         help="refetch and overwrite even if already cached")
     args = parser.parse_args()

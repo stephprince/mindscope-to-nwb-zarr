@@ -23,10 +23,16 @@ Use <= 3 workers: the AIND metadata service returns empty bodies under higher co
 Usage
 -----
     uv run python scripts/run_all_vc_ephys.py                 # all 58 sessions
+    uv run python scripts/run_all_vc_ephys.py --zip           # 58 zips in metadata_results/visual_coding_ephys
     uv run python scripts/run_all_vc_ephys.py --workers 3
     uv run python scripts/run_all_vc_ephys.py --limit 3       # first 3 pending (smoke test)
     uv run python scripts/run_all_vc_ephys.py --sessions 715093703 767871931
     uv run python scripts/run_all_vc_ephys.py --no-retry-failed
+
+With --zip, each session's five metadata files are bundled into a single
+<data asset name>.zip written to code/metadata_results/visual_coding_ephys/ (the loose
+files are staged under scratch and the run report stays in _report), so that directory
+ends up holding only the 58 per-session zips.
 """
 import argparse
 import json
@@ -57,15 +63,24 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.procedures impor
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.metadata_generation import (
     SUBJECT_MAPPING_PATH,
+    zip_session_metadata,
 )
 
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE.parent.parent / "data"
 SESSIONS_CSV = DATA_DIR / "allen-brain-observatory" / "visual-coding-neuropixels" / "ecephys-cache" / "sessions.csv"
 OUTPUT_DIR = HERE.parent / "scratch" / "vc_ephys_metadata_test"
-REPORT_DIR = OUTPUT_DIR / "_report"
+# Run report (JSONL + summary) lives under metadata_results/reports/visual_coding_ephys,
+# a sibling of the zips deliverable dir (so the deliverable dir stays only-zips).
+REPORT_DIR = HERE.parent / "metadata_results" / "reports" / "visual_coding_ephys"
 SESSIONS_JSONL = REPORT_DIR / "sessions.jsonl"
 SUMMARY_JSON = REPORT_DIR / "summary.json"
+
+# Deliverable directory for the zipped metadata (one zip per session, nothing else).
+# Used when --zip is passed; the loose per-session files are staged under OUTPUT_DIR and
+# the report goes to REPORT_DIR (a sibling), so this directory ends up holding only the 58 zips.
+DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual_coding_ephys"
+STAGING_DIR = OUTPUT_DIR / "_staging"
 
 S3_NWB_URL_TEMPLATE = (
     "https://allen-brain-observatory.s3.amazonaws.com/"
@@ -105,11 +120,15 @@ def stream_nwb_from_s3(session_id: int):
     return nwbfile, io, h5_file, file_handle
 
 
-def _generate_and_write(nwbfile, session_info: pd.Series) -> tuple[Path, int]:
+def _generate_and_write(nwbfile, session_info: pd.Series, zip_dir: str | None = None) -> tuple[Path, int]:
     """Run the production generators for one streamed session and write the 5 files.
 
     Mirrors the production generate_session_metadata (which reads from a local path);
-    here the nwbfile is streamed. Returns (output_dir, n_stimulus_epochs).
+    here the nwbfile is streamed. When ``zip_dir`` is None the files are written loosely to
+    ``OUTPUT_DIR/<name>/`` (the original test-runner behavior); when set, they are written
+    to a staging folder under ``STAGING_DIR`` so the caller can bundle them into a single
+    zip in the deliverable directory. Returns (output_dir, n_stimulus_epochs), where
+    output_dir is the folder holding the written JSON files (staging folder in zip mode).
     """
     assert nwbfile.stimulus_notes == session_info['session_type'], \
         f"Session type mismatch: {nwbfile.stimulus_notes} != {session_info['session_type']}"
@@ -123,7 +142,10 @@ def _generate_and_write(nwbfile, session_info: pd.Series) -> tuple[Path, int]:
     instrument = generate_instrument(session_info)
     models = [data_description, subject, acquisition, procedures, instrument]
 
-    out_dir = OUTPUT_DIR / data_description.name
+    # In zip mode, stage the loose files under scratch so the deliverable dir stays clean;
+    # otherwise write them directly under OUTPUT_DIR (original behavior).
+    base_dir = STAGING_DIR if zip_dir else OUTPUT_DIR
+    out_dir = base_dir / data_description.name
     out_dir.mkdir(parents=True, exist_ok=True)
     for model in models:
         if model is not None:
@@ -135,8 +157,13 @@ def _generate_and_write(nwbfile, session_info: pd.Series) -> tuple[Path, int]:
     return out_dir, n_epochs
 
 
-def process_session(session_id: int) -> dict:
-    """Generate metadata for one session. Never raises; returns a result record."""
+def process_session(session_id: int, zip_dir: str | None = None) -> dict:
+    """Generate metadata for one session. Never raises; returns a result record.
+
+    When ``zip_dir`` is set, the session's five metadata files are bundled into a single
+    ``<data asset name>.zip`` in that directory (and the loose staging folder removed), so
+    the deliverable directory ends up holding only one zip per session.
+    """
     rows = _rows()
     row = rows[rows["id"] == session_id]
     session_info = row.iloc[0] if len(row) else pd.Series({"id": session_id})
@@ -182,7 +209,7 @@ def process_session(session_id: int) -> dict:
                 caught[:] = []
                 result["gen_attempts"] = attempt + 1
                 try:
-                    out_dir, n_epochs = _generate_and_write(nwbfile, session_info)
+                    out_dir, n_epochs = _generate_and_write(nwbfile, session_info, zip_dir=zip_dir)
                     missing = _missing_required_files(out_dir)
                     if missing:
                         if out_dir is not None and out_dir.exists():
@@ -193,6 +220,12 @@ def process_session(session_id: int) -> dict:
                             f"missing: {', '.join(missing)}"
                         )
                     result["n_stimulus_epochs"] = n_epochs
+                    # Count the files while the (staging) folder still exists, then, in zip
+                    # mode, bundle them into a single zip in the deliverable dir and point
+                    # out_dir at that zip so the folder name/record reflects the zip.
+                    result["n_files"] = len(list(out_dir.glob("*.json")))
+                    if zip_dir is not None:
+                        out_dir = zip_session_metadata(out_dir, Path(zip_dir))
                     last_exc = None
                     break
                 except Exception as e:
@@ -203,7 +236,6 @@ def process_session(session_id: int) -> dict:
 
             if out_dir is not None:
                 result["output_folder"] = out_dir.name
-                result["n_files"] = len(list(out_dir.glob("*.json")))
             result["status"] = "OK"
         except Exception as e:
             result["status"] = "FAILED"
@@ -258,11 +290,21 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="only first N pending sessions")
     parser.add_argument("--sessions", type=int, nargs="*", default=None, help="explicit session ids")
     parser.add_argument("--no-retry-failed", dest="retry_failed", action="store_false")
+    parser.add_argument("--zip", dest="zip", action="store_true",
+                        help="bundle each session's 5 files into one zip in "
+                             "metadata_results/visual_coding_ephys (dir holds only the 58 zips)")
     parser.set_defaults(retry_failed=True)
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    # In zip mode the deliverable dir gets only the per-session zips; loose files are staged
+    # under scratch (STAGING_DIR) and the report stays in REPORT_DIR.
+    zip_dir = None
+    if args.zip:
+        DELIVERABLE_DIR.mkdir(parents=True, exist_ok=True)
+        STAGING_DIR.mkdir(parents=True, exist_ok=True)
+        zip_dir = str(DELIVERABLE_DIR)
 
     sessions_df = pd.read_csv(SESSIONS_CSV)
     all_ids = [int(x) for x in sessions_df["id"].tolist()]
@@ -278,7 +320,7 @@ def main() -> int:
             ids = ids[:args.limit]
 
     print(f"Total sessions: {len(all_ids)} | to process now: {len(ids)} | workers: {args.workers}", flush=True)
-    print(f"Output:  {OUTPUT_DIR}", flush=True)
+    print(f"Output:  {DELIVERABLE_DIR if zip_dir else OUTPUT_DIR}{' (zips)' if zip_dir else ''}", flush=True)
     print(f"Report:  {SESSIONS_JSONL}", flush=True)
     if not ids:
         print("Nothing to do.", flush=True)
@@ -289,7 +331,7 @@ def main() -> int:
     t_start = time.time()
     with open(SESSIONS_JSONL, "a", encoding="utf-8") as jsonl, \
             ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(process_session, sid): sid for sid in ids}
+        futures = {pool.submit(process_session, sid, zip_dir): sid for sid in ids}
         for n, fut in enumerate(as_completed(futures), 1):
             sid = futures[fut]
             try:
