@@ -41,6 +41,12 @@ root_dir = Path(__file__).parent.parent.parent.parent
 # named for the experiment's AIND data asset (the zip's stem is the "session name").
 METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-2p-metadata-only"
 
+# TEST TOGGLE: each Code Ocean pipeline job mounts exactly one metadata zip. When this is
+# set to a zip filename, only the job whose mounted zip matches it does any work; every
+# other job is a no-op (writes an empty placeholder, converts nothing). Set to None for
+# production, where every job converts its mounted zip.
+TEST_ONLY_ZIP_NAME = None
+
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
 
@@ -302,7 +308,7 @@ def _experiment_id_from_metadata(metadata_dir: Path) -> int:
     )
 
 
-def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
+def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
     """Convert NWB HDF5 file to Zarr.
 
     The pipeline input is a single zipped AIND metadata folder mounted at
@@ -319,13 +325,28 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         scratch_dir: Directory to download the NWB files to.
 
     Returns:
-        Path to the converted Zarr directory store.
+        Path to the converted Zarr directory store, or ``None`` if the job is a no-op
+        because its mounted zip does not match ``TEST_ONLY_ZIP_NAME`` (in which case an
+        empty placeholder file named for the session is written to ``results_dir``).
     """
     # Each pipeline job mounts exactly one metadata zip.
     zip_files = sorted(p for p in METADATA_ZIP_DIR.iterdir() if p.suffix == ".zip")
     if not zip_files:
         raise RuntimeError(f"No metadata zip found in {METADATA_ZIP_DIR}.")
     metadata_zip = zip_files[0]
+
+    # TEST no-op: when a target zip is hardcoded, only that experiment's job does work; every
+    # other job writes an empty placeholder file (named for the session) to results and skips.
+    if TEST_ONLY_ZIP_NAME is not None and metadata_zip.name != TEST_ONLY_ZIP_NAME:
+        results_dir.mkdir(parents=True, exist_ok=True)
+        placeholder = results_dir / metadata_zip.stem
+        placeholder.touch()
+        print(
+            f"[TEST_ONLY_ZIP_NAME] Mounted zip {metadata_zip.name} is not the test target "
+            f"{TEST_ONLY_ZIP_NAME}; skipping conversion (wrote empty placeholder {placeholder.name})."
+        )
+        return None
+
     # The zip stem is the experiment's data asset name; the Zarr store is named after it.
     session_name = metadata_zip.stem
     print(f"Metadata zip: {metadata_zip.name} (session name: {session_name})")
