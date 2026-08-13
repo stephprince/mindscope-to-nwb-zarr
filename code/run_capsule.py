@@ -89,8 +89,11 @@ def run():
         print("No Zarr produced for this job (no-op); nothing to inspect.")
         return
 
-    # Validate and inspect resulting Zarr file
-    inspector_report_path = result_zarr_path.with_suffix('.inspector_report.txt')
+    # Validate and inspect resulting Zarr file. Write the report into a qc/ subfolder
+    # adjacent to the Zarr (and, for Visual Coding Ephys, the unzipped metadata JSONs).
+    qc_dir = result_zarr_path.parent / "qc"
+    qc_dir.mkdir(parents=True, exist_ok=True)
+    inspector_report_path = qc_dir / (result_zarr_path.stem + ".inspector_report.txt")
     print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
     inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
