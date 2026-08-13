@@ -264,7 +264,8 @@ def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
 
     Returns:
         Path to the converted Zarr directory store, or ``None`` if the job is a no-op
-        because its mounted zip does not match ``TEST_ONLY_ZIP_NAME``.
+        because its mounted zip does not match ``TEST_ONLY_ZIP_NAME`` (in which case an
+        empty placeholder file named for the session is written to ``results_dir``).
     """
     # Each pipeline job mounts exactly one session zip.
     zip_files = sorted(p for p in METADATA_ZIP_DIR.iterdir() if p.suffix == ".zip")
@@ -273,11 +274,16 @@ def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     metadata_zip = zip_files[0]
 
     # TEST no-op: when a target zip is hardcoded, only that session's job does work; every
-    # other job returns without downloading or converting anything (see TEST_ONLY_ZIP_NAME).
+    # other job does no download/conversion. It still writes an empty placeholder file
+    # (named for the session) to results so the Code Ocean job produces output.
     if TEST_ONLY_ZIP_NAME is not None and metadata_zip.name != TEST_ONLY_ZIP_NAME:
+        results_dir.mkdir(parents=True, exist_ok=True)
+        placeholder = results_dir / metadata_zip.stem
+        placeholder.touch()
         print(
             f"[TEST_ONLY_ZIP_NAME] Mounted zip {metadata_zip.name} is not the test target "
-            f"{TEST_ONLY_ZIP_NAME}; skipping this job (no-op)."
+            f"{TEST_ONLY_ZIP_NAME}; skipping conversion (wrote empty placeholder "
+            f"{placeholder.name})."
         )
         return None
     # The zip stem is the session's data asset name; the Zarr store is named after it.
