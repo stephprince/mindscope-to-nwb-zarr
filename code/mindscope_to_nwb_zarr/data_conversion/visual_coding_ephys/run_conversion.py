@@ -63,17 +63,39 @@ EcephysSpecimen = get_class('EcephysSpecimen', 'ndx-aibs-ecephys')
 # EcephysSpecimen "strain" field is not populated, leading to a MissingRequiredBuildWarning.
 # To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
 # by getting the "strain" value from the builder "strain" attribute.
+def _strain_value_to_str(strain_value):
+    """Coerce a builder ``strain`` value to ``str`` (or ``None`` if genuinely absent).
+
+    ``strain`` is a required text *attribute* of the ndx-aibs-ecephys ``EcephysSpecimen``
+    type, but the core NWB ``Subject`` later added an optional ``strain`` *dataset*. In the
+    original HDF5 files ``builder.get('strain')`` yields the attribute as a ``str``, but
+    after an HDF5->Zarr export ``strain`` round-trips as the core dataset, so on read-back
+    the builder yields a ``DatasetBuilder`` (whose ``data`` may be ``bytes``). This unwraps
+    whichever representation is present; returning ``None`` for an absent value preserves the
+    pre-workaround behavior (a non-fatal ``MissingRequiredBuildWarning``) rather than raising.
+    """
+    if hasattr(strain_value, "data"):  # DatasetBuilder (dataset form, e.g. after Zarr export)
+        strain_value = strain_value.data
+    if isinstance(strain_value, bytes):
+        strain_value = strain_value.decode()
+    if strain_value is None:
+        return None
+    return str(strain_value)
+
+
 @register_map(EcephysSpecimen)
 class CustomEcephysSpecimenMapper(ObjectMapper):
     """Instruct the object mapper for EcephysSpecimen to get strain (str) from builder
     when constructing the object from the EcephysSpecimen builder read from a file.
+
+    The value is read from whichever representation the file uses (the extension's text
+    attribute in the original HDF5, or the core Subject's ``strain`` dataset after an
+    HDF5->Zarr export); see ``_strain_value_to_str``.
     """
 
     @ObjectMapper.constructor_arg("strain")
     def strain_carg(self, builder, manager):
-        strain_value = builder.get('strain')
-        assert isinstance(strain_value, str)
-        return strain_value
+        return _strain_value_to_str(builder.get('strain'))
 
 
 def _open_nwb_hdf5(path: Path, mode: str, manager=None) -> NWBHDF5IO:
