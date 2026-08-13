@@ -23,10 +23,16 @@ concurrency (its procedures endpoint is slow), which surfaces as JSONDecodeError
 Usage
 -----
     uv run python scripts/run_all_vc_ophys.py                 # all sessions
+    uv run python scripts/run_all_vc_ophys.py --zip           # one zip per session in metadata_results/visual_coding_ophys
     uv run python scripts/run_all_vc_ophys.py --workers 3
     uv run python scripts/run_all_vc_ophys.py --limit 5       # first 5 pending (smoke test)
     uv run python scripts/run_all_vc_ophys.py --indices 50 200 350
     uv run python scripts/run_all_vc_ophys.py --no-retry-failed
+
+With --zip, each session's five metadata files are bundled into a single
+<data asset name>.zip written to code/metadata_results/visual_coding_ophys/ (the loose
+folder is written under scratch and the run report stays in _report), so that directory
+ends up holding only the per-session zips.
 """
 import argparse
 import json
@@ -47,6 +53,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.metadata_generat
     get_dandi_asset_path,
     stream_nwb_from_dandi,
     generate_session_metadata,
+    zip_session_metadata,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ophys.instrument import (
     rig_for_experiment,
@@ -59,6 +66,12 @@ OUTPUT_DIR = HERE.parent / "scratch" / "vc_ophys_metadata_test"
 REPORT_DIR = OUTPUT_DIR / "_report"
 SESSIONS_JSONL = REPORT_DIR / "sessions.jsonl"
 SUMMARY_JSON = REPORT_DIR / "summary.json"
+
+# Deliverable directory for the zipped metadata (one zip per session, nothing else).
+# Used when --zip is passed: each session's loose folder is written under OUTPUT_DIR and
+# then bundled into a single zip here, so this directory holds only the per-session zips.
+# The run report stays in REPORT_DIR (under scratch), so the deliverable stays only-zips.
+DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual_coding_ophys"
 
 # The internal AIND metadata service returns empty/truncated bodies under concurrent
 # load (subject + procedures fetches, each with a raw-parse fallback = up to 4 calls
@@ -112,11 +125,13 @@ def _find_output_dir(subject_id: str, session_start_time) -> Path | None:
     return max(matches, key=lambda p: p.stat().st_mtime)
 
 
-def process_experiment(index: int) -> dict:
+def process_experiment(index: int, zip_dir: str | None = None) -> dict:
     """Generate metadata for one experiment (by row index). Never raises.
 
     Returns a result dict describing status, timing, captured warnings, and (on
-    failure) the exception type/message/traceback.
+    failure) the exception type/message/traceback. When ``zip_dir`` is set, the session's
+    five metadata files are bundled into a single ``<data asset name>.zip`` in that
+    directory (and the loose folder removed), so the deliverable holds only one zip/session.
     """
     row = _rows()[index]
     session_info = pd.Series(row)
@@ -224,6 +239,11 @@ def process_experiment(index: int) -> dict:
                     with open(acq_path) as f:
                         acq = json.load(f)
                     result["n_stimulus_epochs"] = len(acq.get("stimulus_epochs", []))
+                # In zip mode, bundle the folder into a single zip in the deliverable dir
+                # (done after the reads above, since it removes the loose folder).
+                if zip_dir is not None:
+                    zip_path = zip_session_metadata(out_dir, Path(zip_dir))
+                    result["output_folder"] = zip_path.name
             result["status"] = "OK"
         except Exception as e:
             result["status"] = "FAILED"
@@ -289,11 +309,20 @@ def main() -> int:
                         help="explicit row indices to process (overrides resume/limit)")
     parser.add_argument("--no-retry-failed", dest="retry_failed", action="store_false",
                         help="do not retry experiments previously recorded as FAILED")
+    parser.add_argument("--zip", dest="zip", action="store_true",
+                        help="bundle each session's 5 files into one zip in "
+                             "metadata_results/visual_coding_ophys (dir holds only the zips)")
     parser.set_defaults(retry_failed=True)
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    # In zip mode the deliverable dir gets only the per-session zips; loose folders are
+    # written under OUTPUT_DIR (scratch) then zipped away, and the report stays in REPORT_DIR.
+    zip_dir = None
+    if args.zip:
+        DELIVERABLE_DIR.mkdir(parents=True, exist_ok=True)
+        zip_dir = str(DELIVERABLE_DIR)
 
     rows = json.load(open(OPHYS_JSON))
     total = len(rows)
@@ -311,7 +340,7 @@ def main() -> int:
 
     print(f"Total experiments: {total} | to process now: {len(indices)} | "
           f"workers: {args.workers}", flush=True)
-    print(f"Output:  {OUTPUT_DIR}", flush=True)
+    print(f"Output:  {DELIVERABLE_DIR if zip_dir else OUTPUT_DIR}{' (zips)' if zip_dir else ''}", flush=True)
     print(f"Report:  {SESSIONS_JSONL}", flush=True)
     if not indices:
         print("Nothing to do.", flush=True)
@@ -323,7 +352,7 @@ def main() -> int:
     # Append per-session records as they complete so progress is durable/resumable.
     with open(SESSIONS_JSONL, "a", encoding="utf-8") as jsonl, \
             ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(process_experiment, i): i for i in indices}
+        futures = {pool.submit(process_experiment, i, zip_dir): i for i in indices}
         for n, fut in enumerate(as_completed(futures), 1):
             idx = futures[fut]
             try:
