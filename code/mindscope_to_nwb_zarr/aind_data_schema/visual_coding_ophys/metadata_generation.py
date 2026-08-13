@@ -18,7 +18,9 @@ Session structure (on DANDI):
 Only the processed NWB file is needed for metadata generation.
 """
 
+import shutil
 import traceback
+import zipfile
 import pandas as pd
 
 from pathlib import Path
@@ -125,7 +127,37 @@ def stream_nwb_from_dandi(asset_path: str):
     return nwbfile, io, h5_file, file_handle
 
 
-def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path) -> None:
+def zip_session_metadata(session_dir: Path, output_dir: Path) -> Path:
+    """Bundle a session's generated metadata files into a single zip and drop the folder.
+
+    ``write_standard_file`` writes the (up to five) metadata JSON files into
+    ``session_dir`` (named for the data asset). This zips those files into
+    ``output_dir/<session_dir.name>.zip`` and removes the now-redundant loose folder, so
+    ``output_dir`` ends up holding only one zip per session. The zip stores the JSON files
+    flat (no internal directory).
+
+    Parameters
+    ----------
+    session_dir : Path
+        Directory holding the session's written metadata JSON files.
+    output_dir : Path
+        Directory the per-session zip is written into.
+
+    Returns
+    -------
+    Path
+        Path to the created zip file.
+    """
+    zip_path = output_dir / f"{session_dir.name}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for json_file in sorted(session_dir.glob("*.json")):
+            zf.write(json_file, arcname=json_file.name)
+    shutil.rmtree(session_dir, ignore_errors=True)
+    return zip_path
+
+
+def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path,
+                              zip_output: bool = False) -> None:
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -137,6 +169,11 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
         Session metadata row from the ophys experiment metadata
     output_dir : Path
         Path to directory to save output JSON files
+    zip_output : bool, optional
+        When True, the session's metadata files are bundled into a single
+        ``<data asset name>.zip`` in ``output_dir`` and the loose per-session folder is
+        removed (see ``zip_session_metadata``), so ``output_dir`` holds only one zip per
+        session. Defaults to False (the loose per-session folder is kept).
     """
     # Generate metadata models. The DataDescription name (also used as the per-session
     # output folder name below) follows the shared convention
@@ -159,8 +196,12 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
             deserialized = model.model_validate_json(serialized)
             deserialized.write_standard_file(output_directory=session_output_dir)
 
+    # Optionally collapse the per-session folder into a single zip in output_dir.
+    if zip_output:
+        zip_session_metadata(session_output_dir, output_dir)
 
-def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
+
+def generate_all_session_metadata(data_dir: Path, results_dir: Path, zip_output: bool = False) -> None:
     """
     Iterate through all sessions and generate session metadata by streaming from DANDI.
 
@@ -173,6 +214,10 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
         Path to data directory where S3 bucket is mounted
     results_dir : Path
         Path to directory to save output metadata JSON files
+    zip_output : bool, optional
+        When True, each session's metadata files are bundled into a single per-session zip
+        so the output directory holds only one zip per session (see
+        ``generate_session_metadata``). Defaults to False.
     """
     output_dir = results_dir / "visual-coding-ophys-metadata"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +246,7 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
                     nwbfile=nwbfile,
                     session_info=experiment_row,
                     output_dir=output_dir,
+                    zip_output=zip_output,
                 )
             finally:
                 # Clean up handles
