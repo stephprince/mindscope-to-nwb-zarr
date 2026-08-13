@@ -45,7 +45,11 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-2p-metadata-only"
 # set to a zip filename, only the job whose mounted zip matches it does any work; every
 # other job is a no-op (writes an empty placeholder, converts nothing). Set to None for
 # production, where every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = None
+#
+# TESTING: gate the first Code Ocean run to a single session. Replace this PLACEHOLDER with
+# the actual first (alphabetically) zip name after regenerating the metadata zips locally
+# (run_all_vc_ophys.py --zip); the packaging timestamp in the name changes every run.
+TEST_ONLY_ZIP_NAME = "<FIRST_SESSION_ZIP_NAME>.zip"  # PLACEHOLDER — set after regenerating zips
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
