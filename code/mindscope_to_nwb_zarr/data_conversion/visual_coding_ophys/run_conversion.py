@@ -13,7 +13,7 @@ Session structure (on DANDI):
         sub-{specimen_id}_ses-{experiment_id}-{StimX}_ophys.nwb                 - Raw 2p data
 
 Pipeline input:
-    A single zipped AIND metadata folder mounted at data/visual-coding-2p-metadata-only/,
+    A single zipped AIND metadata folder mounted at data/visual-coding-ophys-metadata-only/,
     named for the experiment's data asset. The metadata is unzipped into
     results/<session name>/, the ophys experiment id is read from its data_description.json
     tags (and used to look up the experiment row in ophys_experiments.json), the NWB files
@@ -39,7 +39,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetData
 root_dir = Path(__file__).parent.parent.parent.parent
 # Mount point (on Code Ocean) of the metadata-only data asset: one zip per experiment, each
 # named for the experiment's AIND data asset (the zip's stem is the "session name").
-METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-2p-metadata-only"
+METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-ophys-metadata-only"
 
 # TEST TOGGLE: each Code Ocean pipeline job mounts exactly one metadata zip. When this is
 # set to a zip filename, only the job whose mounted zip matches it does any work; every
@@ -316,7 +316,7 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     """Convert NWB HDF5 file to Zarr.
 
     The pipeline input is a single zipped AIND metadata folder mounted at
-    ``METADATA_ZIP_DIR`` (``data/visual-coding-2p-metadata-only`` on Code Ocean), named for
+    ``METADATA_ZIP_DIR`` (``data/visual-coding-ophys-metadata-only`` on Code Ocean), named for
     the experiment's data asset. This unzips that metadata folder into
     ``results_dir/<session name>/``, reads the ophys experiment id from the unzipped
     ``data_description.json`` tags and looks up its row in ``ophys_experiments.json``,
