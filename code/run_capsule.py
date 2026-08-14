@@ -89,19 +89,14 @@ def run():
         print("No Zarr produced for this job (no-op); nothing to inspect.")
         return
 
-    # The qc/ NWBInspector report is disabled (commented out) for Visual Coding Ophys per
-    # request; the other datasets still generate it.
-    if dataset.lower() == "visual coding ophys":
-        print("Skipping qc/ NWBInspector report for Visual Coding Ophys (disabled per request).")
-        return
-
     # Validate and inspect resulting Zarr file. Write the report into a qc/ subfolder
     # adjacent to the Zarr (and, for Visual Coding Ephys, the unzipped metadata JSONs).
-    qc_dir = result_zarr_path.parent / "qc"
-    qc_dir.mkdir(parents=True, exist_ok=True)
-    inspector_report_path = qc_dir / (result_zarr_path.stem + ".inspector_report.txt")
-    print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
-    inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
+    # NOTE: Commented out for live runs
+    # qc_dir = result_zarr_path.parent / "qc"
+    # qc_dir.mkdir(parents=True, exist_ok=True)
+    # inspector_report_path = qc_dir / (result_zarr_path.stem + ".inspector_report.txt")
+    # print(f"Inspecting resulting Zarr file {result_zarr_path} ...")
+    # inspect_zarr_file(zarr_path=result_zarr_path, inspector_report_path=inspector_report_path)
 
 
 if __name__ == "__main__":
