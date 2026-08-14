@@ -36,6 +36,7 @@ from pynwb.image import GrayscaleImage, Images
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
+from mindscope_to_nwb_zarr.pynwb_utils import reconstruct_stimulus_epochs_table
 
 root_dir = Path(__file__).parent.parent.parent.parent
 # Mount point (on Code Ocean) of the metadata-only data asset: one zip per experiment, each
@@ -503,6 +504,17 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         # DANDI (v2) file truncates it to 3 rows (upstream bug #49); this restores the full
         # table. No-op for non-StimB sessions (which have no static_gratings stimulus).
         rebuild_static_gratings_from_cache(base_nwbfile, experiment_id)
+
+        # Reconstruct the epochs table for the 34 sessions whose DANDI file lacks it (the
+        # upstream converter skipped them when AllenSDK's get_stimulus_epoch_table raised).
+        # Done after the static_gratings rebuild so static_gratings blocks use the full table.
+        # No-op when the file already has an epochs table.
+        if base_nwbfile.epochs is None:
+            print("No epochs table in source file; reconstructing from nwb.stimulus ...")
+            base_nwbfile.epochs = reconstruct_stimulus_epochs_table(
+                base_nwbfile, experiment_id=experiment_id, static_gratings_dir=STATIC_GRATINGS_DIR
+            )
+            print(f"  -> reconstructed epochs table has {len(base_nwbfile.epochs)} blocks.")
 
         # Add raw 2p data as acquisition
         with NWBHDF5IO(raw_file_path, 'r', manager=processed_io.manager) as raw_io:

@@ -34,7 +34,8 @@ from aind_data_schema_models.brain_atlas import CCFv3
 from mindscope_to_nwb_zarr.pynwb_utils import (
     get_data_stream_start_time,
     get_data_stream_end_time,
-    get_modalities
+    get_modalities,
+    reconstruct_stimulus_epochs_table,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_ethics_review_id,
@@ -204,7 +205,7 @@ def create_imaging_config(nwbfile: NWBFile, imaging_plane_info: dict, microscope
     return imaging_config
 
 
-def get_stimulus_epochs(nwbfile: NWBFile) -> list[StimulusEpoch]:
+def get_stimulus_epochs(nwbfile: NWBFile, session_info: pd.Series | None = None) -> list[StimulusEpoch]:
     """Extract stimulus epochs from NWB file intervals tables.
 
     Visual Coding ophys NWBs store all stimulus presentations in a single ``epochs``
@@ -212,6 +213,12 @@ def get_stimulus_epochs(nwbfile: NWBFile) -> list[StimulusEpoch]:
     recur in several non-contiguous blocks across the session). This emits one
     ``StimulusEpoch`` per block, each carrying that block's own start/stop time from
     the NWB file, via the shared ``convert_intervals_to_visual_stimulus_epoch`` helper.
+
+    For the 34 sessions whose DANDI file has **no** epochs table (the upstream converter
+    skipped them because AllenSDK's ``get_stimulus_epoch_table`` raised
+    ``EpochSeparationException``), the epochs table is reconstructed from ``nwb.stimulus``
+    via :func:`reconstruct_stimulus_epochs_table` (which fails loudly on any anomaly). The
+    ophys experiment id needed to locate the static_gratings cache comes from ``session_info``.
 
     The helper is called with ``session_info=None`` because the ophys experiment
     metadata has no ``session_type`` (training protocol / curriculum status stay
@@ -221,6 +228,9 @@ def get_stimulus_epochs(nwbfile: NWBFile) -> list[StimulusEpoch]:
     ----------
     nwbfile : NWBFile
         NWB file containing intervals tables
+    session_info : pandas.Series, optional
+        The experiment row; its ``id`` is used to locate the static_gratings cache when the
+        epochs table must be reconstructed.
 
     Returns
     -------
@@ -229,16 +239,27 @@ def get_stimulus_epochs(nwbfile: NWBFile) -> list[StimulusEpoch]:
     """
     stimulus_epochs = []
 
-    # Visual Coding ophys stores all stimulus blocks in the "epochs" intervals table.
-    for table_key, intervals_table in nwbfile.intervals.items():
-        # Skip non-stimulus tables
-        if table_key in ["trials", "invalid_times"]:
-            continue
+    # Visual Coding ophys stores all stimulus blocks in the "epochs" intervals table. When
+    # that table is absent (34 sessions), reconstruct it from the per-stimulus presentation
+    # times so these sessions get stimulus epochs like every other session.
+    if nwbfile.epochs is not None:
+        epoch_dataframes = [
+            table.to_dataframe()
+            for key, table in nwbfile.intervals.items()
+            if key not in ("trials", "invalid_times")
+        ]
+    else:
+        experiment_id = int(session_info["id"]) if session_info is not None and "id" in session_info else None
+        reconstructed = reconstruct_stimulus_epochs_table(nwbfile, experiment_id=experiment_id)
+        print(
+            f"[epochs] source file has no epochs table; reconstructed {len(reconstructed)} "
+            f"stimulus epoch blocks from nwb.stimulus."
+        )
+        epoch_dataframes = [reconstructed.to_dataframe()]
 
-        intervals_df = intervals_table.to_dataframe()
-
-        # One epoch per row/block, so each has its own start/stop from the NWB. The block's
-        # stimulus_type names the epoch and selects its metadata annotation from nwb.stimulus.
+    for intervals_df in epoch_dataframes:
+        # One epoch per row/block, so each has its own start/stop. The block's stimulus_type
+        # names the epoch and selects its metadata annotation from nwb.stimulus.
         for i in range(len(intervals_df)):
             block_df = intervals_df.iloc[[i]]
             block_name = str(block_df['stimulus_type'].iloc[0])
@@ -440,7 +461,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 ],
             ),
         ],
-        stimulus_epochs=get_stimulus_epochs(nwbfile),
+        stimulus_epochs=get_stimulus_epochs(nwbfile, session_info),
         subject_details=AcquisitionSubjectDetails(
             mouse_platform_name="MindScope Running Disc",  # matches the Disc device in the instrument; de Vries et al. describe a rotating disk
         ),
