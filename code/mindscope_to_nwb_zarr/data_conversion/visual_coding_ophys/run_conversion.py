@@ -36,6 +36,7 @@ from pynwb.image import GrayscaleImage, Images
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
+from mindscope_to_nwb_zarr.data_conversion.visual_coding_ophys._eye_gaze_mapping import add_eye_gaze_mapping
 from mindscope_to_nwb_zarr.pynwb_utils import reconstruct_stimulus_epochs_table
 
 root_dir = Path(__file__).parent.parent.parent.parent
@@ -515,6 +516,13 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
                 base_nwbfile, experiment_id=experiment_id, static_gratings_dir=STATIC_GRATINGS_DIR
             )
             print(f"  -> reconstructed epochs table has {len(base_nwbfile.epochs)} blocks.")
+
+        # Add the Allen DLC eye-gaze-mapping product (gaze on the monitor + pupil/eye area)
+        # from the ophys_eye_gaze_mapping S3 prefix. Present for 837/1518 experiments; a no-op
+        # otherwise. Stored under *_dlc_screen_mapping names so it coexists with any older
+        # v1-embedded eye tracking already in processing['behavior']. Done before the heavy raw
+        # merge so the processed-only local test can exercise it.
+        add_eye_gaze_mapping(base_nwbfile, experiment_id, bucket=b, scratch_dir=scratch_dir)
 
         # Add raw 2p data as acquisition
         with NWBHDF5IO(raw_file_path, 'r', manager=processed_io.manager) as raw_io:
