@@ -56,13 +56,15 @@ S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"
 load_namespaces(str(root_dir / "ndx-aibs-ecephys/ndx-aibs-ecephys.namespace.yaml"))
 EcephysSpecimen = get_class('EcephysSpecimen', 'ndx-aibs-ecephys')
 
-# The NWB extension ndx-aibs-ecephys 0.2.0 specifies a required "strain" text attribute in
-# the new data type EcephysSpecimen which extends the NWB core data type Subject.
-# However, since the time that the extension was created, the NWB core Subject data type
-# has added an optional "strain" dataset. As a result, when reading the NWB file, the
-# EcephysSpecimen "strain" field is not populated, leading to a MissingRequiredBuildWarning.
-# To work around this, we use a custom ObjectMapper to construct the EcephysSpecimen object
-# by getting the "strain" value from the builder "strain" attribute.
+# The source HDF5 files were written with ndx-aibs-ecephys 0.2.0, which specifies "strain" as
+# a required text *attribute* on the EcephysSpecimen data type (an extension of the NWB core
+# Subject type). Since then, NWB core Subject (>=2.3.0) added an optional "strain" *dataset*,
+# and this repository ships/loads ndx-aibs-ecephys 0.3.0 (see code/ndx-aibs-ecephys/CHANGELOG.md),
+# which likewise redefines "strain" as a dataset to match core. As a result, when reading with
+# the 0.3.0 schema the EcephysSpecimen "strain" field is not auto-populated from the 0.2.0
+# attribute (or from the core dataset after an HDF5->Zarr round-trip), leading to a
+# MissingRequiredBuildWarning. To work around this, we use a custom ObjectMapper to construct
+# the EcephysSpecimen object by reading "strain" from whichever representation the file uses.
 def _strain_value_to_str(strain_value):
     """Coerce a builder ``strain`` value to ``str`` (or ``None`` if genuinely absent).
 

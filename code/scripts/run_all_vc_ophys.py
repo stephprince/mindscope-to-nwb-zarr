@@ -23,14 +23,14 @@ concurrency (its procedures endpoint is slow), which surfaces as JSONDecodeError
 Usage
 -----
     uv run python scripts/run_all_vc_ophys.py                 # all sessions
-    uv run python scripts/run_all_vc_ophys.py --zip           # one zip per session in metadata_results/visual_coding_ophys
+    uv run python scripts/run_all_vc_ophys.py --zip           # one zip per session in metadata_results/visual-coding-ophys-metadata-only
     uv run python scripts/run_all_vc_ophys.py --workers 3
     uv run python scripts/run_all_vc_ophys.py --limit 5       # first 5 pending (smoke test)
     uv run python scripts/run_all_vc_ophys.py --indices 50 200 350
     uv run python scripts/run_all_vc_ophys.py --no-retry-failed
 
 With --zip, each session's five metadata files are bundled into a single
-<data asset name>.zip written to code/metadata_results/visual_coding_ophys/ (the loose
+<data asset name>.zip written to code/metadata_results/visual-coding-ophys-metadata-only/ (the loose
 folder is written under scratch and the run report stays in _report), so that directory
 ends up holding only the per-session zips.
 """
@@ -311,7 +311,7 @@ def main() -> int:
                         help="do not retry experiments previously recorded as FAILED")
     parser.add_argument("--zip", dest="zip", action="store_true",
                         help="bundle each session's 5 files into one zip in "
-                             "metadata_results/visual_coding_ophys (dir holds only the zips)")
+                             "metadata_results/visual-coding-ophys-metadata-only (dir holds only the zips)")
     parser.set_defaults(retry_failed=True)
     args = parser.parse_args()
 
