@@ -35,6 +35,15 @@ _SUFFIX = "_dlc_screen_mapping"
 _REF_FRAME_CM = "(0,0) is the center of the stimulus monitor. Columns are [x_pos_cm, y_pos_cm]."
 _REF_FRAME_DEG = "(0,0) is the center of the stimulus monitor. Columns are [x_pos_deg, y_pos_deg]."
 
+# The Allen Institute flags this DLC gaze-mapping product as provisional: per AllenSDK
+# (BrainObservatoryCache.get_ophys_pupil_data), "this pupil data is obtained using a new eye
+# tracking algorithm and is in the process of being validated." Surfaced in every series
+# description. This module reads the same H5 datasets AllenSDK's read_eye_gaze_mappings does,
+# with identical column-name indexing and units (screen cm, spherical deg, areas pixels^2,
+# timestamps seconds); it just uses h5py directly so it needs no AllenSDK/pytables.
+_PROVISIONAL = (" NOTE: produced by a newer eye-tracking algorithm the Allen Institute lists as "
+                "still being validated; treat as provisional.")
+
 
 def resolve_eye_gaze_mapping_key(bucket, experiment_id: int) -> str | None:
     """Return the S3 key of the eye-gaze-mapping H5 for this experiment, or ``None``.
@@ -147,7 +156,7 @@ def add_eye_gaze_mapping(nwbfile, experiment_id: int, bucket, scratch_dir: Path)
                 unit="cm",
                 reference_frame=_REF_FRAME_CM,
                 description=("DeepLabCut-estimated gaze location projected onto the stimulus "
-                             "monitor (cm), blink-filtered (NaN during blinks/dropped frames)."),
+                             "monitor (cm), blink-filtered (NaN during blinks/dropped frames)." + _PROVISIONAL),
             ),
             SpatialSeries(
                 name=f"pupil_location_raw{_SUFFIX}",
@@ -156,7 +165,7 @@ def add_eye_gaze_mapping(nwbfile, experiment_id: int, bucket, scratch_dir: Path)
                 unit="cm",
                 reference_frame=_REF_FRAME_CM,
                 description=("DeepLabCut-estimated gaze location projected onto the stimulus "
-                             "monitor (cm), unfiltered (raw)."),
+                             "monitor (cm), unfiltered (raw)." + _PROVISIONAL),
             ),
         ],
     )
@@ -170,7 +179,7 @@ def add_eye_gaze_mapping(nwbfile, experiment_id: int, bucket, scratch_dir: Path)
                 unit="degrees",
                 reference_frame=_REF_FRAME_DEG,
                 description=("DeepLabCut-estimated angular gaze direction on the stimulus "
-                             "monitor (degrees), blink-filtered."),
+                             "monitor (degrees), blink-filtered." + _PROVISIONAL),
             ),
             SpatialSeries(
                 name=f"pupil_location_spherical_raw{_SUFFIX}",
@@ -179,7 +188,7 @@ def add_eye_gaze_mapping(nwbfile, experiment_id: int, bucket, scratch_dir: Path)
                 unit="degrees",
                 reference_frame=_REF_FRAME_DEG,
                 description=("DeepLabCut-estimated angular gaze direction on the stimulus "
-                             "monitor (degrees), unfiltered (raw)."),
+                             "monitor (degrees), unfiltered (raw)." + _PROVISIONAL),
             ),
         ],
     )
@@ -187,13 +196,13 @@ def add_eye_gaze_mapping(nwbfile, experiment_id: int, bucket, scratch_dir: Path)
         name=f"PupilTracking{_SUFFIX}",
         time_series=[
             TimeSeries(name=f"pupil_area{_SUFFIX}", data=arrays["pupil_area_new"], timestamps=timestamps,
-                       unit="pixels", description="DeepLabCut-estimated pupil area (pixel-area), blink-filtered."),
+                       unit="pixels^2", description="DeepLabCut-estimated pupil area (pixels^2), blink-filtered." + _PROVISIONAL),
             TimeSeries(name=f"pupil_area_raw{_SUFFIX}", data=arrays["pupil_area_raw"], timestamps=timestamps,
-                       unit="pixels", description="DeepLabCut-estimated pupil area (pixel-area), unfiltered (raw)."),
+                       unit="pixels^2", description="DeepLabCut-estimated pupil area (pixels^2), unfiltered (raw)." + _PROVISIONAL),
             TimeSeries(name=f"eye_area{_SUFFIX}", data=arrays["eye_area_new"], timestamps=timestamps,
-                       unit="pixels", description="DeepLabCut-estimated eye area (pixel-area), blink-filtered."),
+                       unit="pixels^2", description="DeepLabCut-estimated eye area (pixels^2), blink-filtered." + _PROVISIONAL),
             TimeSeries(name=f"eye_area_raw{_SUFFIX}", data=arrays["eye_area_raw"], timestamps=timestamps,
-                       unit="pixels", description="DeepLabCut-estimated eye area (pixel-area), unfiltered (raw)."),
+                       unit="pixels^2", description="DeepLabCut-estimated eye area (pixels^2), unfiltered (raw)." + _PROVISIONAL),
         ],
     )
 
