@@ -71,7 +71,7 @@ SUMMARY_JSON = REPORT_DIR / "summary.json"
 # Used when --zip is passed: each session's loose folder is written under OUTPUT_DIR and
 # then bundled into a single zip here, so this directory holds only the per-session zips.
 # The run report stays in REPORT_DIR (under scratch), so the deliverable stays only-zips.
-DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual_coding_ophys"
+DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual-coding-ophys-metadata-only"
 
 # The internal AIND metadata service returns empty/truncated bodies under concurrent
 # load (subject + procedures fetches, each with a raw-parse fallback = up to 4 calls
