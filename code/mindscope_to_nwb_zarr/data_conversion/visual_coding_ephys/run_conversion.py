@@ -36,6 +36,11 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     add_missing_descriptions,
     fix_vector_index_dtypes,
 )
+from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys._units_analysis_metrics import (
+    add_electrode_structure_ids,
+    add_unit_analysis_metrics,
+    resolve_session_type,
+)
 
 root_dir = Path(__file__).parent.parent.parent.parent
 # Mount point (on Code Ocean) of the metadata-only data asset: one zip per session, each
@@ -47,7 +52,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-neuropixels-metadat
 # other job is a no-op (nothing downloaded or converted), so the pipeline can be validated
 # on a single session without spending compute on all 58. Set to None for production, where
 # every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = None
+TEST_ONLY_ZIP_NAME = "437660_2019-03-20_14-36-29_nwb_2026-08-10_17-33-51.zip"  # session 839557629
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_ECEPHYS_CACHE_PATH = "visual-coding-neuropixels/ecephys-cache"
@@ -181,6 +186,7 @@ def convert_session_to_zarr(
     base_hdf5_path: Path,
     probe_hdf5_paths: list[Path],
     zarr_path: Path,
+    session_type: str | None = None,
 ) -> None:
     """Convert a Visual Coding Ephys session to Zarr format.
 
@@ -191,6 +197,9 @@ def convert_session_to_zarr(
         base_hdf5_path: Path to the base session NWB HDF5 file.
         probe_hdf5_paths: Paths to probe LFP NWB HDF5 files.
         zarr_path: Path to output Zarr file.
+        session_type: 'brain_observatory_1.1' or 'functional_connectivity'. When provided, the
+            AllenSDK per-unit visual-response analysis metrics for that session type are streamed
+            from S3 and added to the units table. When None, that step is skipped.
     """
     print(f"Reading base NWB file {base_hdf5_path} ...")
     print(f"  Found {len(probe_hdf5_paths)} probe files:")
@@ -218,6 +227,15 @@ def convert_session_to_zarr(
             # Add missing description fields (from technical white paper)
             print("Adding missing descriptions ...")
             add_missing_descriptions(nwbfile)
+
+            # Add the AllenSDK per-unit visual-response analysis metrics (RF, tuning, running
+            # modulation, per-stimulus firing rates, etc.) that are absent from the source NWB,
+            # plus the numeric CCF structure id on the electrodes table. Streamed from the public
+            # ecephys-cache CSVs (no AllenSDK dependency); see _units_analysis_metrics.py.
+            if session_type is not None:
+                print(f"Adding unit analysis metrics ({session_type}) ...")
+                add_unit_analysis_metrics(nwbfile, session_type)
+            add_electrode_structure_ids(nwbfile)
 
             # Fix VectorIndex dtypes to be uint64
             print("Fixing VectorIndex dtypes ...")
@@ -325,6 +343,10 @@ def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
     session_id = _session_id_from_metadata(metadata_out_dir)
     print(f"Session ID: {session_id}")
 
+    # Resolve the session type (drives which per-unit analysis-metrics file is attached).
+    session_type = resolve_session_type(session_id)
+    print(f"Session type: {session_type}")
+
     # Download session files from S3.
     base_file_path, probe_file_paths = download_visual_coding_ephys_session_files(
         session_id=session_id,
@@ -340,6 +362,7 @@ def convert_visual_coding_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         base_hdf5_path=base_file_path,
         probe_hdf5_paths=probe_file_paths,
         zarr_path=zarr_path,
+        session_type=session_type,
     )
 
     return zarr_path

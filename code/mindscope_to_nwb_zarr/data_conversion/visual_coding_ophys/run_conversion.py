@@ -49,7 +49,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-ophys-metadata-only
 # other job is a no-op (writes an empty placeholder, converts nothing), so the pipeline can be
 # validated on a single session without spending compute on all 1518. Set to None for
 # production, where every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = None
+TEST_ONLY_ZIP_NAME = "221470_2016-01-21_16-06-18_nwb_2026-08-13_23-15-53.zip"
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
