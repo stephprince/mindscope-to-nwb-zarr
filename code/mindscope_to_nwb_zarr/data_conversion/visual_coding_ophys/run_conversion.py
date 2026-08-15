@@ -146,16 +146,20 @@ def download_visual_coding_ophys_files_from_dandi(
         print(f"Downloading processed file to {processed_download_path} ...")
         asset.download(filepath=processed_download_path)
 
-        # Download raw file
-        asset = dandiset.get_asset_by_path(raw_asset_path)
-        if not asset:
-            raise RuntimeError(
-                f"No asset found for raw ophys file {raw_asset_path} "
-                f"in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}"
-            )
-        raw_download_path = scratch_dir_path / raw_file_name
-        print(f"Downloading raw file to {raw_download_path} ...")
-        asset.download(filepath=raw_download_path)
+        # NOTE: Raw 2p download temporarily DISABLED — the raw data is not included in the
+        # export (see the matching NOTE in convert_experiment_to_zarr). Re-enable this block
+        # together with the raw-merge block there to add raw 2p data back into the Zarr.
+        raw_download_path = None
+        # # Download raw file
+        # asset = dandiset.get_asset_by_path(raw_asset_path)
+        # if not asset:
+        #     raise RuntimeError(
+        #         f"No asset found for raw ophys file {raw_asset_path} "
+        #         f"in DANDI dandiset {DANDISET_ID} version {DANDISET_VERSION}"
+        #     )
+        # raw_download_path = scratch_dir_path / raw_file_name
+        # print(f"Downloading raw file to {raw_download_path} ...")
+        # asset.download(filepath=raw_download_path)
 
     return (processed_download_path, raw_download_path)
 
@@ -523,46 +527,51 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         # merge so the processed-only local test can exercise it.
         add_eye_tracking_2p(base_nwbfile, experiment_id, scratch_dir=scratch_dir)
 
-        # Add raw 2p data as acquisition
-        with NWBHDF5IO(raw_file_path, 'r', manager=processed_io.manager) as raw_io:
-            raw_nwbfile = raw_io.read()
-            assert 'MotionCorrectedTwoPhotonSeries' in raw_nwbfile.acquisition, (
-                "Expected 'MotionCorrectedTwoPhotonSeries' in raw NWB file acquisition"
-            )
-            for acq_data in raw_nwbfile.acquisition.values():
-                acq_data.reset_parent()
-                if acq_data.name == "MotionCorrectedTwoPhotonSeries":
-                    # WARNING: This approach modifies an attribute that should not be 
-                    # able to be reset. Validation should always be performed afterwards.
-                    acq_data.fields["imaging_plane"] = base_nwbfile.get_imaging_plane()
+        # NOTE: Raw 2p data inclusion is temporarily DISABLED. To add it back into the export,
+        # uncomment the block below AND re-enable the raw download in
+        # download_visual_coding_ophys_files_from_dandi (matching NOTE there), then re-indent
+        # the "Export to Zarr" block below to run inside the `with NWBHDF5IO(raw_file_path...)`
+        # context so raw_io stays open during export.
+        # # Add raw 2p data as acquisition
+        # with NWBHDF5IO(raw_file_path, 'r', manager=processed_io.manager) as raw_io:
+        #     raw_nwbfile = raw_io.read()
+        #     assert 'MotionCorrectedTwoPhotonSeries' in raw_nwbfile.acquisition, (
+        #         "Expected 'MotionCorrectedTwoPhotonSeries' in raw NWB file acquisition"
+        #     )
+        #     for acq_data in raw_nwbfile.acquisition.values():
+        #         acq_data.reset_parent()
+        #         if acq_data.name == "MotionCorrectedTwoPhotonSeries":
+        #             # WARNING: This approach modifies an attribute that should not be
+        #             # able to be reset. Validation should always be performed afterwards.
+        #             acq_data.fields["imaging_plane"] = base_nwbfile.get_imaging_plane()
+        #
+        #             # Use an iterator to read raw data in chunks so we don't
+        #             # have to load the entire dataset into memory at once
+        #             data_iterator = H5DatasetDataChunkIterator(
+        #                 dataset=acq_data.data,
+        #                 chunk_shape=acq_data.data.chunks,
+        #                 buffer_gb=8,
+        #             )
+        #             # Rechunk the raw 2p data to optimize for cloud computing
+        #             # and also reduce the number of chunks created.
+        #             # Code Ocean limits the rate of COPY requests per S3 prefix
+        #             # so we cannot have too many chunks per Zarr array or else
+        #             # we get a 503 Slow Down error from S3 and a Code Ocean
+        #             # pipeline task failure.
+        #             # Here we use chunks of (75, 512, X) which results in
+        #             # about 1500-1700 chunks for a typical raw 2p dataset with
+        #             # 110,000-120,000 frames.
+        #             acq_data.fields["data"] = ZarrDataIO(
+        #                 data=data_iterator,
+        #                 chunks=[75, acq_data.data.shape[1], acq_data.data.shape[2]],
+        #             )
+        #         base_nwbfile.add_acquisition(acq_data)
 
-                    # Use an iterator to read raw data in chunks so we don't
-                    # have to load the entire dataset into memory at once
-                    data_iterator = H5DatasetDataChunkIterator(
-                        dataset=acq_data.data,
-                        chunk_shape=acq_data.data.chunks,
-                        buffer_gb=8,
-                    )
-                    # Rechunk the raw 2p data to optimize for cloud computing
-                    # and also reduce the number of chunks created.
-                    # Code Ocean limits the rate of COPY requests per S3 prefix
-                    # so we cannot have too many chunks per Zarr array or else
-                    # we get a 503 Slow Down error from S3 and a Code Ocean
-                    # pipeline task failure.
-                    # Here we use chunks of (75, 512, X) which results in
-                    # about 1500-1700 chunks for a typical raw 2p dataset with
-                    # 110,000-120,000 frames.
-                    acq_data.fields["data"] = ZarrDataIO(
-                        data=data_iterator,
-                        chunks=[75, acq_data.data.shape[1], acq_data.data.shape[2]],
-                    )
-                base_nwbfile.add_acquisition(acq_data)
-
-            # Export to Zarr. The store is named after the zipped session name and written
-            # inside the unzipped metadata folder so the metadata and Zarr live together.
-            zarr_path = metadata_out_dir / f"{session_name}.nwb.zarr"
-            print(f"Exporting to Zarr file {zarr_path} ...")
-            with NWBZarrIO(str(zarr_path), mode='w') as export_io:
-                export_io.export(src_io=processed_io, nwbfile=base_nwbfile, write_args=dict(link_data=False))
+        # Export to Zarr. The store is named after the zipped session name and written
+        # inside the unzipped metadata folder so the metadata and Zarr live together.
+        zarr_path = metadata_out_dir / f"{session_name}.nwb.zarr"
+        print(f"Exporting to Zarr file {zarr_path} ...")
+        with NWBZarrIO(str(zarr_path), mode='w') as export_io:
+            export_io.export(src_io=processed_io, nwbfile=base_nwbfile, write_args=dict(link_data=False))
 
     return zarr_path
