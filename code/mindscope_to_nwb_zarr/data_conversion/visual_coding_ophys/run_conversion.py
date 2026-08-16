@@ -49,7 +49,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-ophys-metadata-only
 # other job is a no-op (writes an empty placeholder, converts nothing), so the pipeline can be
 # validated on a single session without spending compute on all 1518. Set to None for
 # production, where every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = None
+TEST_ONLY_ZIP_NAME = "340427_2017-09-29_08-22-03_nwb_2026-08-13_22-55-17.zip"  # DIAGNOSTIC: StimB session 639437387
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
@@ -401,6 +401,33 @@ def _experiment_id_from_metadata(metadata_dir: Path) -> int:
     )
 
 
+def _debug_dump_data_dir() -> None:
+    """DIAGNOSTIC (temporary): recursively print the mounted ``data`` folder so we can see what
+    Code Ocean actually mounted for this job -- in particular whether the static_gratings cache
+    asset is present, complete, and at the expected path. Remove once the mount is diagnosed."""
+    import os
+
+    data_root = root_dir.parent / "data"
+    print(f"\n===== DATA MOUNT DUMP: {data_root} (exists={data_root.exists()}) =====", flush=True)
+    if data_root.exists():
+        for dirpath, dirnames, filenames in os.walk(data_root):
+            rel = os.path.relpath(dirpath, data_root)
+            print(f"[DIR] {rel}  ({len(filenames)} files, {len(dirnames)} subdirs)", flush=True)
+            for fn in sorted(filenames)[:10]:
+                print(f"       {fn}", flush=True)
+            if len(filenames) > 10:
+                print(f"       ... (+{len(filenames) - 10} more)", flush=True)
+
+    sg = STATIC_GRATINGS_DIR
+    print(f"\n----- static_gratings dir: {sg} (exists={sg.exists()}) -----", flush=True)
+    if sg.exists():
+        csvs = sorted(sg.glob("*.csv"))
+        print(f"  {len(csvs)} CSV files | 639437387.csv present: {(sg / '639437387.csv').exists()}", flush=True)
+        print(f"  first 5: {[p.name for p in csvs[:5]]}", flush=True)
+        print(f"  last 5:  {[p.name for p in csvs[-5:]]}", flush=True)
+    print("===== END DATA MOUNT DUMP =====\n", flush=True)
+
+
 def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
     """Convert NWB HDF5 file to Zarr.
 
@@ -439,6 +466,9 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
             f"{TEST_ONLY_ZIP_NAME}; skipping conversion (wrote empty placeholder {placeholder.name})."
         )
         return None
+
+    # DIAGNOSTIC (temporary): dump the mounted data folder to see what this job actually has.
+    _debug_dump_data_dir()
 
     # The zip stem is the experiment's data asset name; the Zarr store is named after it.
     session_name = metadata_zip.stem
