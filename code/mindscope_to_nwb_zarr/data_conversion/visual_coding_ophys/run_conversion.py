@@ -410,7 +410,7 @@ def _debug_dump_data_dir() -> None:
     data_root = root_dir.parent / "data"
     print(f"\n===== DATA MOUNT DUMP: {data_root} (exists={data_root.exists()}) =====", flush=True)
     if data_root.exists():
-        for dirpath, dirnames, filenames in os.walk(data_root):
+        for dirpath, dirnames, filenames in os.walk(data_root, followlinks=True):
             rel = os.path.relpath(dirpath, data_root)
             print(f"[DIR] {rel}  ({len(filenames)} files, {len(dirnames)} subdirs)", flush=True)
             for fn in sorted(filenames)[:10]:
@@ -421,10 +421,17 @@ def _debug_dump_data_dir() -> None:
     sg = STATIC_GRATINGS_DIR
     print(f"\n----- static_gratings dir: {sg} (exists={sg.exists()}) -----", flush=True)
     if sg.exists():
-        csvs = sorted(sg.glob("*.csv"))
-        print(f"  {len(csvs)} CSV files | 639437387.csv present: {(sg / '639437387.csv').exists()}", flush=True)
-        print(f"  first 5: {[p.name for p in csvs[:5]]}", flush=True)
-        print(f"  last 5:  {[p.name for p in csvs[-5:]]}", flush=True)
+        print("  immediate children:", flush=True)
+        for entry in sorted(os.scandir(sg), key=lambda e: e.name):
+            kind = "DIR " if entry.is_dir() else "FILE"
+            link = f" -> {os.readlink(entry.path)}" if entry.is_symlink() else ""
+            symlink_tag = "(symlink)" if entry.is_symlink() else ""
+            print(f"    [{kind}]{symlink_tag} {entry.name}{link}", flush=True)
+        all_csvs = list(sg.rglob("*.csv"))
+        hits = [p for p in all_csvs if p.name == "639437387.csv"]
+        print(f"  recursive *.csv count: {len(all_csvs)}", flush=True)
+        print(f"  639437387.csv found at (relative): {[str(p.relative_to(sg)) for p in hits]}", flush=True)
+        print(f"  sample recursive csvs: {[str(p.relative_to(sg)) for p in all_csvs[:5]]}", flush=True)
     print("===== END DATA MOUNT DUMP =====\n", flush=True)
 
 
