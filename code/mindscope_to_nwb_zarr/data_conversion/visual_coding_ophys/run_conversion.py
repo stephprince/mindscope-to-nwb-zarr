@@ -49,7 +49,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-ophys-metadata-only
 # other job is a no-op (writes an empty placeholder, converts nothing), so the pipeline can be
 # validated on a single session without spending compute on all 1518. Set to None for
 # production, where every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = "340427_2017-09-29_08-22-03_nwb_2026-08-13_22-55-17.zip"  # DIAGNOSTIC: StimB session 639437387
+TEST_ONLY_ZIP_NAME = "340427_2017-09-29_08-22-03_nwb_2026-08-13_22-55-17.zip"  # VERIFY static_gratings fix on StimB session 639437387; reset to None for production
 
 S3_BUCKET = "s3://allen-brain-observatory"
 S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
@@ -59,7 +59,32 @@ S3_METADATA_PATH = "visual-coding-2p/ophys_experiments.json"
 # environment. The DANDI (v2) files truncate every static_gratings table to 3 rows due to an
 # upstream bug (catalystneuro/visual-coding-to-nwb-v2 #49); we rebuild the full table from
 # these caches. On Code Ocean this directory is a mounted data asset; locally it is on disk.
-STATIC_GRATINGS_DIR = root_dir.parent / "data" / "visual-coding-ophys-static-gratings"
+def _resolve_static_gratings_dir(base: Path) -> Path:
+    """Return the directory that actually holds the ``<experiment_id>.csv`` cache files.
+
+    On Code Ocean the static_gratings data asset is attached with ``collect: true``, which
+    stages its contents one level deeper than the mount point (e.g.
+    ``data/visual-coding-ophys-static-gratings/<subdir>/*.csv``). If ``base`` has no CSVs
+    directly but a nested directory does, descend to it so the flat ``<dir>/<id>.csv`` lookup
+    still works. Returns ``base`` unchanged when it already holds the CSVs (or when nothing
+    does, e.g. a local run without the mount).
+    """
+    import os
+
+    if not base.exists() or any(base.glob("*.csv")):
+        return base
+    for dirpath, _dirnames, filenames in os.walk(base, followlinks=True):
+        if any(fn.endswith(".csv") for fn in filenames):
+            resolved = Path(dirpath)
+            if resolved != base:
+                print(f"static_gratings cache resolved to nested dir: {resolved}", flush=True)
+            return resolved
+    return base
+
+
+STATIC_GRATINGS_DIR = _resolve_static_gratings_dir(
+    root_dir.parent / "data" / "visual-coding-ophys-static-gratings"
+)
 
 DANDISET_ID = "000728"
 DANDISET_VERSION = "0.240827.1809"
@@ -401,40 +426,6 @@ def _experiment_id_from_metadata(metadata_dir: Path) -> int:
     )
 
 
-def _debug_dump_data_dir() -> None:
-    """DIAGNOSTIC (temporary): recursively print the mounted ``data`` folder so we can see what
-    Code Ocean actually mounted for this job -- in particular whether the static_gratings cache
-    asset is present, complete, and at the expected path. Remove once the mount is diagnosed."""
-    import os
-
-    data_root = root_dir.parent / "data"
-    print(f"\n===== DATA MOUNT DUMP: {data_root} (exists={data_root.exists()}) =====", flush=True)
-    if data_root.exists():
-        for dirpath, dirnames, filenames in os.walk(data_root, followlinks=True):
-            rel = os.path.relpath(dirpath, data_root)
-            print(f"[DIR] {rel}  ({len(filenames)} files, {len(dirnames)} subdirs)", flush=True)
-            for fn in sorted(filenames)[:10]:
-                print(f"       {fn}", flush=True)
-            if len(filenames) > 10:
-                print(f"       ... (+{len(filenames) - 10} more)", flush=True)
-
-    sg = STATIC_GRATINGS_DIR
-    print(f"\n----- static_gratings dir: {sg} (exists={sg.exists()}) -----", flush=True)
-    if sg.exists():
-        print("  immediate children:", flush=True)
-        for entry in sorted(os.scandir(sg), key=lambda e: e.name):
-            kind = "DIR " if entry.is_dir() else "FILE"
-            link = f" -> {os.readlink(entry.path)}" if entry.is_symlink() else ""
-            symlink_tag = "(symlink)" if entry.is_symlink() else ""
-            print(f"    [{kind}]{symlink_tag} {entry.name}{link}", flush=True)
-        all_csvs = list(sg.rglob("*.csv"))
-        hits = [p for p in all_csvs if p.name == "639437387.csv"]
-        print(f"  recursive *.csv count: {len(all_csvs)}", flush=True)
-        print(f"  639437387.csv found at (relative): {[str(p.relative_to(sg)) for p in hits]}", flush=True)
-        print(f"  sample recursive csvs: {[str(p.relative_to(sg)) for p in all_csvs[:5]]}", flush=True)
-    print("===== END DATA MOUNT DUMP =====\n", flush=True)
-
-
 def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
     """Convert NWB HDF5 file to Zarr.
 
@@ -473,9 +464,6 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
             f"{TEST_ONLY_ZIP_NAME}; skipping conversion (wrote empty placeholder {placeholder.name})."
         )
         return None
-
-    # DIAGNOSTIC (temporary): dump the mounted data folder to see what this job actually has.
-    _debug_dump_data_dir()
 
     # The zip stem is the experiment's data asset name; the Zarr store is named after it.
     session_name = metadata_zip.stem
