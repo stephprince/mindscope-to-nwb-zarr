@@ -10,8 +10,17 @@ running platform is the "MindScope Running Disc", and visual stimulus epochs lis
 Handles both ecephys sessions (probeA-F present, optotagging present) and behavior-only
 sessions (no probes, no optotagging): the per-probe configs are simply empty and the
 optotagging epoch is omitted.
+
+Stimulus epochs (see ``get_stimulation_epochs``) follow the Visual Coding Neuropixels
+approach of one epoch per contiguous ``stimulus_block``, with one Visual-Behavior-specific
+addition: the change-detection *behavior task* block (the presentation table's
+``active == True`` rows) is emitted as a single epoch carrying the session's
+``training_protocol_name`` and ``curriculum_status``; the passive replay and the passive
+mapping stimuli (flash / gabor / spontaneous) are split per block and carry no task
+metadata.
 """
 
+import warnings
 from datetime import timedelta
 from pynwb import NWBFile
 import pandas as pd
@@ -41,18 +50,22 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_subject_id,
     get_session_start_time,
     get_instrument_id,
+    get_ethics_review_id,
     get_total_reward_volume,
     get_individual_reward_volume,
+    get_reward_volume_notes,
     get_optostimulation_parameters,
     convert_intervals_to_visual_stimulus_epoch,
     EPHYS_GLOBAL_COORDINATE_SYSTEM,
 )
-# Reuse the Visual Coding Neuropixels per-probe assembly config builder: the Visual
-# Behavior Neuropixels NWBs have the identical EcephysProbe probeA-F structure, and the
-# config device names it emits ("Ephys Assembly A", "ProbeA", ...) match the instrument
-# components reused from that dataset.
+# Reuse the Visual Coding Neuropixels per-probe assembly config builder and the per-block
+# splitter: the Visual Behavior Neuropixels NWBs have the identical EcephysProbe probeA-F
+# structure and the same ``stimulus_block`` column, and the config device names the builder
+# emits ("Ephys Assembly A", "ProbeA", ...) match the instrument components reused from
+# that dataset.
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.acquisition import (
     get_ephys_assembly_configs,
+    _iter_stimulus_blocks,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
     OPTOTAGGING_LASER_NAME,
@@ -65,21 +78,43 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
 )
 
 
+def _ethics_review_id_or_none(subject_id) -> list[str] | None:
+    """Look up the ethics (IACUC) review id for a subject, or None if not on file.
+
+    The bundled ``reference/ethics_review_ids.csv`` covers most -- but not all -- Visual
+    Behavior Neuropixels subjects. For a subject that is absent, warn and return None
+    rather than failing the session (the README lists the uncovered subjects).
+    """
+    try:
+        return get_ethics_review_id(subject_id)
+    except KeyError:
+        warnings.warn(
+            f"No ethics_review_id on file for subject {subject_id}; leaving it None "
+            f"(see the README list of Visual Behavior Neuropixels subjects without one)."
+        )
+        return None
+
+
 def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[StimulusEpoch]:
     """
-    Extract stimulus epochs from NWB file intervals tables.
+    Extract stimulus epochs from NWB file intervals tables, one per contiguous block.
 
-    The change-detection presentation table is split into active (task) and passive-replay
-    epochs. Each visual epoch lists the stimulus monitor ("Stimulus Screen") as its active
-    device. When the session has optotagging data (ecephys sessions), a single
-    "Optotagging" epoch driven by the 473 nm optotagging laser is appended.
+    A presentation table's ``active == True`` rows are the change-detection *behavior task*;
+    they are emitted as a single "Change detection - Active" epoch that carries the session's
+    ``training_protocol_name`` and ``curriculum_status`` (passed via ``session_info``). The
+    passive replay (``active == False``) and the passive mapping stimuli (tables with no
+    active rows, e.g. flash / gabor / spontaneous) are split per ``stimulus_block`` into
+    their own epochs and carry no task metadata (``session_info=None``), mirroring the
+    Visual Coding Neuropixels pipeline. A single "Optotagging" epoch driven by the 473 nm
+    laser is appended when the session has optotagging data (ecephys sessions).
 
     Parameters
     ----------
     nwbfile : NWBFile
         NWB file containing intervals tables
     session_info : pd.Series
-        Session metadata row
+        Session metadata row (drives training_protocol_name / curriculum_status on the
+        active behavior epoch)
 
     Returns
     -------
@@ -89,45 +124,54 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
     stimulation_epochs = []
 
     for table_key, intervals_table in nwbfile.intervals.items():
-        # skip generic trials table that contains behavioral data and invalid_times sections
+        # skip the generic trials table (behavioral data) and invalid_times sections
         if table_key in ["trials", "invalid_times"]:
             continue
-        # split active and passive behavior sessions into different stimulus epochs
-        elif table_key == "Natural_Images_Lum_Matched_set_ophys_G_2019_presentations":
-            active_intervals = intervals_table.to_dataframe().query('active == True')
-            stim_epoch = convert_intervals_to_visual_stimulus_epoch(
-                stimulus_name="Change detection - Active",
-                table_key=table_key,
-                intervals_table=active_intervals,
-                nwbfile=nwbfile,
-                session_info=session_info,
-                active_devices=[STIMULUS_MONITOR_NAME],  # the stimulus monitor in the instrument
-            )
-            stimulation_epochs.append(stim_epoch)
 
-            passive_intervals = intervals_table.to_dataframe().query('active == False')
-            if len(passive_intervals) > 0:
-                stim_epoch = convert_intervals_to_visual_stimulus_epoch(
-                    stimulus_name="Change detection - Passive replay",
+        df = intervals_table.to_dataframe()
+        has_active_task = "active" in df.columns and bool((df["active"] == True).any())  # noqa: E712
+
+        if has_active_task:
+            # The change-detection behavior task: one epoch for the active block, carrying
+            # the session's training protocol + curriculum (via session_info).
+            active_df = df[df["active"] == True]  # noqa: E712
+            stimulation_epochs.append(
+                convert_intervals_to_visual_stimulus_epoch(
+                    stimulus_name="Change detection - Active",
                     table_key=table_key,
-                    intervals_table=passive_intervals,
+                    intervals_table=active_df,
                     nwbfile=nwbfile,
                     session_info=session_info,
-                    active_devices=[STIMULUS_MONITOR_NAME],
+                    active_devices=[STIMULUS_MONITOR_NAME],  # the stimulus monitor in the instrument
                 )
-                stimulation_epochs.append(stim_epoch)
-        else:
-            # Convert table key to formatted stimulus name
-            stimulus_name = table_key.replace('_', ' ').title()
-            stim_epoch = convert_intervals_to_visual_stimulus_epoch(
-                stimulus_name=stimulus_name,
-                table_key=table_key,
-                intervals_table=intervals_table.to_dataframe(),
-                nwbfile=nwbfile,
-                session_info=session_info,
-                active_devices=[STIMULUS_MONITOR_NAME],
             )
-            stimulation_epochs.append(stim_epoch)
+            # The passive replay, split per contiguous block; no task metadata.
+            passive_df = df[df["active"] == False]  # noqa: E712
+            for _block_id, block_df in _iter_stimulus_blocks(passive_df):
+                stimulation_epochs.append(
+                    convert_intervals_to_visual_stimulus_epoch(
+                        stimulus_name="Change detection - Passive replay",
+                        table_key=table_key,
+                        intervals_table=block_df,
+                        nwbfile=nwbfile,
+                        session_info=None,
+                        active_devices=[STIMULUS_MONITOR_NAME],
+                    )
+                )
+        else:
+            # Passive mapping stimulus (flash / gabor / spontaneous): one epoch per block.
+            stimulus_name = table_key.replace("_", " ").title()
+            for _block_id, block_df in _iter_stimulus_blocks(df):
+                stimulation_epochs.append(
+                    convert_intervals_to_visual_stimulus_epoch(
+                        stimulus_name=stimulus_name,
+                        table_key=table_key,
+                        intervals_table=block_df,
+                        nwbfile=nwbfile,
+                        session_info=None,
+                        active_devices=[STIMULUS_MONITOR_NAME],
+                    )
+                )
 
     if 'optotagging' in nwbfile.processing:
         optogenetic_stimulation = nwbfile.processing['optotagging']['optogenetic_stimulation']
@@ -174,23 +218,47 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
     Acquisition
         AIND Acquisition data model populated with data from the NWB file
     """
+    subject_id = get_subject_id(nwbfile, session_info=session_info)
+
     # One config per probe, with device names matching the instrument components. Empty for
     # behavior-only sessions (no EcephysProbe devices).
     ephys_assembly_configs = get_ephys_assembly_configs(nwbfile)
 
+    # Reward/lick spout config. Only emitted when a per-reward volume is available: a
+    # no-reward session (get_individual_reward_volume returns None) would otherwise give
+    # LickSpoutConfig.volume=None, which fails validation. Mirrors visual_behavior_ophys.
+    individual_reward_volume = get_individual_reward_volume(nwbfile)
+    reward_configs = []
+    reward_active_devices = []
+    if individual_reward_volume is not None:
+        reward_configs.append(
+            LickSpoutConfig(
+                device_name=REWARD_SPOUT_NAME,
+                solution=Liquid.WATER,
+                solution_valence=Valence.POSITIVE,
+                volume=individual_reward_volume,  # smallest per-trial reward volume
+                volume_unit=VolumeUnit.ML,
+                relative_position=["Anterior"],  # TODO - confirm exact placement
+                notes=get_reward_volume_notes(nwbfile),  # lists all volumes if more than one was used
+            )
+        )
+        reward_active_devices.append(REWARD_SPOUT_NAME)
+
     # Devices active on the data stream: each ephys assembly, its probe, and the reward
-    # spout (the reward-driven behavior task ran on every session, ephys or behavior-only).
+    # spout (when reward was delivered). The optotagging laser is listed on its own epoch.
     active_devices = (
         [config.device_name for config in ephys_assembly_configs]
         + [probe.device_name for config in ephys_assembly_configs for probe in config.probes]
-        + [REWARD_SPOUT_NAME]
+        + reward_active_devices
     )
 
     acquisition = Acquisition(
-        subject_id=get_subject_id(nwbfile, session_info=session_info),
+        subject_id=subject_id,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        ethics_review_id=None,  # TODO - obtain if available
+        # Ethics (IACUC) review id, keyed by the 6-digit mouse id. Not on file for every
+        # Visual Behavior Neuropixels subject; None (with a warning) when absent.
+        ethics_review_id=_ethics_review_id_or_none(subject_id),
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),  # equipment_name; matches the generated Instrument
         acquisition_type=nwbfile.session_description,
         notes=None,
@@ -206,15 +274,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 configurations=[
                     # Per-probe ephys assembly configs (device names match the instrument).
                     *ephys_assembly_configs,
-                    # Reward/lick spout; the smallest per-trial reward volume is recorded.
-                    LickSpoutConfig(
-                        device_name=REWARD_SPOUT_NAME,
-                        solution=Liquid.WATER,
-                        solution_valence=Valence.POSITIVE,
-                        volume=get_individual_reward_volume(nwbfile),
-                        volume_unit=VolumeUnit.ML,
-                        relative_position=["Anterior"],  # TODO - confirm exact placement
-                    ),
+                    # Reward/lick spout (present only when reward was delivered).
+                    *reward_configs,
                     # The optotagging laser config lives on the "Optotagging" stimulus epoch
                     # (see get_stimulation_epochs), not on the data stream.
                 ],

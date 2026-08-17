@@ -331,4 +331,30 @@ Other per-session handling:
 - **Eye/pupil tracking is present for a subset; camera videos are not.** (This is about the **converted Zarr** output — the generated metadata is uniform across all 1518 sessions: the instrument always declares Eye + Body `CameraAssembly`s and the acquisition always lists them as active devices, regardless of which eye-tracking product a session has. See the eye-tracking note under *NWB Zarr Conversion → Visual Coding Ophys* for the primary description.) The DANDI NWBs already carry a **v1-embedded** eye tracking for the sessions whose v1 source NWB had a `processing/brain_observatory_pipeline/EyeTracking` group (**363 of 1518**): the upstream converter copied it into `processing['behavior']` as `EyeTracking` (`SpatialSeries` `pupil_location`, unit m), `CompassDirection` (`pupil_location_spherical`, degrees), and `PupilTracking` (`pupil_size`, px), referenced to the monitor center. This repo's conversion stores the 2p-frame-aligned `get_eye_tracking` product for **818** sessions and, **when it does, removes that v1-embedded eye tracking** (see the eye-tracking note under **Visual Coding Ophys** conversion above), so those sessions carry a single product — **177** of the 363 v1-embedded sessions overlap the release and have their v1 data replaced. The other **186** v1-embedded sessions are **not** in the `get_eye_tracking` release and keep their v1-embedded eye tracking unchanged. What is still **not** packaged, for any session, is the eye/body **camera video**, even though the cameras are described in the instrument.
 
 ### Visual Behavior Neuropixels
+
+**Stimulus epochs.** `get_stimulation_epochs` emits **one epoch per contiguous `stimulus_block`** (grouped by the `stimulus_block` column of each presentation table), matching the Visual Coding Neuropixels pipeline, with one Visual-Behavior addition: the change-detection **behavior task** — the presentation table's `active == True` rows (the `Natural_Images_*` table on ecephys sessions, or `grating_presentations` on early training) — is emitted as a single `Change detection - Active` epoch that carries the session's **`training_protocol_name`** (`session_type`) and **`curriculum_status`**. The passive replay (`active == False`) and the passive mapping stimuli (flash / gabor / spontaneous) are split per block into their own epochs and carry no task metadata, listing the `Stimulus Screen` monitor as their active device. An `Optotagging` epoch (473 nm laser) is appended for ecephys sessions. A typical ecephys session is **7 epochs** (active, passive replay, flash, gabor, 2× spontaneous, optotagging); a behavior-only session is **1** (the active task).
+
+**Ethics (IACUC) review id.** `acquisition.json`'s `ethics_review_id` is looked up per subject (6-digit mouse id) from `code/reference/ethics_review_ids.csv`, which covers **65 of the 81** Visual Behavior Neuropixels subjects. For the **16 uncovered subjects below**, the lookup warns and leaves `ethics_review_id` **None** rather than failing the session — so **all sessions of these 16 subjects (721 behavior-only + 32 ecephys = 753 sessions)** have no ethics review id. Extend `ethics_review_ids.csv` when the ids become available.
+
+| subject (mouse id) | behavior sessions | ecephys sessions | ecephys session ids |
+|---|---|---|---|
+| 562033 | 91 | 2 | 1113751921, 1113957627 |
+| 570299 | 54 | 2 | 1115077618, 1115356973 |
+| 570302 | 77 | 2 | 1122903357, 1123100019 |
+| 572846 | 31 | 2 | 1112302803, 1112515874 |
+| 574078 | 30 | 2 | 1115086689, 1115368723 |
+| 574081 | 51 | 2 | 1121406444, 1121607504 |
+| 574082 | 40 | 2 | 1118327332, 1118508667 |
+| 576323 | 23 | 2 | 1116941914, 1117148442 |
+| 576324 | 28 | 2 | 1118324999, 1118512505 |
+| 577287 | 48 | 2 | 1124285719, 1124507277 |
+| 578003 | 27 | 2 | 1119946360, 1120251466 |
+| 578257 | 52 | 2 | 1125713722, 1125937457 |
+| 579993 | 53 | 2 | 1130113579, 1130349290 |
+| 585326 | 24 | 2 | 1128520325, 1128719842 |
+| 585329 | 57 | 2 | 1139846596, 1140102579 |
+| 599294 | 35 | 2 | 1152632711, 1152811536 |
+
+**Experimenters.** The acquisition's `experimenters` is left empty: the Visual Behavior Neuropixels session tables carry no per-session operator, and there is no operator reference file for this dataset (unlike Visual Coding Neuropixels). The project investigators are still recorded on the data description (Corbett Bennett, Shawn Olsen).
+
 - Look into discrepancies in the session start time for some of the later sessions.
