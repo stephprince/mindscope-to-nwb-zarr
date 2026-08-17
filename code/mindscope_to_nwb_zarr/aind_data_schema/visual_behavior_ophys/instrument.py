@@ -63,6 +63,7 @@ from aind_data_schema.components.devices import (
     FilterType,
     Laser,
     Lens,
+    LightEmittingDiode,
     LickSpout,
     Microscope,
     Monitor,
@@ -223,6 +224,72 @@ def _build_reward_spout() -> LickSpout:
 
 
 # ---------------------------------------------------------------------------
+# Illumination LEDs (behavior + eye monitoring)
+#
+# Ported from the reference behavior-camera instrument (instrument_behavior_camera.py).
+# Behavior illumination (740 nm) is used wherever a body/behavior camera is present (all
+# three rigs); eye illumination (850 nm) only where an eye camera is present (2P +
+# mesoscope, not the behavior box).
+# ---------------------------------------------------------------------------
+
+def _build_behavior_illumination() -> list:
+    """The 740 nm behavior-monitoring illumination LED, its lens, and bandpass filter.
+
+    The Thorlabs LB1092-B-ML is a lens; the 747 nm bandpass is a separate filter (the
+    whitepaper conflates them -- see instrument_behavior_camera.py).
+    """
+    return [
+        LightEmittingDiode(
+            name="BehaviorIlluminationLED",
+            manufacturer=Organization.OTHER,
+            model="LZ4-40R308-0000",
+            wavelength=740,
+            wavelength_unit=SizeUnit.NM,
+            notes="LED Engine Inc. 740 nm illumination LED for behavior monitoring",
+        ),
+        Lens(
+            name="BehaviorIlluminationLens",
+            manufacturer=Organization.THORLABS,
+            model="LB1092-B-ML",
+            notes="Lens in front of behavior illumination LED",
+        ),
+        Filter(
+            name="BehaviorIlluminationFilter",
+            manufacturer=Organization.OTHER,  # manufacturer/model unconfirmed (schema requires a value)
+            filter_type=FilterType.BANDPASS,
+            center_wavelength=747,
+            wavelength_unit=SizeUnit.NM,
+            notes=(
+                "747+/-33 nm bandpass filter in front of behavior illumination LED "
+                "to prevent visible portion of LED spectrum from reaching mouse eye. "
+                "Manufacturer/model unconfirmed (whitepaper conflates it with the "
+                "LB1092-B-ML lens; likely Semrock FF01-747/33-25)."
+            ),
+        ),
+    ]
+
+
+def _build_eye_illumination() -> list:
+    """The 850 nm eye-tracking illumination LED and its lens (eye-camera rigs only)."""
+    return [
+        LightEmittingDiode(
+            name="EyeIlluminationLED",
+            manufacturer=Organization.OTHER,
+            model="LZ1-10R602-0000",
+            wavelength=850,
+            wavelength_unit=SizeUnit.NM,
+            notes="LED Engine Inc. 850 nm illumination LED for eye tracking",
+        ),
+        Lens(
+            name="EyeIlluminationLens",
+            manufacturer=Organization.THORLABS,
+            model="LB1092-B-ML",
+            notes="Lens in front of eye illumination LED",
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Behavior box instrument (BEH.*)
 # ---------------------------------------------------------------------------
 
@@ -294,6 +361,7 @@ def build_behavior_instrument(equipment_name: str) -> Instrument:
                     model="MVL8M23",
                 ),
             ),
+            *_build_behavior_illumination(),  # 740 nm body/behavior-camera illumination
             _build_reward_spout(),
         ],
     )
@@ -411,6 +479,8 @@ def build_2p_instrument(equipment_name: str) -> Instrument:
                     wavelength_unit=SizeUnit.NM,
                 ),
             ),
+            *_build_behavior_illumination(),  # 740 nm body/behavior-camera illumination
+            *_build_eye_illumination(),        # 850 nm eye-camera illumination
             _build_reward_spout(),
         ],
     )
@@ -629,6 +699,8 @@ def build_mesoscope_instrument(equipment_name: str) -> Instrument:
                 manufacturer=Organization.COHERENT_SCIENTIFIC,
                 model="Chameleon Vision",
             ),
+            *_build_behavior_illumination(),  # 740 nm body/behavior-camera illumination
+            *_build_eye_illumination(),        # 850 nm eye-camera illumination
             _build_reward_spout(),
             Microscope(
                 name=microscope_name_for_equipment(equipment_name),
