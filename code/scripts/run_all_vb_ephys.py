@@ -62,6 +62,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.procedures import (
     fetch_procedures_from_aind_metadata_service,
 )
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.instrument import generate_instrument
 
 HERE = Path(__file__).resolve().parent
 PROJECT_METADATA = HERE.parent.parent / "data" / "visual-behavior-neuropixels" / "project_metadata"
@@ -76,11 +77,13 @@ SUMMARY_JSON = REPORT_DIR / "summary.json"
 # Public S3 bucket (HTTPS endpoint) holding the Visual Behavior Neuropixels NWB files.
 S3_BASE_URL = "https://visual-behavior-neuropixels-data.s3.amazonaws.com/visual-behavior-neuropixels"
 
-# visual_behavior_ephys has no instrument module yet, so a complete session is these four
-# files; subject/procedures require the metadata service, so their absence signals an
-# unreachable service, not a data gap. With --skip-procedures, procedures.json is dropped
-# from both the generated set and this completeness check (see _required_files).
-REQUIRED_FILES = ("data_description.json", "subject.json", "acquisition.json", "procedures.json")
+# A complete session is these five files. subject/procedures require the metadata service,
+# so their absence signals an unreachable service, not a data gap; data_description /
+# acquisition / instrument are derived from the NWB + session tables and always present.
+# With --skip-procedures, procedures.json is dropped from both the generated set and this
+# completeness check (see _required_files).
+REQUIRED_FILES = ("data_description.json", "subject.json", "acquisition.json",
+                  "procedures.json", "instrument.json")
 
 
 def _required_files(include_procedures: bool) -> tuple:
@@ -170,7 +173,8 @@ def _generate_and_write(nwbfile, session_info: pd.Series, include_procedures: bo
     subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
     procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info) if include_procedures else None
-    models = [data_description, subject, acquisition, procedures]
+    instrument = generate_instrument(session_info)
+    models = [data_description, subject, acquisition, procedures, instrument]
 
     out_dir = OUTPUT_DIR / data_description.name
     out_dir.mkdir(parents=True, exist_ok=True)

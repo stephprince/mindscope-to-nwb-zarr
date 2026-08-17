@@ -101,6 +101,34 @@ def _fetch_subject_raw(subject_id: str, api_host: str) -> Optional[dict]:
             return raw_data
 
 
+def cross_check_subject_against_session_info(nwbfile: NWBFile, session_info: pd.Series) -> None:
+    """Fail loudly if the NWB subject disagrees with the session table row.
+
+    The session tables (behavior_sessions.csv / ecephys_sessions.csv) carry their own
+    ``mouse_id``, ``sex`` and ``genotype`` per session. The mouse id is already
+    cross-checked in ``get_subject_id``; this additionally checks sex and genotype. For
+    this fixed dataset every field must agree, so a mismatch raises.
+
+    Raises
+    ------
+    ValueError
+        If the session table's sex or genotype disagrees with the NWB subject.
+    """
+    # Mouse id: asserts session_info['mouse_id'] == nwbfile.subject.subject_id.
+    get_subject_id(nwbfile, session_info)
+
+    if str(session_info['sex']) != str(nwbfile.subject.sex):
+        raise ValueError(
+            f"Sex mismatch between session table ({session_info['sex']}) and NWB "
+            f"({nwbfile.subject.sex}) for mouse {nwbfile.subject.subject_id}."
+        )
+    if str(session_info['genotype']) != str(nwbfile.subject.genotype):
+        raise ValueError(
+            f"Genotype mismatch between session table ({session_info['genotype']}) and NWB "
+            f"({nwbfile.subject.genotype}) for mouse {nwbfile.subject.subject_id}."
+        )
+
+
 def fetch_subject_from_aind_metadata_service(
     nwbfile: NWBFile,
     session_info: pd.Series,
@@ -147,6 +175,10 @@ def fetch_subject_from_aind_metadata_service(
     unexpected mismatch should surface and be addressed, not be silently accepted.
     """
     api_host = api_host if api_host else "http://aind-metadata-service"
+
+    # Cross-check the NWB subject against the session table row (mouse id, sex, genotype)
+    # before hitting the metadata service, so a table/NWB disagreement fails loudly.
+    cross_check_subject_against_session_info(nwbfile, session_info)
 
     # 6-digit mouse ID from the NWB file, cross-checked against session_info['mouse_id'].
     subject_id = get_subject_id(nwbfile, session_info)
