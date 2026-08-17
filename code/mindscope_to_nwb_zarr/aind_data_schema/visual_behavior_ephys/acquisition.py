@@ -20,7 +20,6 @@ mapping stimuli (flash / gabor / spontaneous) are split per block and carry no t
 metadata.
 """
 
-import warnings
 from datetime import timedelta
 from pynwb import NWBFile
 import pandas as pd
@@ -78,21 +77,30 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
 )
 
 
-def _ethics_review_id_or_none(subject_id) -> list[str] | None:
-    """Look up the ethics (IACUC) review id for a subject, or None if not on file.
+# The entire Visual Behavior Neuropixels cohort is under a single IACUC protocol: every
+# subject present in the (frozen) reference/ethics_review_ids.csv -- 65 of the 81 -- maps to
+# 1805, so the id is hardcoded here for the whole cohort, including the 16 subjects absent
+# from that reference file. When the reference file does list the subject, its value is
+# asserted to agree, so a future divergence fails loudly rather than passing silently.
+VBN_ETHICS_REVIEW_ID = "1805"
 
-    The bundled ``reference/ethics_review_ids.csv`` covers most -- but not all -- Visual
-    Behavior Neuropixels subjects. For a subject that is absent, warn and return None
-    rather than failing the session (the README lists the uncovered subjects).
+
+def _vbn_ethics_review_id(subject_id) -> list[str]:
+    """Ethics (IACUC) review id for a VBN subject: always ``["1805"]``.
+
+    Asserts that any value the reference CSV provides for the subject matches the hardcoded
+    cohort id (so a mismatch, or a future edit to the reference file, fails loudly).
     """
     try:
-        return get_ethics_review_id(subject_id)
+        looked_up = get_ethics_review_id(subject_id)
     except KeyError:
-        warnings.warn(
-            f"No ethics_review_id on file for subject {subject_id}; leaving it None "
-            f"(see the README list of Visual Behavior Neuropixels subjects without one)."
+        looked_up = None
+    if looked_up is not None:
+        assert looked_up == [VBN_ETHICS_REVIEW_ID], (
+            f"ethics_review_ids.csv lists {looked_up} for subject {subject_id}, but the "
+            f"Visual Behavior Neuropixels cohort id is [{VBN_ETHICS_REVIEW_ID!r}]."
         )
-        return None
+    return [VBN_ETHICS_REVIEW_ID]
 
 
 def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[StimulusEpoch]:
@@ -256,9 +264,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
         subject_id=subject_id,
         acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
-        # Ethics (IACUC) review id, keyed by the 6-digit mouse id. Not on file for every
-        # Visual Behavior Neuropixels subject; None (with a warning) when absent.
-        ethics_review_id=_ethics_review_id_or_none(subject_id),
+        # Ethics (IACUC) review id: hardcoded cohort id 1805 (asserted against the
+        # reference CSV when it lists the subject). See _vbn_ethics_review_id.
+        ethics_review_id=_vbn_ethics_review_id(subject_id),
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),  # equipment_name; matches the generated Instrument
         acquisition_type=nwbfile.session_description,
         notes=None,
