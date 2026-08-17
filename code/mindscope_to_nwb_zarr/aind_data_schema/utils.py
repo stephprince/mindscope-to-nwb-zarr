@@ -132,11 +132,39 @@ def get_session_start_time(nwbfile: NWBFile, session_info: pd.Series) -> datetim
     return nwbfile.session_start_time
 
 
+# Behavior-box rig names look like "BEH.G-Box6" (with a box number) or the bare cluster
+# form "BEH.G" (without one). Everything else (CAM2P.3, MESO.1, NP.0, ...) is left as is.
+_BEHAVIOR_BOX_RE = re.compile(r"^BEH\.([A-Za-z])(?:-Box(\d+))?$")
+
+
+def resolve_instrument_id(equipment_name: str) -> str:
+    """Map a rig ``equipment_name`` to the instrument id used in the metadata.
+
+    Behavior boxes get a compact ``[letter][number]`` id: ``"BEH.G-Box6" -> "G6"``. The
+    bare cluster form (no box number) drops to just the letter: ``"BEH.G" -> "G"``.
+    Non-behavior-box rigs (e.g. ``CAM2P.3``, ``MESO.1``, ``NP.0``) are returned unchanged.
+
+    Applied to both the generated Instrument's ``instrument_id`` and the Acquisition's
+    ``instrument_id`` (via ``get_instrument_id``) so the two always match.
+    """
+    match = _BEHAVIOR_BOX_RE.match(equipment_name)
+    if match is None:
+        return equipment_name
+    letter, number = match.group(1).upper(), match.group(2)
+    return f"{letter}{number}" if number else letter
+
+
 def get_instrument_id(nwbfile: NWBFile, session_info: pd.Series) -> str:
-    """Get the instrument ID from the NWB file, cross-checked with the session info. e.g. "BEH.F-Box1"."""
+    """Get the instrument ID from the NWB file, cross-checked with the session info.
+
+    The raw rig name (the NWB device name, cross-checked against
+    ``session_info['equipment_name']``) is mapped through ``resolve_instrument_id`` so a
+    behavior box like ``"BEH.G-Box6"`` becomes ``"G6"``; imaging/ephys rigs
+    (``CAM2P.3``, ``MESO.1``, ``NP.0``) are unchanged. Matches the generated Instrument's id.
+    """
     instrument = next(iter(nwbfile.devices))
     assert session_info['equipment_name'] == instrument, "instrument_id mismatch occurred"
-    return instrument
+    return resolve_instrument_id(instrument)
 
 
 def get_total_reward_volume(nwbfile: NWBFile) -> float | None:

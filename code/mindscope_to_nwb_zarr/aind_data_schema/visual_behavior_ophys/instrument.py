@@ -71,6 +71,8 @@ from aind_data_schema.components.devices import (
 from aind_data_schema.components.identifiers import Software
 from aind_data_schema.core.instrument import Instrument
 
+from mindscope_to_nwb_zarr.aind_data_schema.utils import resolve_instrument_id
+
 
 # ---------------------------------------------------------------------------
 # Canonical component names.
@@ -218,10 +220,14 @@ def _build_reward_spout() -> LickSpout:
 # ---------------------------------------------------------------------------
 
 def build_behavior_instrument(equipment_name: str) -> Instrument:
-    """Build the behavior-box Instrument (ported from reference/behavior_instrument.py)."""
+    """Build the behavior-box Instrument (ported from reference/behavior_instrument.py).
+
+    The ``instrument_id`` is the compact ``[letter][number]`` box id (e.g. ``"BEH.G-Box6"``
+    -> ``"G6"``), matching the Acquisition's ``instrument_id`` (see ``resolve_instrument_id``).
+    """
     return Instrument(
         location="Unknown",
-        instrument_id=equipment_name,
+        instrument_id=resolve_instrument_id(equipment_name),
         modification_date=_BEHAVIOR_MODIFICATION_DATE,
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         modalities=[Modality.BEHAVIOR],
