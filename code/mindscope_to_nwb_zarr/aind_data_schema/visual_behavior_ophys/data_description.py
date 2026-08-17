@@ -35,12 +35,25 @@ _TAG_COLUMNS = [
 ]
 
 
+def _format_tag_value(value) -> str:
+    """Render a tag value, coercing integer-valued ids to a plain int string.
+
+    Numeric linkage-id columns (e.g. ophys_session_id) are read as float when the column
+    contains NaNs (behavior-only rows), so an id would otherwise render with a trailing
+    ".0" (``951410079.0``). Strings -- including the list-valued ophys_container_id /
+    ophys_experiment_id and session_type / project_code -- pass through unchanged.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _build_tags(session_info: pd.Series) -> list[str]:
     """Build the asset tags from whichever identifying columns are present and non-null."""
     tags = ["mindscope"]
     for column in _TAG_COLUMNS:
         if column in session_info.index and pd.notna(session_info[column]):
-            tags.append(f"{column}: {session_info[column]}")
+            tags.append(f"{column}: {_format_tag_value(session_info[column])}")
     return tags
 
 
