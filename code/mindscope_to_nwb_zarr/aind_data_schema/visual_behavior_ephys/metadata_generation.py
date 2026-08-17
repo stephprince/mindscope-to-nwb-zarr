@@ -12,7 +12,8 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.procedures import fetch_procedures_from_aind_metadata_service
 
 
-def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path):
+def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path,
+                              include_procedures: bool = True):
     """
     Process a single NWB file and generate AIND data schema JSON files.
 
@@ -24,6 +25,10 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
         Session metadata row from the session table
     output_dir : Path
         Path to directory to save output JSON files
+    include_procedures : bool, optional
+        Whether to fetch and write procedures.json. Defaults to True. Set to False to skip
+        procedures (e.g. while the metadata-service procedures endpoint is unavailable);
+        the other models are still generated and procedures can be added on a later run.
     """
     # Read NWB file
     nwbfile = read_nwb(nwb_file_path)
@@ -32,11 +37,13 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
     assert nwbfile.session_description == session_info['session_type'], \
         f"Session description mismatch: {nwbfile.session_description} != {session_info['session_type']}"
 
-    # Generate metadata models
+    # Generate metadata models. subject and procedures are fetched from the AIND metadata
+    # service (cached by 6-digit mouse id); both fail loudly on an unexpected outcome
+    # (unreachable service, 404, or an NWB/LIMS disagreement) rather than returning None.
     data_description = generate_data_description(nwbfile, session_info)
-    subject = None  # fetch_subject_from_aind_metadata_service(nwbfile, session_info)
+    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
     acquisition = generate_acquisition(nwbfile, session_info)
-    procedures = None  #fetch_procedures_from_aind_metadata_service(nwbfile, session_info)
+    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info) if include_procedures else None
     #instrument = generate_instrument(nwbfile, session_info) # TODO - add instrument generation
     metadata_models = [data_description, subject, acquisition, procedures]  # add instrument when available
 
@@ -49,7 +56,8 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
             deserialized.write_standard_file(output_directory=output_dir / data_description.name)
 
 
-def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
+def generate_all_session_metadata(data_dir: Path, results_dir: Path,
+                                  include_procedures: bool = True) -> None:
     """
     Iterate through all sessions in the mounted data directory and generate session metadata.
 
@@ -62,6 +70,10 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
         Path to data directory where S3 bucket is mounted
     results_dir : Path
         Path to directory to save output metadata JSON files
+    include_procedures : bool, optional
+        Whether to fetch and write procedures.json for each session. Defaults to True. Set
+        to False to skip procedures while the metadata-service procedures endpoint is
+        unavailable; a later run with it True adds procedures.json to each session folder.
     """
     output_dir = results_dir / "visual-behavior-neuropixels-metadata"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -106,6 +118,7 @@ def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
                 nwb_file_path=nwb_file_path,
                 session_info=session_info,
                 output_dir=output_dir,
+                include_procedures=include_procedures,
             )
         except Exception as e:
             print(f"Error generating metadata for session {behavior_session_id}: {e}")

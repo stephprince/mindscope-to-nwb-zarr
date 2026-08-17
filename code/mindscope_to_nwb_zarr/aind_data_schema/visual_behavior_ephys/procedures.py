@@ -1,105 +1,194 @@
-"""Generates an example JSON file for visual behavior ephys procedures"""
+"""Generates procedures metadata from NWB files for visual behavior ephys (neuropixels) sessions.
+
+Mirrors ``visual_behavior_ophys/procedures.py`` (on-disk caching, raw-parse fallback,
+build-time fixups for known LIMS schema quirks) but is stricter about missing records:
+this is a one-time conversion of a fixed dataset, so an unreachable metadata service
+raises here rather than returning None. The known-issue fixups are retained: they repair
+LIMS records that would otherwise fail schema validation (so the model cannot be built
+without them) and each repair emits a warning that the batch runner captures durably.
+"""
 
 import json
-import pandas as pd
 import warnings
+import pandas as pd
 from pynwb import NWBFile
 from typing import Optional
 
 from aind_data_schema.core.procedures import Procedures
 
 from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id
+from mindscope_to_nwb_zarr.aind_data_schema.metadata_service_cache import (
+    load_cached, store_cached, PROCEDURES,
+)
 
 import aind_metadata_service_client
 from aind_metadata_service_client.rest import ApiException
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
-def _fix_procedures_validation_issues(subject_procedures: list) -> list:
+
+def _fix_procedures_validation_issues(subject_procedures: list) -> None:
     """
-    Fix known validation issues in procedures data from the API
+    Fix known validation issues in procedures data from the API, in place.
+
+    These are LIMS records that would otherwise fail aind-data-schema validation; the
+    repairs are the minimum needed to build the model, and each emits a warning so the
+    imputation is visible in the run report.
 
     Parameters
     ----------
     subject_procedures : list
-        The subject_procedures list from the API response
-
-    Returns
-    -------
-    list
-        The fixed subject_procedures list
+        The subject_procedures list from the API response; modified in place.
     """
-    # Fix issues in subject_procedures
+    # Known start_dates among this subject's surgeries, used to impute a missing one below.
+    known_start_dates = [
+        p.get('start_date') for p in subject_procedures
+        if p.get('object_type') == 'Surgery' and p.get('start_date')
+    ]
+
     for i, procedure in enumerate(subject_procedures):
         # Fix Surgery procedures
         if procedure.get('object_type') == 'Surgery':
             if procedure.get('anaesthesia') is not None and 'duration' not in procedure['anaesthesia']:
-                subject_procedures[i]['anaesthesia']['duration'] = 0.0 # TODO - is there a better missing value?
-                print(f"  Fixed missing anaesthesia.duration, set to 0.0")
+                subject_procedures[i]['anaesthesia']['duration'] = 0.0
+                warnings.warn("Fixed missing anaesthesia.duration, set to 0.0")
+
+            # Surgery.start_date is required; LIMS occasionally leaves it null. Impute from
+            # another surgery of the same subject (the best available anchor) and warn.
+            if procedure.get('start_date') is None and known_start_dates:
+                subject_procedures[i]['start_date'] = known_start_dates[0]
+                warnings.warn(
+                    f"Fixed missing Surgery.start_date, imputed {known_start_dates[0]} from "
+                    f"another surgery of the same subject (real date unknown)"
+                )
 
             # Fix procedures within Surgery
             for j, surgery_proc in enumerate(procedure['procedures']):
-                # Fix Craniotomy position (should be list or Translation object, not string)
-                if surgery_proc.get('object_type') == 'Craniotomy' and 'position' in surgery_proc:
-                    position = surgery_proc['position']
+                if surgery_proc.get('object_type') == 'Craniotomy':
+                    position = surgery_proc.get('position')
+                    # Craniotomy position should be a list (or Translation), not a string.
                     if isinstance(position, str):
                         subject_procedures[i]['procedures'][j]['position'] = [position]
-                        print(f"  Fixed Craniotomy position from string '{position}' to list [{position}]")
+                        warnings.warn(f"Fixed Craniotomy position from string '{position}' to list [{position}]")
+                    # A Circle craniotomy requires a position; LIMS occasionally leaves it
+                    # null. Impute the dataset norm (["Left"]); every other cached craniotomy
+                    # uses it and coordinate_system_name is already present on the record.
+                    elif position is None and surgery_proc.get('craniotomy_type') == 'Circle':
+                        subject_procedures[i]['procedures'][j]['position'] = ["Left"]
+                        warnings.warn('Fixed missing Circle Craniotomy.position, imputed ["Left"] (dataset norm)')
 
-    return subject_procedures
 
+def _fetch_procedures_raw(subject_id: str, api_host: str) -> Optional[dict]:
+    """Fetch the raw procedures response dict from the AIND metadata service.
 
-def fetch_procedures_from_aind_metadata_service(nwbfile: NWBFile, session_info: pd.Series, api_host: Optional[str] = None) -> Optional[Procedures]:
+    Returns the JSON-safe raw_data dict that ``Procedures(**raw_data)`` is built from
+    (after the known-validation-issue fixups), or None if the service is unreachable.
+    Raises RuntimeError if the procedures are not found (HTTP 404). Does not touch the
+    cache; callers cache the result.
+
+    The None-on-unreachable contract is kept (rather than raising) so the preload script
+    can distinguish "service down, retry later" from a genuine 404; the public
+    ``fetch_procedures_from_aind_metadata_service`` escalates the None to a hard failure.
     """
-    Fetch procedures metadata from AIND metadata service API
-
-    Parameters
-    ----------
-    nwbfile : NWBFile
-        The NWB file containing subject information to extract subject ID
-    session_info : pd.Series
-        Series containing session information to extract subject ID
-    api_host : str, optional
-        The API host URL. Defaults to "http://aind-metadata-service"
-
-    Returns
-    -------
-    Procedures or None
-        Procedures object if found, None otherwise
-
-    Notes
-    -----
-    The API endpoint used is GET /api/v2/procedures/{subject_id}
-
-    If the API call fails, returns None and logs a warning.
-    """
-    api_host = api_host if api_host else "http://aind-metadata-service"
-    subject_id = get_subject_id(nwbfile, session_info)
-
     configuration = aind_metadata_service_client.Configuration(host=api_host)
 
     with aind_metadata_service_client.ApiClient(configuration) as api_client:
         api_instance = aind_metadata_service_client.DefaultApi(api_client)
 
-        # there are known validation issues with old procedures data, always get raw response
-        # TODO - what will happen if no response, keep track of sessions with missing info
         try:
             procedures_response = api_instance.get_procedures(subject_id=subject_id)
-            procedures = Procedures(**procedures_response)
+            if hasattr(procedures_response, 'model_dump'):
+                return procedures_response.model_dump(mode="json")
+            return procedures_response
         except Urllib3HTTPError as e:
-            warnings.warn(f"Warning: Could not connect to AIND metadata service at {api_host}: {e}")
+            warnings.warn(f"Could not connect to AIND metadata service at {api_host}: {e}")
             return None
         except ApiException as e:
-            # If validation fails, try to get the raw response
-            warnings.warn(f"Warning: Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
+            if e.status == 404:
+                raise RuntimeError(
+                    f"Procedures for subject {subject_id} not found in the AIND metadata service (HTTP 404)."
+                ) from e
+            # A 5xx is a service-side outage (the body is a plain error string like
+            # "Internal Server Error", not JSON), distinct from the validation errors below
+            # (real JSON that merely fails schema validation). Surface it clearly instead of
+            # letting the raw-parse json.loads fail with a confusing JSONDecodeError.
+            if e.status is not None and e.status >= 500:
+                body = e.body.decode("utf-8", "replace") if isinstance(e.body, bytes) else str(e.body)
+                raise RuntimeError(
+                    f"AIND metadata service returned HTTP {e.status} for procedures (subject {subject_id}): {body[:200]!r}"
+                ) from e
+            warnings.warn(f"Validation error for procedures (subject {subject_id}), attempting to parse and fix raw response")
 
-            # Get raw response without preload content validation
             response = api_instance.get_procedures_without_preload_content(subject_id=subject_id)
-            raw_data = json.loads(response.data.decode('utf-8'))
+            try:
+                raw_data = json.loads(response.data.decode('utf-8'))
+            except (ValueError, UnicodeDecodeError) as pe:
+                raise RuntimeError(
+                    f"AIND metadata service returned a non-JSON body (HTTP {response.status}) for "
+                    f"procedures (subject {subject_id}): {response.data[:200]!r}"
+                ) from pe
+            # Note: known-validation-issue fixups are applied at build time (in the public
+            # function), not here, so they also cover the clean-path and cache-hit responses.
+            return raw_data
 
-            # Fix known validation issues in procedures data
-            raw_data['subject_procedures'] = _fix_procedures_validation_issues(raw_data['subject_procedures'])
 
-            # Create Procedures from the fixed data
-            procedures = Procedures(**raw_data)
-        return procedures
-        
+def fetch_procedures_from_aind_metadata_service(
+    nwbfile: NWBFile,
+    session_info: pd.Series,
+    api_host: Optional[str] = None,
+) -> Procedures:
+    """
+    Fetch procedures metadata from the AIND metadata service API (fail-loud).
+
+    Parameters
+    ----------
+    nwbfile : NWBFile
+        The NWB file used to resolve (and cross-check) the subject ID
+    session_info : pd.Series
+        Series containing session information (from the behavior or ecephys session table)
+    api_host : str, optional
+        The API host URL. Defaults to "http://aind-metadata-service"
+
+    Returns
+    -------
+    Procedures
+        Procedures object built from the metadata-service response.
+
+    Raises
+    ------
+    RuntimeError
+        If the metadata service is unreachable, or if the procedures for the subject are
+        not found (HTTP 404).
+
+    Notes
+    -----
+    The API endpoint used is GET /api/v2/procedures/{subject_id}
+
+    The subject_id is the 6-digit mouse ID from the NWB file, cross-checked against
+    session_info['mouse_id'] (see ``get_subject_id``).
+    """
+    api_host = api_host if api_host else "http://aind-metadata-service"
+
+    # 6-digit mouse ID from the NWB file, cross-checked against session_info['mouse_id'].
+    subject_id = get_subject_id(nwbfile, session_info)
+
+    # The procedures record for a subject does not change between runs and the same
+    # subject recurs across many sessions, so cache it by subject_id (see
+    # metadata_service_cache). On a miss, fetch and cache. An unreachable service yields
+    # None from the fetcher, which we escalate to a hard failure below (fail-loud).
+    raw_data = load_cached(PROCEDURES, subject_id)
+    if raw_data is None:
+        raw_data = _fetch_procedures_raw(subject_id, api_host)
+        if raw_data is None:
+            raise RuntimeError(
+                f"AIND metadata service unreachable while fetching procedures for subject {subject_id}."
+            )
+        store_cached(PROCEDURES, subject_id, raw_data)
+
+    # Apply known-validation-issue fixups at build time (not before caching) so the cache
+    # holds the raw service response and any updated fixups apply on the next run without
+    # re-fetching. This also covers responses that arrived via the clean (non-fallback)
+    # API path, which previously skipped the fixups.
+    _fix_procedures_validation_issues(raw_data['subject_procedures'])
+
+    # Build the aind_data_schema Procedures from the (fixed) response dict.
+    return Procedures(**raw_data)
