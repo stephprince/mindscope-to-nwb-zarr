@@ -17,7 +17,7 @@ drift.
 import json
 import warnings
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from pynwb import NWBFile
 from typing import Optional
 
@@ -127,6 +127,52 @@ def cross_check_subject_against_session_info(nwbfile: NWBFile, session_info: pd.
             f"Genotype mismatch between session table ({session_info['genotype']}) and NWB "
             f"({nwbfile.subject.genotype}) for mouse {nwbfile.subject.subject_id}."
         )
+
+
+def cross_check_lims_against_session_info(session_info: pd.Series, raw_data: dict) -> None:
+    """Fail loudly if the authoritative LIMS subject record disagrees with the session table.
+
+    The metadata service (LIMS) is authoritative and is what ``subject.json`` is built
+    from, while the session tables (behavior_sessions.csv / ecephys_sessions.csv) drive
+    every other file in the package (data_description, acquisition). If the two disagreed
+    the output package would be internally inconsistent, so they are checked directly here
+    rather than relying on transitivity through the NWB cross-checks.
+
+    Checks sex, genotype, and date of birth. The CSV has no date-of-birth column; it is
+    derived as ``date_of_acquisition - age_in_days`` and compared with a small tolerance
+    (the age is stored only to integer days).
+
+    Raises
+    ------
+    ValueError
+        If the session table's sex, genotype, or derived date of birth disagrees with the
+        (authoritative) LIMS record. ``genotype`` is compared against the final LIMS value,
+        after any null-genotype backfill, so callers must run this after that step.
+    """
+    details = raw_data['subject_details']
+    sex_map = {"F": "Female", "M": "Male"}
+
+    if sex_map.get(str(session_info['sex'])) != details['sex']:
+        raise ValueError(
+            f"Sex mismatch between session table ({session_info['sex']}) and the authoritative "
+            f"AIND metadata service ({details['sex']})."
+        )
+    if str(session_info['genotype']) != str(details['genotype']):
+        raise ValueError(
+            f"Genotype mismatch between session table ({session_info['genotype']}) and the "
+            f"authoritative AIND metadata service ({details['genotype']})."
+        )
+
+    # DOB from the CSV (date_of_acquisition - age_in_days), tolerant of the integer-day age.
+    if pd.notna(session_info.get('date_of_acquisition')) and pd.notna(session_info.get('age_in_days')):
+        acquisition_date = datetime.fromisoformat(str(session_info['date_of_acquisition'])).date()
+        csv_dob = acquisition_date - timedelta(days=int(session_info['age_in_days']))
+        lims_dob = datetime.strptime(details['date_of_birth'], "%Y-%m-%d").date()
+        if abs((csv_dob - lims_dob).days) > 2:
+            raise ValueError(
+                f"Date of birth mismatch >2 days between session table (derived {csv_dob}) and "
+                f"the authoritative AIND metadata service ({lims_dob})."
+            )
 
 
 def fetch_subject_from_aind_metadata_service(
@@ -244,6 +290,12 @@ def fetch_subject_from_aind_metadata_service(
             f"Genotype mismatch for subject {subject_id}: NWB={nwb_genotype}, "
             f"LIMS={lims_genotype}."
         )
+
+    # Directly cross-check the authoritative LIMS record against the session table row.
+    # subject.json is built from LIMS while the other files are driven by the CSV, so the
+    # two must agree for the package to be internally consistent. Run after the genotype
+    # backfill so the final authoritative genotype is what gets compared.
+    cross_check_lims_against_session_info(session_info, raw_data)
 
     # Build the aind_data_schema Subject from the response dict -- the same for both the
     # clean-success and raw-parse fallback paths, so the return type is consistent.
