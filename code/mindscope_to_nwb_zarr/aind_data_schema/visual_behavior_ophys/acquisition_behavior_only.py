@@ -123,7 +123,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 solution_valence=Valence.POSITIVE,
                 volume=individual_reward_volume,
                 volume_unit=VolumeUnit.ML,
-                relative_position=["Anterior"],  # TODO - what is the correct information here
+                relative_position=["Anterior"],
                 notes=get_reward_volume_notes(nwbfile),  # lists all volumes if more than one was used
             )
         )
@@ -148,9 +148,9 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 modalities=get_modalities(nwbfile),
                 code=None,
                 notes=None,
-                active_devices=[
-                    REWARD_SPOUT_NAME,  # "Reward Spout" in the instrument
-                ],
+                # "Reward Spout" is active only when a reward was delivered (omitted for
+                # no-reward sessions, matching the omitted LickSpoutConfig).
+                active_devices=[REWARD_SPOUT_NAME] if reward_configs else [],
                 configurations=reward_configs,
             ),
         ],

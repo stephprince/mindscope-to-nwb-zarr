@@ -238,7 +238,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 solution_valence=Valence.POSITIVE,
                 volume=individual_reward_volume,  # smallest per-trial reward volume
                 volume_unit=VolumeUnit.ML,
-                relative_position=["Anterior"],  # TODO - confirm exact placement
+                relative_position=["Anterior"],
                 notes=get_reward_volume_notes(nwbfile),  # lists all volumes if more than one was used
             )
         )

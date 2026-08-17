@@ -511,7 +511,9 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                     device_names["detector"],  # detector ("PMT")
                     STIMULUS_MONITOR_NAME,     # visual stimulus screen
                     *behavior_video_devices,
-                    device_names["reward_spout"],
+                    # reward spout active only when a reward was delivered (matches the
+                    # omitted LickSpoutConfig for no-reward sessions)
+                    *([device_names["reward_spout"]] if reward_configs else []),
                 ],
                 configurations=[
                     imaging_config,

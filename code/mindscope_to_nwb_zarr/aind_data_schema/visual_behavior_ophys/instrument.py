@@ -154,15 +154,22 @@ _MESO_MODIFICATION_DATE = date(2024, 4, 2)  # TODO: confirm (from reference file
 # ---------------------------------------------------------------------------
 
 def _build_running_disc() -> Disc:
-    """The MindScope running disc for the behavior box and 2P rigs.
+    """The MindScope running disc, shared by all three rigs (behavior box, 2P, mesoscope).
 
-    The mesoscope defines its own running disc (with encoder/decoder details).
+    Uses the full mesoscope specification -- manufacturer AI, plus the encoder / decoder /
+    firmware / surface-material details -- as the single, most complete record of the disc
+    (the behavior box and 2P rigs use the same physical running disc).
     """
     return Disc(
         name=RUNNING_DISC_NAME,
-        manufacturer=Organization.AIND,
+        manufacturer=Organization.AI,
         radius=8.255,
         radius_unit=SizeUnit.CM,
+        output=DaqChannelType.DO,
+        encoder="CUI Devices AMT102-V 0000 Dip Switch 2048 ppr",
+        decoder="LS7366R",
+        encoder_firmware=Software(name="ls7366r_quadrature_counter", version="0.1.6"),
+        surface_material="Kittrich Magic Cover Solid Grip Liner",
     )
 
 
@@ -466,17 +473,7 @@ def build_mesoscope_instrument(equipment_name: str) -> Instrument:
         axis_unit=SizeUnit.UM,
     )
 
-    running_disc = Disc(
-        name=RUNNING_DISC_NAME,
-        manufacturer=Organization.AI,
-        radius=8.255,
-        radius_unit=SizeUnit.CM,
-        output=DaqChannelType.DO,
-        encoder="CUI Devices AMT102-V 0000 Dip Switch 2048 ppr",
-        decoder="LS7366R",
-        encoder_firmware=Software(name="ls7366r_quadrature_counter", version="0.1.6"),
-        surface_material="Kittrich Magic Cover Solid Grip Liner",
-    )
+    running_disc = _build_running_disc()
 
     stimulus_monitor = Monitor(
         name=STIMULUS_MONITOR_NAME,
