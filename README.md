@@ -38,15 +38,14 @@ uv run python run_capsule.py --dataset "Visual Coding Ophys" --results_dir "./re
 
 ### As a Capsule
 
-The Code Ocean capsule uses an App Builder with these parameters:
+The Code Ocean capsule uses an App Builder with this parameter:
 - `dataset`: Selects which dataset to convert
-- `metadata`: Set to `True` for metadata-only generation
 
-Sync the capsule with the GitHub repository, attach the appropriate data assets, configure parameters in the App Builder tab, and click "Run with parameters".
+Sync the capsule with the GitHub repository, attach the appropriate data assets (including the AIND-metadata data asset — see below), configure parameters in the App Builder tab, and click "Run with parameters".
 
-### AIND Metadata Extraction in a Capsule
+### AIND metadata is generated locally, not in the capsule
 
-To extract only AIND metadata JSON files without Zarr conversion, set the `metadata` parameter to `True` in the App Builder tab before running the capsule. This will use the mounted data assets as input and output metadata files to the results folder, and the run does not require paralellization in a capsule, though some datasets take longer to extract. Note that this will skip the Zarr conversion step.
+The AIND metadata (`data_description` / `subject` / `acquisition` / `procedures` / `instrument`) is **generated locally, not in this capsule**: the AIND metadata service is only reachable on the Allen VPN, which Code Ocean does not have. Run the `code/scripts/run_all_*.py` generators locally (they stream the NWBs and query the metadata service), then upload the resulting per-session metadata as a Code Ocean **data asset** that feeds the Zarr conversion. The capsule (`run_capsule.py`) only runs the HDF5 → Zarr conversion — there is no `metadata` / `--metadata_only` capsule parameter.
 
 ### Batch Conversion using Pipelines
 
@@ -334,6 +333,7 @@ Other per-session handling:
 
 Metadata is generated for the Visual Behavior 2P dataset — behavior-only sessions plus single-plane (CAM2P) and mesoscope (MESO) ophys sessions (one NWB per imaging plane).
 
+- **Instrument modification date** — each instrument's `modification_date` is the rig's **first day of use in this dataset** (earliest `date_of_acquisition` among sessions on that `equipment_name`, via `utils.first_use_date`), replacing the earlier hardcoded placeholders. This is **per-experiment**: a rig shared with Visual Behavior Neuropixels gets a different date in each (e.g. `BEH.B-Box1` is `2018-11-21` here vs `2020-03-06` in VBN; `CAM2P.3` → `2019-01-07`, `MESO` → `2019-04-01`). The behavior box, 2P, and mesoscope builders take the date from `generate_instrument`; the old constants remain only as fallback defaults for direct builder calls. The mesoscope also has an acquisition-vs-instrument `global_coordinate_system` mismatch (`BREGMA_ARI` vs `BREGMA_ALS`) — see the VBN "Known inconsistencies" note.
 - **Imaging frame rate** — the per-plane `imaging_rate` from the NWB imaging plane flows through to the acquisition's `ImagingConfig.SamplingStrategy.frame_rate`. Single-plane (CAM2P) sessions are 31 Hz; mesoscope (MESO) sessions are asserted to be one of {5, 6, 9, 11} Hz. A survey of all 265 mesoscope sessions found **11 Hz is the standard at every plane count (252 of 265 sessions)**; the **13 sessions below run slower** (9/6/5 Hz), which is *not* explained by plane count alone (they occur at 2/3/6/7 planes):
 
   | ophys_session_id | imaging_rate (Hz) | planes | plane groups | project_code |
@@ -379,6 +379,12 @@ Metadata is generated for the Visual Behavior 2P dataset — behavior-only sessi
 
 **Experimenters.** The acquisition's `experimenters` is left empty: the Visual Behavior Neuropixels session tables carry no per-session operator, and there is no operator reference file for this dataset (unlike Visual Coding Neuropixels). The project investigators are still recorded on the data description (Corbett Bennett, Shawn Olsen).
 
+**Instrument.** Selected per session by the physical rig (`equipment_name`): `NP.*` → the Neuropixels instrument (the Visual Coding Neuropixels components reused, plus a reward/lick spout, the full-spec running disc, and the 473 nm optotagging laser; modalities `ECEPHYS` / `BEHAVIOR` / `BEHAVIOR_VIDEOS`); `BEH.*` → the Visual Behavior Ophys behavior-box instrument (`BEHAVIOR` / `BEHAVIOR_VIDEOS`). Each instrument's **`modification_date` is the rig's first day of use** — the earliest `date_of_acquisition` among sessions on that `equipment_name` **within this dataset** (`utils.first_use_date`, so `NP.0` and `NP.1` get different dates). Because a rig is used across programs, the **same box has a different date per experiment** — e.g. `BEH.B-Box1` is `2020-03-06` in VBN but `2018-11-21` in Visual Behavior Ophys. An ecephys session with `EcephysProbe` devices but **no `optotagging` processing module raises** (fail-loud) rather than silently omitting the optotagging epoch.
+
+**Known inconsistencies / future work.**
+- **Coordinate-system mismatch on BEH-box sessions.** The acquisition's `global_coordinate_system` is the ephys `BREGMA_RAS` for all VBN sessions, but the BEH-box instrument uses `BREGMA_ARI`; for behavior-only BEH sessions (which have no probes) the two disagree. Visual Behavior Ophys has the analogous mismatch on its **mesoscope** (acquisition `BREGMA_ARI` vs instrument `BREGMA_ALS`); Visual Coding Neuropixels is consistent (`BREGMA_RAS` on both). Not yet reconciled.
+- **Illumination LEDs.** The 740 nm behavior + 850 nm eye illumination LEDs are modelled on the behavior-box and 2P/mesoscope instruments but **not** on the Neuropixels rig (VBN `NP.*` or Visual Coding Neuropixels), which reuse the shared `base_components`. Consider adding them to the NP rig **and** the Visual Coding Neuropixels rig if the illumination hardware is confirmed for the neuropixels setup.
+
 **Warnings and errors (full-dataset run, 2026-08-17).** All **3424 sessions generated successfully with 0 errors** (3271 behavior-only + 153 ecephys), each producing the full five-file set. The run emitted **40,583 warnings**, all of the benign/expected types below (no unexpected types):
 
 - **Upstream `aind-data-schema` deprecations (no data impact).** Only the new coordinate-system / device-model fields are populated; these fire when the deprecated fields are touched during serialization.
@@ -387,6 +393,6 @@ Metadata is generated for the Visual Behavior 2P dataset — behavior-only sessi
   - `CoordinateSystem 'PROBE_RUFD' uses a DEPTH axis, which is deprecated` — **1,810** (ecephys only). The shared probe geometry encodes insertion depth as a 4th DEPTH axis; this one is partly ours and is deferred pending sign-off from the reference-geometry author (same as Visual Coding Neuropixels).
 - **Reproducibility note** — `Neither commit_hash nor version provided for Code` — **13,026**, once per stimulus/optotagging `Code` block; the Visual Behavior stimulus code has no recorded version.
 - **Missing ethics review id** — fired **721** times in the original run (`No ethics_review_id on file for subject …; leaving it None`, for the 16 subjects tabled above). **Since resolved:** the cohort ethics id `1805` is now hardcoded for VBN (asserted against the reference CSV when present) and the existing `acquisition.json` files were backfilled in place, so `ethics_review_id` is `["1805"]` for all 3424 sessions and this warning no longer occurs.
-- **Ecephys session-start-time is Pacific local time mislabeled as UTC** — `session_start_time mismatch - using nwbfile value` — **153 (every ecephys session)**. The `ecephys_sessions.csv` `date_of_acquisition` differs from the NWB `session_start_time` by exactly the US Pacific offset — **7 h under PDT, 8 h under PST** (e.g. CSV `2020-08-17 15:21:49+00:00` vs NWB `22:21:49+00:00`) — i.e. the CSV records Pacific local time stamped `+00:00`. The NWB value is the correct UTC and the pipeline keeps it; behavior-only sessions are unaffected (their CSV times agree with the NWB). This fully explains, and supersedes, the earlier "session start time for some of the later sessions" note: it is **all** ecephys sessions, and it is a timezone-labeling artifact in the ecephys table, not a data error.
+- **Ecephys session-start-time is Pacific local time mislabeled as UTC** — for **every ecephys session** the `ecephys_sessions.csv` `date_of_acquisition` differs from the NWB `session_start_time` by exactly the US Pacific offset — **7 h under PDT, 8 h under PST** (DST-dependent; e.g. CSV `2020-08-17 15:21:49+00:00` vs NWB `22:21:49+00:00`) — i.e. the CSV records Pacific local time stamped `+00:00`. The NWB value is the correct UTC and the pipeline keeps it. In the 2026-08-17 run this emitted 153 `session_start_time mismatch` warnings; it is **now validated fail-loud** (`_vbn_acquisition_start_time`): the CSV wall-clock reinterpreted as `America/Los_Angeles` and converted to UTC must equal the NWB value (holds for all 153), otherwise the session raises. Behavior-only sessions are unaffected (their CSV times already agree with the NWB).
 
 **Operational note (not a data/code error).** During the initial 6-worker batch run, one ecephys session (ecephys_session_id **1093638203**) hit a transient `MemoryError` on an 8 GB machine (six workers each holding a multi-GB NWB); it completed cleanly when the run was resumed with **2 workers**. On a low-RAM machine, use **≤2–3 workers** for the ecephys sessions.
