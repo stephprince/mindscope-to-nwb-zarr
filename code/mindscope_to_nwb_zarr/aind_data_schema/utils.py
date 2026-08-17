@@ -133,20 +133,25 @@ def get_session_start_time(nwbfile: NWBFile, session_info: pd.Series) -> datetim
 
 
 # Behavior-box rig names look like "BEH.G-Box6" (with a box number) or the bare cluster
-# form "BEH.G" (without one). Everything else (CAM2P.3, MESO.1, NP.0, ...) is left as is.
+# form "BEH.G" (without one). The single mesoscope rig "MESO.1" is shortened to "MESO".
+# Everything else (CAM2P.3, NP.0, ...) is left as is.
 _BEHAVIOR_BOX_RE = re.compile(r"^BEH\.([A-Za-z])(?:-Box(\d+))?$")
+_MESOSCOPE_RE = re.compile(r"^MESO(\.\d+)?$")
 
 
 def resolve_instrument_id(equipment_name: str) -> str:
     """Map a rig ``equipment_name`` to the instrument id used in the metadata.
 
     Behavior boxes get a compact ``[letter][number]`` id: ``"BEH.G-Box6" -> "G6"``. The
-    bare cluster form (no box number) drops to just the letter: ``"BEH.G" -> "G"``.
-    Non-behavior-box rigs (e.g. ``CAM2P.3``, ``MESO.1``, ``NP.0``) are returned unchanged.
+    bare cluster form (no box number) drops to just the letter: ``"BEH.G" -> "G"``. The
+    single mesoscope rig is shortened: ``"MESO.1" -> "MESO"``. Other rigs (e.g.
+    ``CAM2P.3``, ``NP.0``) are returned unchanged.
 
     Applied to both the generated Instrument's ``instrument_id`` and the Acquisition's
     ``instrument_id`` (via ``get_instrument_id``) so the two always match.
     """
+    if _MESOSCOPE_RE.match(equipment_name):
+        return "MESO"
     match = _BEHAVIOR_BOX_RE.match(equipment_name)
     if match is None:
         return equipment_name

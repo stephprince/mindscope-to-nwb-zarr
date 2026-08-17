@@ -305,7 +305,7 @@ def build_2p_instrument(equipment_name: str) -> Instrument:
     """
     return Instrument(
         location="Unknown",
-        instrument_id=equipment_name,
+        instrument_id=resolve_instrument_id(equipment_name),
         modification_date=_CAM2P_MODIFICATION_DATE,
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         modalities=[Modality.POPHYS, Modality.BEHAVIOR_VIDEOS],
@@ -596,7 +596,7 @@ def build_mesoscope_instrument(equipment_name: str) -> Instrument:
     )
 
     return Instrument(
-        instrument_id=equipment_name,
+        instrument_id=resolve_instrument_id(equipment_name),
         modification_date=_MESO_MODIFICATION_DATE,
         modalities=[Modality.POPHYS, Modality.BEHAVIOR_VIDEOS, Modality.BEHAVIOR],
         notes=_POSTHOC_NOTE,
