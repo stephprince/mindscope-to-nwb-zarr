@@ -316,7 +316,7 @@ def build_behavior_instrument(equipment_name: str, modification_date: date = _BE
         instrument_id=resolve_instrument_id(equipment_name),
         modification_date=modification_date,
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
-        modalities=[Modality.BEHAVIOR],
+        modalities=[Modality.BEHAVIOR, Modality.BEHAVIOR_VIDEOS],  # body + top monitoring cameras
         notes=_POSTHOC_NOTE,
         components=[
             _build_running_disc(),

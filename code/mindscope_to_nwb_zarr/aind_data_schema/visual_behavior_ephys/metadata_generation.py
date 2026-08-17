@@ -4,7 +4,7 @@ import traceback
 import pandas as pd
 
 from pathlib import Path
-from pynwb import read_nwb
+from pynwb import NWBHDF5IO
 
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.data_description import generate_data_description
@@ -31,30 +31,35 @@ def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, outp
         procedures (e.g. while the metadata-service procedures endpoint is unavailable);
         the other models are still generated and procedures can be added on a later run.
     """
-    # Read NWB file
-    nwbfile = read_nwb(nwb_file_path)
+    # Open the NWB explicitly (rather than pynwb.read_nwb) so the file handle is closed
+    # after generation; the batch loop opens thousands of files and would otherwise leak.
+    io = NWBHDF5IO(str(nwb_file_path), mode="r", load_namespaces=True)
+    try:
+        nwbfile = io.read()
 
-    # Validate that session description matches metadata
-    assert nwbfile.session_description == session_info['session_type'], \
-        f"Session description mismatch: {nwbfile.session_description} != {session_info['session_type']}"
+        # Validate that session description matches metadata
+        assert nwbfile.session_description == session_info['session_type'], \
+            f"Session description mismatch: {nwbfile.session_description} != {session_info['session_type']}"
 
-    # Generate metadata models. subject and procedures are fetched from the AIND metadata
-    # service (cached by 6-digit mouse id); both fail loudly on an unexpected outcome
-    # (unreachable service, 404, or an NWB/LIMS disagreement) rather than returning None.
-    data_description = generate_data_description(nwbfile, session_info)
-    subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
-    acquisition = generate_acquisition(nwbfile, session_info)
-    procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info) if include_procedures else None
-    instrument = generate_instrument(session_info)  # NP rig (+ lick spout) or BEH box, by equipment_name
-    metadata_models = [data_description, subject, acquisition, procedures, instrument]
+        # Generate metadata models. subject and procedures are fetched from the AIND metadata
+        # service (cached by 6-digit mouse id); both fail loudly on an unexpected outcome
+        # (unreachable service, 404, or an NWB/LIMS disagreement) rather than returning None.
+        data_description = generate_data_description(nwbfile, session_info)
+        subject = fetch_subject_from_aind_metadata_service(nwbfile, session_info)
+        acquisition = generate_acquisition(nwbfile, session_info)
+        procedures = fetch_procedures_from_aind_metadata_service(nwbfile, session_info) if include_procedures else None
+        instrument = generate_instrument(session_info)  # NP rig (+ lick spout) or BEH box, by equipment_name
+        metadata_models = [data_description, subject, acquisition, procedures, instrument]
 
-    # Save the metadata files
-    Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)
-    for model in metadata_models:
-        if model is not None:
-            serialized = model.model_dump_json()
-            deserialized = model.model_validate_json(serialized)
-            deserialized.write_standard_file(output_directory=output_dir / data_description.name)
+        # Save the metadata files
+        Path(output_dir / data_description.name).mkdir(parents=True, exist_ok=True)
+        for model in metadata_models:
+            if model is not None:
+                serialized = model.model_dump_json()
+                deserialized = model.model_validate_json(serialized)
+                deserialized.write_standard_file(output_directory=output_dir / data_description.name)
+    finally:
+        io.close()
 
 
 def generate_all_session_metadata(data_dir: Path, results_dir: Path,

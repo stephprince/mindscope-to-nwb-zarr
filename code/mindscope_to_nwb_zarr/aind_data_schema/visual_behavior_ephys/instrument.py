@@ -40,6 +40,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument impor
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument import (
     build_behavior_instrument,
     _build_reward_spout,
+    _build_running_disc,
 )
 
 
@@ -72,7 +73,15 @@ def build_np_instrument(equipment_name: str, modification_date: date = _NP_MODIF
         global_coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         modalities=[Modality.ECEPHYS, Modality.BEHAVIOR, Modality.BEHAVIOR_VIDEOS],
         notes=_POSTHOC_NOTE,
-        components=[*base_components, optotagging_laser, _build_reward_spout()],
+        # The Visual Coding base_components carry a bare running disc (manufacturer AIND,
+        # radius only); swap in the full-spec Visual Behavior Ophys disc (AI, with
+        # encoder/decoder/firmware/surface material), matching the BEH-box instrument.
+        components=[
+            *[c for c in base_components if type(c).__name__ != "Disc"],
+            _build_running_disc(),
+            optotagging_laser,
+            _build_reward_spout(),
+        ],
     )
 
 

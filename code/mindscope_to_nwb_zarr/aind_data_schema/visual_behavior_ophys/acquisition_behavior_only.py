@@ -172,9 +172,8 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
                 )),
                 stimulus_name="Change detection natural images",
                 code=Code(
-                    url="Unknown",  # TODO add URL to stimulus code
-                    version="Unknown", # TODO add version to stimulus code
-                    # TODO add code parameters if available, but it seems like it is not available
+                    url="None",      # stimulus code source not recorded (matches VBN / VC ephys)
+                    version="None",  # stimulus code version not recorded
                     parameters=visual_stimulation,
                 ),
                 stimulus_modalities=[StimulusModality.VISUAL],

@@ -20,7 +20,8 @@ mapping stimuli (flash / gabor / spontaneous) are split per block and carry no t
 metadata.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pynwb import NWBFile
 import pandas as pd
 
@@ -47,7 +48,6 @@ from mindscope_to_nwb_zarr.pynwb_utils import (
 )
 from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_subject_id,
-    get_session_start_time,
     get_instrument_id,
     get_ethics_review_id,
     get_total_reward_volume,
@@ -83,6 +83,36 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
 # from that reference file. When the reference file does list the subject, its value is
 # asserted to agree, so a future divergence fails loudly rather than passing silently.
 VBN_ETHICS_REVIEW_ID = "1805"
+
+# The rig is at the Allen Institute in Seattle. The ecephys_sessions.csv date_of_acquisition
+# is the acquisition wall-clock in US/Pacific but is mislabeled "+00:00"; the NWB
+# session_start_time is the correct UTC.
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
+def _vbn_acquisition_start_time(nwbfile: NWBFile, session_info: pd.Series) -> datetime:
+    """Acquisition start time = the NWB ``session_start_time`` (correct UTC), cross-checked.
+
+    Behavior-only rows: the session table ``date_of_acquisition`` already agrees with the
+    NWB (both UTC). Ecephys rows: ``ecephys_sessions.csv`` stores the acquisition wall-clock
+    in US/Pacific but labeled ``+00:00``, so reinterpreting that wall-clock as US/Pacific and
+    converting to UTC must equal the NWB value -- a DST-aware 7 h (PDT) / 8 h (PST) offset.
+    Any other discrepancy raises (fail-loud) rather than silently using the NWB value.
+    """
+    nwb_start = nwbfile.session_start_time
+    csv_dt = datetime.fromisoformat(str(session_info['date_of_acquisition']))
+    # Already agrees (behavior-only): use the NWB value.
+    if abs((csv_dt.astimezone(timezone.utc) - nwb_start).total_seconds()) < 120:
+        return nwb_start
+    # Otherwise it must be the Pacific-local-labeled-as-UTC case (ecephys).
+    expected_utc = csv_dt.replace(tzinfo=_PACIFIC).astimezone(timezone.utc)
+    if abs((expected_utc - nwb_start).total_seconds()) >= 120:
+        raise ValueError(
+            f"VBN session_start_time mismatch not explained by the US/Pacific offset: "
+            f"session table date_of_acquisition={csv_dt.isoformat()}, NWB "
+            f"session_start_time={nwb_start.isoformat()}."
+        )
+    return nwb_start
 
 
 def _vbn_ethics_review_id(subject_id) -> list[str]:
@@ -181,6 +211,15 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                     )
                 )
 
+    # Ecephys sessions (EcephysProbe devices present) always ran optotagging; a missing
+    # module signals a truncated/incorrect file rather than a behavior-only session.
+    has_probes = any(d.__class__.__name__ == "EcephysProbe" for d in nwbfile.devices.values())
+    if has_probes and 'optotagging' not in nwbfile.processing:
+        raise ValueError(
+            "Ecephys session (EcephysProbe devices present) is missing the expected "
+            "'optotagging' processing module."
+        )
+
     if 'optotagging' in nwbfile.processing:
         optogenetic_stimulation = nwbfile.processing['optotagging']['optogenetic_stimulation']
         opto_stim_epoch = StimulusEpoch(
@@ -262,7 +301,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
 
     acquisition = Acquisition(
         subject_id=subject_id,
-        acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
+        acquisition_start_time=_vbn_acquisition_start_time(nwbfile, session_info),
         acquisition_end_time=get_data_stream_end_time(nwbfile),
         # Ethics (IACUC) review id: hardcoded cohort id 1805 (asserted against the
         # reference CSV when it lists the subject). See _vbn_ethics_review_id.
