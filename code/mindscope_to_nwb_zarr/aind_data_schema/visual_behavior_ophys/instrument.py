@@ -72,7 +72,9 @@ from aind_data_schema.components.devices import (
 from aind_data_schema.components.identifiers import Software
 from aind_data_schema.core.instrument import Instrument
 
-from mindscope_to_nwb_zarr.aind_data_schema.utils import resolve_instrument_id
+from pathlib import Path
+
+from mindscope_to_nwb_zarr.aind_data_schema.utils import resolve_instrument_id, first_use_date
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +147,19 @@ def ophys_device_names(is_single_plane: bool) -> dict:
 # Reconstructed posthoc; dates are placeholders carried over from the reference
 # files and should be corrected when better records are available.
 _POSTHOC_NOTE = "Created several years posthoc from incomplete records. Much information is missing."
-_BEHAVIOR_MODIFICATION_DATE = date(2016, 10, 12)  # TODO: confirm
-_CAM2P_MODIFICATION_DATE = date(2016, 10, 12)  # TODO: confirm
-_MESO_MODIFICATION_DATE = date(2024, 4, 2)  # TODO: confirm (from reference file)
+# Fallback modification dates, used only if a builder is called directly without a date.
+# generate_instrument overrides these with the rig's first-use date (see below).
+_BEHAVIOR_MODIFICATION_DATE = date(2016, 10, 12)
+_CAM2P_MODIFICATION_DATE = date(2016, 10, 12)
+_MESO_MODIFICATION_DATE = date(2024, 4, 2)
+
+# Session tables used to date each instrument by the rig's first day of use. parents[4] is
+# the repo root (this file is code/mindscope_to_nwb_zarr/aind_data_schema/visual_behavior_ophys/).
+_PROJECT_METADATA = Path(__file__).resolve().parents[4] / "data" / "visual-behavior-ophys" / "project_metadata"
+_SESSION_TABLES = (
+    _PROJECT_METADATA / "behavior_session_table.csv",
+    _PROJECT_METADATA / "ophys_experiment_table.csv",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +305,7 @@ def _build_eye_illumination() -> list:
 # Behavior box instrument (BEH.*)
 # ---------------------------------------------------------------------------
 
-def build_behavior_instrument(equipment_name: str) -> Instrument:
+def build_behavior_instrument(equipment_name: str, modification_date: date = _BEHAVIOR_MODIFICATION_DATE) -> Instrument:
     """Build the behavior-box Instrument (ported from reference/behavior_instrument.py).
 
     The ``instrument_id`` is the compact ``[letter][number]`` box id (e.g. ``"BEH.G-Box6"``
@@ -302,7 +314,7 @@ def build_behavior_instrument(equipment_name: str) -> Instrument:
     return Instrument(
         location="Unknown",
         instrument_id=resolve_instrument_id(equipment_name),
-        modification_date=_BEHAVIOR_MODIFICATION_DATE,
+        modification_date=modification_date,
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         modalities=[Modality.BEHAVIOR],
         notes=_POSTHOC_NOTE,
@@ -371,7 +383,7 @@ def build_behavior_instrument(equipment_name: str) -> Instrument:
 # Single-plane 2P instrument (CAM2P.*)
 # ---------------------------------------------------------------------------
 
-def build_2p_instrument(equipment_name: str) -> Instrument:
+def build_2p_instrument(equipment_name: str, modification_date: date = _CAM2P_MODIFICATION_DATE) -> Instrument:
     """Build the single-plane 2P Instrument (ported from reference/cam2p_3_final_behavior_instrument.py).
 
     The microscope component name is the per-rig name from ``MICROSCOPE_NAMES``
@@ -381,7 +393,7 @@ def build_2p_instrument(equipment_name: str) -> Instrument:
     return Instrument(
         location="Unknown",
         instrument_id=resolve_instrument_id(equipment_name),
-        modification_date=_CAM2P_MODIFICATION_DATE,
+        modification_date=modification_date,
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         modalities=[Modality.POPHYS, Modality.BEHAVIOR_VIDEOS],
         notes=_POSTHOC_NOTE,
@@ -525,7 +537,7 @@ def _build_meso_camera(name: str) -> Camera:
     )
 
 
-def build_mesoscope_instrument(equipment_name: str) -> Instrument:
+def build_mesoscope_instrument(equipment_name: str, modification_date: date = _MESO_MODIFICATION_DATE) -> Instrument:
     """Build the mesoscope Instrument (ported from reference/mesoscope_instrument.py).
 
     The microscope component name is the per-rig name from ``MICROSCOPE_NAMES``
@@ -664,7 +676,7 @@ def build_mesoscope_instrument(equipment_name: str) -> Instrument:
 
     return Instrument(
         instrument_id=resolve_instrument_id(equipment_name),
-        modification_date=_MESO_MODIFICATION_DATE,
+        modification_date=modification_date,
         modalities=[Modality.POPHYS, Modality.BEHAVIOR_VIDEOS, Modality.BEHAVIOR],
         notes=_POSTHOC_NOTE,
         global_coordinate_system=coordinate_system,
@@ -743,13 +755,15 @@ def generate_instrument(session_info: pd.Series) -> Instrument:
         If ``equipment_name`` does not match a known rig family.
     """
     equipment_name = str(session_info["equipment_name"])
+    # modification_date = the first day this rig was used in the dataset.
+    modification_date = first_use_date(equipment_name, _SESSION_TABLES)
 
     if equipment_name.startswith("BEH"):
-        return build_behavior_instrument(equipment_name)
+        return build_behavior_instrument(equipment_name, modification_date)
     if equipment_name.startswith("CAM2P"):
-        return build_2p_instrument(equipment_name)
+        return build_2p_instrument(equipment_name, modification_date)
     if equipment_name.startswith("MESO"):
-        return build_mesoscope_instrument(equipment_name)
+        return build_mesoscope_instrument(equipment_name, modification_date)
 
     raise ValueError(
         f"No instrument definition for equipment_name '{equipment_name}'. "

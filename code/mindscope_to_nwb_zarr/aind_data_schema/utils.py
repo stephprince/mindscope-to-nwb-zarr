@@ -16,10 +16,46 @@ from aind_data_schema.components.identifiers import Software, Code
 from aind_data_schema.core.acquisition import StimulusEpoch
 from mindscope_to_nwb_zarr.aind_data_schema.stimuli import OptotaggingStimulation
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from functools import lru_cache
 from pathlib import Path
 from pynwb import NWBFile
+
+
+@lru_cache(maxsize=None)
+def _first_use_dates(table_paths: tuple) -> dict:
+    """Map each rig ``equipment_name`` to its earliest ``date_of_acquisition`` (a date).
+
+    Computed once (cached) from the given session-table CSV paths, each of which must have
+    ``equipment_name`` and ``date_of_acquisition`` columns. ``date_of_acquisition`` values
+    have mixed ISO-8601 formats (some with sub-second precision), so are parsed with
+    ``format="ISO8601"``.
+    """
+    frames = [pd.read_csv(path, usecols=["equipment_name", "date_of_acquisition"]) for path in table_paths]
+    rows = pd.concat(frames, ignore_index=True).dropna(subset=["equipment_name", "date_of_acquisition"])
+    day = pd.to_datetime(rows["date_of_acquisition"], utc=True, format="ISO8601").dt.date
+    return rows.assign(_day=day).groupby("equipment_name")["_day"].min().to_dict()
+
+
+def first_use_date(equipment_name: str, table_paths) -> date:
+    """Earliest ``date_of_acquisition`` for a rig across the given session tables (a date).
+
+    Used to set an instrument's ``modification_date`` to the first day the rig was used in
+    the dataset.
+
+    Raises
+    ------
+    KeyError
+        If the rig never appears in the tables (so its instrument cannot be dated).
+    """
+    dates = _first_use_dates(tuple(str(p) for p in table_paths))
+    first = dates.get(equipment_name)
+    if first is None:
+        raise KeyError(
+            f"No sessions with equipment_name {equipment_name!r} in the session tables; "
+            f"cannot set the instrument modification_date."
+        )
+    return first
 
 
 # CSV mapping subject (donor/mouse) id -> ethics (IACUC) review id, bundled in the repo.

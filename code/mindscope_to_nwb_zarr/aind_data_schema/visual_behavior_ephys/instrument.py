@@ -25,13 +25,14 @@ always used (never the 465 nm LED).
 """
 
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.instrument import Instrument
 
-from mindscope_to_nwb_zarr.aind_data_schema.utils import EPHYS_GLOBAL_COORDINATE_SYSTEM
+from mindscope_to_nwb_zarr.aind_data_schema.utils import EPHYS_GLOBAL_COORDINATE_SYSTEM, first_use_date
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.instrument import (
     base_components,        # monitor, running disc, eye/body cameras, 6 ephys assemblies
     optotagging_laser,      # 473 nm optotagging laser (the laser-era light source)
@@ -42,14 +43,21 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
 )
 
 
-# Reconstructed posthoc; the Visual Behavior Neuropixels ecephys acquisitions begin
-# 2020-08-17, used here as the NP-rig modification date (the schema requires one). The
-# behavior-box modification date comes from the Visual Behavior Ophys builder.
+# Fallback modification date, used only if build_np_instrument is called directly without
+# one; generate_instrument overrides it with the rig's first-use date (see below).
 _NP_MODIFICATION_DATE = date(2020, 8, 17)
 _POSTHOC_NOTE = "Created several years posthoc from incomplete records. Much information is missing."
 
+# Session tables used to date each instrument by the rig's first day of use. parents[4] is
+# the repo root (this file is code/mindscope_to_nwb_zarr/aind_data_schema/visual_behavior_ephys/).
+_PROJECT_METADATA = Path(__file__).resolve().parents[4] / "data" / "visual-behavior-neuropixels" / "project_metadata"
+_SESSION_TABLES = (
+    _PROJECT_METADATA / "behavior_sessions.csv",
+    _PROJECT_METADATA / "ecephys_sessions.csv",
+)
 
-def build_np_instrument(equipment_name: str) -> Instrument:
+
+def build_np_instrument(equipment_name: str, modification_date: date = _NP_MODIFICATION_DATE) -> Instrument:
     """Build the Neuropixels-rig Instrument for a session.
 
     Identical to the Visual Coding Neuropixels instrument (``base_components`` +
@@ -60,7 +68,7 @@ def build_np_instrument(equipment_name: str) -> Instrument:
     return Instrument(
         location="Unknown",
         instrument_id=equipment_name,
-        modification_date=_NP_MODIFICATION_DATE,
+        modification_date=modification_date,
         global_coordinate_system=EPHYS_GLOBAL_COORDINATE_SYSTEM,  # bregma-relative frame the probe transforms resolve into
         modalities=[Modality.ECEPHYS, Modality.BEHAVIOR, Modality.BEHAVIOR_VIDEOS],
         notes=_POSTHOC_NOTE,
@@ -82,11 +90,14 @@ def generate_instrument(session_info: pd.Series) -> Instrument:
         If ``equipment_name`` does not match a known rig family.
     """
     equipment_name = str(session_info["equipment_name"])
+    # modification_date = the first day this rig was used in the Visual Behavior Neuropixels
+    # dataset (a rig may be used earlier in other datasets; the date is per-experiment).
+    modification_date = first_use_date(equipment_name, _SESSION_TABLES)
 
     if equipment_name.startswith("NP"):
-        return build_np_instrument(equipment_name)
+        return build_np_instrument(equipment_name, modification_date)
     if equipment_name.startswith("BEH"):
-        return build_behavior_instrument(equipment_name)
+        return build_behavior_instrument(equipment_name, modification_date)
 
     raise ValueError(
         f"No instrument definition for equipment_name '{equipment_name}'. "
