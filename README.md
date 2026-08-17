@@ -328,6 +328,23 @@ Other per-session handling:
 - **Acquisition start time** — taken directly from the NWB `session_start_time`. Unlike the Visual Coding **Neuropixels** pipeline (where `session_start_time` is a packaging date that is re-anchored from a reference CSV), the ophys `session_start_time` is the true acquisition time, so no CSV re-anchoring and no packaging-date `notes` caveat are applied.
 - **Unrecorded laser power** — the two-photon laser power was adjusted per session and not recorded in the NWB, so it is a placeholder in the imaging config: `LaserConfig.power` is left `None` (optional), while `Plane.power` (a required field) is set to the sentinel `-1` percent to signal "unknown".
 - **Unrecorded emission wavelength** — the imaging plane's `emission_lambda` is stored as `NaN` for every session (only the 910 nm `excitation_lambda` is recorded), so the channel's `emission_wavelength` is left `None`.
+- **Imaging frame rate** — the per-plane `imaging_rate` from the NWB imaging plane flows through to the acquisition's `ImagingConfig.SamplingStrategy.frame_rate`. Single-plane (CAM2P) sessions are 31 Hz; mesoscope (MESO.1) sessions are asserted to be one of {5, 6, 9, 11} Hz. A survey of all 265 mesoscope sessions found **11 Hz is the standard at every plane count (252 of 265 sessions)**; the **13 sessions below run slower** (9/6/5 Hz), which is *not* explained by plane count alone (they occur at 2/3/6/7 planes):
+
+  | ophys_session_id | imaging_rate (Hz) | planes | plane groups | project_code |
+  |---|---|---|---|---|
+  | 962045676 | 5 | 7 | 4 | VisualBehaviorMultiscope4areasx2d |
+  | 873720614 | 6 | 2 | 1 | VisualBehaviorMultiscope |
+  | 1048363441 | 9 | 6 | 4 | VisualBehaviorMultiscope |
+  | 1049240847 | 9 | 6 | 4 | VisualBehaviorMultiscope |
+  | 1050231786 | 9 | 6 | 4 | VisualBehaviorMultiscope |
+  | 1050597678 | 9 | 6 | 4 | VisualBehaviorMultiscope |
+  | 1051107431 | 9 | 3 | 2 | VisualBehaviorMultiscope |
+  | 1051319542 | 9 | 2 | 1 | VisualBehaviorMultiscope |
+  | 1052096166 | 9 | 3 | 2 | VisualBehaviorMultiscope |
+  | 1052330675 | 9 | 2 | 2 | VisualBehaviorMultiscope |
+  | 1052512524 | 9 | 3 | 2 | VisualBehaviorMultiscope |
+  | 1056065360 | 9 | 2 | 2 | VisualBehaviorMultiscope |
+  | 1056238781 | 9 | 3 | 2 | VisualBehaviorMultiscope |
 - **Eye/pupil tracking is present for a subset; camera videos are not.** (This is about the **converted Zarr** output — the generated metadata is uniform across all 1518 sessions: the instrument always declares Eye + Body `CameraAssembly`s and the acquisition always lists them as active devices, regardless of which eye-tracking product a session has. See the eye-tracking note under *NWB Zarr Conversion → Visual Coding Ophys* for the primary description.) The DANDI NWBs already carry a **v1-embedded** eye tracking for the sessions whose v1 source NWB had a `processing/brain_observatory_pipeline/EyeTracking` group (**363 of 1518**): the upstream converter copied it into `processing['behavior']` as `EyeTracking` (`SpatialSeries` `pupil_location`, unit m), `CompassDirection` (`pupil_location_spherical`, degrees), and `PupilTracking` (`pupil_size`, px), referenced to the monitor center. This repo's conversion stores the 2p-frame-aligned `get_eye_tracking` product for **818** sessions and, **when it does, removes that v1-embedded eye tracking** (see the eye-tracking note under **Visual Coding Ophys** conversion above), so those sessions carry a single product — **177** of the 363 v1-embedded sessions overlap the release and have their v1 data replaced. The other **186** v1-embedded sessions are **not** in the `get_eye_tracking` release and keep their v1-embedded eye tracking unchanged. What is still **not** packaged, for any session, is the eye/body **camera video**, even though the cameras are described in the instrument.
 
 ### Visual Behavior Neuropixels
