@@ -31,10 +31,16 @@ keep --workers low, as the AIND metadata service returns empty bodies under conc
 Usage
 -----
     uv run python scripts/run_all_vb_ephys.py                 # all sessions
+    uv run python scripts/run_all_vb_ephys.py --zip           # one zip per session in metadata_results/visual-behavior-neuropixels-metadata-only
     uv run python scripts/run_all_vb_ephys.py --workers 3
     uv run python scripts/run_all_vb_ephys.py --limit 5       # first 5 pending (smoke test)
     uv run python scripts/run_all_vb_ephys.py --indices 0 100 200
     uv run python scripts/run_all_vb_ephys.py --no-retry-failed
+
+With --zip, each session's metadata files are bundled into a single <data asset name>.zip
+written to code/metadata_results/visual-behavior-neuropixels-metadata-only/ (the loose
+folder is written under scratch and the run report stays in _report), so that directory
+ends up holding only the per-session zips.
 """
 import argparse
 import json
@@ -63,6 +69,9 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.procedures imp
     fetch_procedures_from_aind_metadata_service,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.instrument import generate_instrument
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.metadata_generation import (
+    zip_session_metadata,
+)
 
 HERE = Path(__file__).resolve().parent
 PROJECT_METADATA = HERE.parent.parent / "data" / "visual-behavior-neuropixels" / "project_metadata"
@@ -73,6 +82,12 @@ OUTPUT_DIR = HERE.parent / "scratch" / "vb_ephys_metadata_all"
 REPORT_DIR = OUTPUT_DIR / "_report"
 SESSIONS_JSONL = REPORT_DIR / "sessions.jsonl"
 SUMMARY_JSON = REPORT_DIR / "summary.json"
+
+# Deliverable directory for the zipped metadata (one zip per session, nothing else).
+# Used when --zip is passed: each session's loose folder is written under OUTPUT_DIR and
+# then bundled into a single zip here, so this directory holds only the per-session zips.
+# The run report stays in REPORT_DIR (under scratch), so the deliverable stays only-zips.
+DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual-behavior-neuropixels-metadata-only"
 
 # Public S3 bucket (HTTPS endpoint) holding the Visual Behavior Neuropixels NWB files.
 S3_BASE_URL = "https://visual-behavior-neuropixels-data.s3.amazonaws.com/visual-behavior-neuropixels"
@@ -210,11 +225,14 @@ def _resolve_session(index: int):
     }
 
 
-def process_session(index: int, include_procedures: bool = True) -> dict:
+def process_session(index: int, include_procedures: bool = True,
+                    zip_dir: str | None = None) -> dict:
     """Generate metadata for one behavior session (by row index). Never raises.
 
     Returns a result dict describing status, timing, captured warnings, and (on failure)
-    the exception type/message/traceback.
+    the exception type/message/traceback. When ``zip_dir`` is set, the session's metadata
+    files are bundled into a single ``<data asset name>.zip`` in that directory (and the
+    loose folder removed), so the deliverable holds only one zip/session.
     """
     session_kind, url, session_info, ids = _resolve_session(index)
     behavior_session_id = ids["behavior_session_id"]
@@ -300,6 +318,11 @@ def process_session(index: int, include_procedures: bool = True) -> dict:
             if out_dir is not None:
                 result["output_folder"] = out_dir.name
                 result["n_files"] = len(list(out_dir.glob("*.json")))
+                # In zip mode, bundle the folder into a single zip in the deliverable dir
+                # (done after the reads above, since it removes the loose folder).
+                if zip_dir is not None:
+                    zip_path = zip_session_metadata(out_dir, Path(zip_dir))
+                    result["output_folder"] = zip_path.name
             result["status"] = "OK"
         except Exception as e:
             result["status"] = "FAILED"
@@ -367,11 +390,20 @@ def main() -> int:
     parser.add_argument("--skip-procedures", dest="include_procedures", action="store_false",
                         help="do not fetch/write procedures.json (e.g. while the metadata-service "
                              "procedures endpoint is down); the other files are still generated")
+    parser.add_argument("--zip", dest="zip", action="store_true",
+                        help="bundle each session's files into one zip in "
+                             "metadata_results/visual-behavior-neuropixels-metadata-only (dir holds only the zips)")
     parser.set_defaults(retry_failed=True, include_procedures=True)
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    # In zip mode the deliverable dir gets only the per-session zips; loose folders are
+    # written under OUTPUT_DIR (scratch) then zipped away, and the report stays in REPORT_DIR.
+    zip_dir = None
+    if args.zip:
+        DELIVERABLE_DIR.mkdir(parents=True, exist_ok=True)
+        zip_dir = str(DELIVERABLE_DIR)
 
     behavior = pd.read_csv(BEHAVIOR_SESSIONS)
     total = len(behavior)
@@ -389,7 +421,7 @@ def main() -> int:
 
     print(f"Total sessions: {total} | to process now: {len(indices)} | "
           f"workers: {args.workers}", flush=True)
-    print(f"Output:  {OUTPUT_DIR}", flush=True)
+    print(f"Output:  {DELIVERABLE_DIR if zip_dir else OUTPUT_DIR}{' (zips)' if zip_dir else ''}", flush=True)
     print(f"Report:  {SESSIONS_JSONL}", flush=True)
     if not args.include_procedures:
         print("procedures: SKIPPED (--skip-procedures); procedures.json not generated.", flush=True)
@@ -403,7 +435,7 @@ def main() -> int:
     # Append per-session records as they complete so progress is durable/resumable.
     with open(SESSIONS_JSONL, "a", encoding="utf-8") as jsonl, \
             ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(process_session, i, args.include_procedures): i for i in indices}
+        futures = {pool.submit(process_session, i, args.include_procedures, zip_dir): i for i in indices}
         for n, fut in enumerate(as_completed(futures), 1):
             idx = futures[fut]
             try:

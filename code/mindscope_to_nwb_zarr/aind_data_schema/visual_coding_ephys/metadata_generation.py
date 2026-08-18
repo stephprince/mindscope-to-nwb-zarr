@@ -1,13 +1,12 @@
 """Script to generate AIND data schema JSON files for visual coding ephys dataset"""
 
-import shutil
 import traceback
-import zipfile
 import pandas as pd
 
 from pathlib import Path
 from pynwb import read_nwb
 
+from mindscope_to_nwb_zarr.aind_data_schema.utils import zip_session_metadata  # noqa: F401  (re-exported)
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.data_description import generate_data_description
 from mindscope_to_nwb_zarr.aind_data_schema.visual_coding_ephys.subject import (
@@ -23,35 +22,6 @@ SESSIONS_CSV_PATH = "allen-brain-observatory/visual-coding-neuropixels/ecephys-c
 # Path to subject mapping JSON file relative to code directory
 CODE_DIR = Path(__file__).parent.parent.parent.parent
 SUBJECT_MAPPING_PATH = CODE_DIR / "reference" / "visual_coding_ephys_subject_mapping.json"
-
-
-def zip_session_metadata(session_dir: Path, output_dir: Path) -> Path:
-    """Bundle a session's generated metadata files into a single zip and drop the folder.
-
-    ``write_standard_file`` writes the (up to five) metadata JSON files into
-    ``session_dir`` (named for the data asset). This zips those files into
-    ``output_dir/<session_dir.name>.zip`` and removes the now-redundant loose folder, so
-    ``output_dir`` ends up holding only one zip per session. The zip stores the JSON files
-    flat (no internal directory).
-
-    Parameters
-    ----------
-    session_dir : Path
-        Directory holding the session's written metadata JSON files.
-    output_dir : Path
-        Directory the per-session zip is written into.
-
-    Returns
-    -------
-    Path
-        Path to the created zip file.
-    """
-    zip_path = output_dir / f"{session_dir.name}.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for json_file in sorted(session_dir.glob("*.json")):
-            zf.write(json_file, arcname=json_file.name)
-    shutil.rmtree(session_dir, ignore_errors=True)
-    return zip_path
 
 
 def generate_session_metadata(nwb_file_path: Path, session_info: pd.Series, output_dir: Path,

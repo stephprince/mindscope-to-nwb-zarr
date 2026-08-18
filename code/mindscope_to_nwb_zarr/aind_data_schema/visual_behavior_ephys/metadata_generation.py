@@ -6,6 +6,7 @@ import pandas as pd
 from pathlib import Path
 from pynwb import NWBHDF5IO
 
+from mindscope_to_nwb_zarr.aind_data_schema.utils import zip_session_metadata  # noqa: F401  (re-exported)
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.acquisition import generate_acquisition
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.data_description import generate_data_description
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ephys.subject import fetch_subject_from_aind_metadata_service

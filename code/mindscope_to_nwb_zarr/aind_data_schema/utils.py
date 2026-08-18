@@ -1,6 +1,8 @@
 
 import json
 import re
+import shutil
+import zipfile
 import numpy as np
 import pandas as pd
 import warnings
@@ -97,6 +99,38 @@ def get_ethics_review_id(subject_id, csv_path=None) -> list[str]:
             f"No ethics_review_id found for subject_id {subject_id!r} in {_ETHICS_REVIEW_CSV}"
         )
     return [str(review_id)]
+
+
+def zip_session_metadata(session_dir: Path, output_dir: Path) -> Path:
+    """Bundle a session's generated metadata files into a single zip and drop the folder.
+
+    ``write_standard_file`` writes the (up to five) metadata JSON files into
+    ``session_dir`` (named for the data asset). This zips those files into
+    ``output_dir/<session_dir.name>.zip`` and removes the now-redundant loose folder, so
+    ``output_dir`` ends up holding only one zip per session. The zip stores the JSON files
+    flat (no internal directory).
+
+    Shared by every dataset's batch pipeline (Visual Coding ephys/ophys and Visual Behavior
+    ephys), which all produce the same per-session folder of AIND metadata JSON files.
+
+    Parameters
+    ----------
+    session_dir : Path
+        Directory holding the session's written metadata JSON files.
+    output_dir : Path
+        Directory the per-session zip is written into.
+
+    Returns
+    -------
+    Path
+        Path to the created zip file.
+    """
+    zip_path = output_dir / f"{session_dir.name}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for json_file in sorted(session_dir.glob("*.json")):
+            zf.write(json_file, arcname=json_file.name)
+    shutil.rmtree(session_dir, ignore_errors=True)
+    return zip_path
 
 
 # Data asset name datetimes are timezone-free, e.g. "2018-06-27_14-07-11".
