@@ -12,7 +12,11 @@ from aind_data_schema_models.registries import Registry
 from aind_data_schema.components.identifiers import Person
 from aind_data_schema.core.data_description import Funding, DataDescription
 
-from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id, build_data_asset_name
+from mindscope_to_nwb_zarr.aind_data_schema.utils import (
+    get_subject_id,
+    build_data_asset_name,
+    get_session_start_time,
+)
 from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_end_time
 
 
@@ -76,13 +80,18 @@ def generate_data_description(nwbfile: NWBFile, session_info: pd.Series) -> Data
     """
     subject_id = get_subject_id(nwbfile, session_info=session_info)
 
+    # Corrected UTC acquisition start (the raw NWB session_start_time is Pacific-local
+    # mislabeled UTC on the imaging rigs; see utils.get_session_start_time), so the asset
+    # name and creation_time match the acquisition metadata.
+    session_start_time = get_session_start_time(nwbfile, session_info=session_info)
+
     # Asset/folder name: <subject id>_<acquisition start>_nwb_<packaging date (now)>.
-    name = build_data_asset_name(subject_id, nwbfile.session_start_time, datetime.now())
+    name = build_data_asset_name(subject_id, session_start_time, datetime.now())
 
     return DataDescription(
         license=License.CC_BY_40,
         subject_id=subject_id,
-        creation_time=get_data_stream_end_time(nwbfile),
+        creation_time=get_data_stream_end_time(nwbfile, session_start_time),
         name=name,
         tags=_build_tags(session_info),
         institution=Organization.AI,

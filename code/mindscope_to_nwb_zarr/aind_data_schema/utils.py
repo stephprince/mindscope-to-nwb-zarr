@@ -19,6 +19,7 @@ from aind_data_schema.core.acquisition import StimulusEpoch
 from mindscope_to_nwb_zarr.aind_data_schema.stimuli import OptotaggingStimulation
 
 from datetime import datetime, timezone, timedelta, date
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from pathlib import Path
 from pynwb import NWBFile
@@ -185,21 +186,50 @@ def get_subject_date_of_birth(nwbfile: NWBFile, acquisition_start_time: datetime
     return date_of_birth
 
 
+# Visual Behavior Ophys imaging rigs (CAM2P.*/MESO.*) wrote the NWB session_start_time as
+# the acquisition wall-clock in US/Pacific but labeled it "+00:00", so for those sessions the
+# NWB session_start_time is wrong by the DST-aware Pacific offset (7 h PDT / 8 h PST). The
+# session table's date_of_acquisition is the correct UTC. (This is the mirror image of the
+# Visual Behavior Neuropixels case, where the CSV was mislabeled and the NWB was correct.)
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
 def get_session_start_time(nwbfile: NWBFile, session_info: pd.Series) -> datetime:
-    """Get the session start time from the NWB file, cross-checked with the session info.
-    e.g., datetime object for 2018-08-24T14:51:25.667000+00:00
+    """Return the session's true acquisition start time (UTC), failing loud on surprises.
+
+    The session table ``date_of_acquisition`` is the authoritative UTC start. It normally
+    agrees with the NWB ``session_start_time`` (behavior boxes and correctly-stamped
+    sessions), in which case the NWB value is returned unchanged. On the imaging rigs
+    (CAM2P.*/MESO.*) the NWB ``session_start_time`` is instead the acquisition wall-clock in
+    US/Pacific mislabeled ``+00:00`` -- i.e. wrong by the DST-aware Pacific offset (7 h PDT /
+    8 h PST) -- so the corrected UTC start (the CSV value) is returned instead. Because the
+    NWB start time is wrong for those sessions, callers must re-anchor every NWB-relative
+    time (data-stream / stimulus-epoch offsets, DOB) to the returned value.
+
+    Raises
+    ------
+    ValueError
+        If the NWB and CSV start times disagree by something other than the Pacific offset
+        (an unexpected outcome that must be surfaced, not silently papered over).
     """
-    session_time = datetime.fromisoformat(session_info['date_of_acquisition'])
-    session_time_utc = session_time.astimezone(timezone.utc).replace(microsecond=0)
-    nwb_time_utc = nwbfile.session_start_time.astimezone(timezone.utc).replace(microsecond=0)
+    csv_utc = datetime.fromisoformat(str(session_info['date_of_acquisition'])).astimezone(timezone.utc)
+    nwb_utc = nwbfile.session_start_time.astimezone(timezone.utc)
 
-    if session_time_utc != nwb_time_utc:
-        warnings.warn(
-            f"session_start_time mismatch - using nwbfile value. "
-            f"session_info={session_time_utc}, nwbfile={nwb_time_utc}"
+    # Agree (behavior boxes / correctly-stamped imaging sessions): keep the NWB value.
+    if abs((csv_utc - nwb_utc).total_seconds()) < 120:
+        return nwbfile.session_start_time
+
+    # Otherwise the NWB wall-clock must be US/Pacific-local mislabeled as UTC: reinterpreting
+    # its digits as Pacific and converting to UTC must reproduce the CSV UTC start.
+    nwb_wall_as_pacific = nwb_utc.replace(tzinfo=_PACIFIC).astimezone(timezone.utc)
+    if abs((nwb_wall_as_pacific - csv_utc).total_seconds()) >= 120:
+        raise ValueError(
+            f"session_start_time mismatch not explained by the US/Pacific offset: session "
+            f"table date_of_acquisition={csv_utc.isoformat()}, NWB "
+            f"session_start_time={nwb_utc.isoformat()}."
         )
-
-    return nwbfile.session_start_time
+    # The CSV date_of_acquisition is the correct UTC acquisition start.
+    return csv_utc
 
 
 # Behavior-box rig names look like "BEH.G-Box6" (with a box number) or the bare cluster

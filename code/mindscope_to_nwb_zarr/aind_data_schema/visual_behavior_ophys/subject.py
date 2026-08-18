@@ -9,7 +9,11 @@ from typing import Optional
 
 from aind_data_schema.core.subject import Subject
 
-from mindscope_to_nwb_zarr.aind_data_schema.utils import get_subject_id, get_subject_date_of_birth
+from mindscope_to_nwb_zarr.aind_data_schema.utils import (
+    get_subject_id,
+    get_subject_date_of_birth,
+    get_session_start_time,
+)
 from mindscope_to_nwb_zarr.aind_data_schema.metadata_service_cache import (
     load_cached, store_cached, SUBJECT,
 )
@@ -142,7 +146,9 @@ def fetch_subject_from_aind_metadata_service(
     # The NWB stores only an integer-day age (P<days>D), so the DOB derived from
     # it (acquisition_date - age) is approximate. Compare against the LIMS
     # date_of_birth with a small tolerance and warn (rather than fail) on mismatch.
-    nwb_dob = get_subject_date_of_birth(nwbfile)
+    # Anchor to the corrected UTC acquisition start (the raw NWB session_start_time is
+    # Pacific-local mislabeled UTC on the imaging rigs; see utils.get_session_start_time).
+    nwb_dob = get_subject_date_of_birth(nwbfile, get_session_start_time(nwbfile, session_info))
     api_dob = datetime.strptime(raw_data['subject_details']['date_of_birth'], "%Y-%m-%d").date()
     if abs((nwb_dob - api_dob).days) > 2:
         warnings.warn(

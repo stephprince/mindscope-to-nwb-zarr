@@ -56,6 +56,9 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
     microscope_name_for_equipment,
     ophys_device_names,
 )
+from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.acquisition_behavior_only import (
+    build_change_detection_stimulus_epoch,
+)
 
 
 def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_single_plane: bool) -> dict[str, Any]:
@@ -296,12 +299,47 @@ def get_single_plane_imaging_config(microscope_name: str, imaging_plane_info: di
     return create_imaging_config(microscope_name, imaging_plane, imaging_plane_dimensions, planes)
 
 
-def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: list[dict]) -> ImagingConfig:
+# Depth (um) recorded on a dummy CoupledPlane that stands in for a coupled partner which
+# failed QC and is absent from the published data: the dropped plane's true depth is unknown
+# (coupled planes sit at two different depths), so it carries the same -1 sentinel used for
+# the unrecorded laser power elsewhere in this imaging config.
+_UNKNOWN_DEPTH_UM = -1.0
+
+
+def _build_coupled_plane(depth: float, targeted_structure: CCFv3, plane_index: int,
+                         coupled_plane_index: int) -> CoupledPlane:
+    """Build one mesoscope ``CoupledPlane``.
+
+    Laser power and the power-sharing ratio were not recorded, so ``power`` / ``power_ratio``
+    carry the ``-1`` / ``1.0`` placeholders used throughout this imaging config (see the
+    per-field notes and the README's Visual Behavior Ophys section).
+    """
+    return CoupledPlane(
+        depth=depth,
+        depth_unit=SizeUnit.UM,
+        power=-1,  # laser power not recorded in the NWB files
+        power_unit=PowerUnit.PERCENT,
+        targeted_structure=targeted_structure,
+        plane_index=plane_index,
+        coupled_plane_index=coupled_plane_index,
+        power_ratio=1.0,  # power-sharing ratio not recorded
+    )
+
+
+def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: list[dict]) -> tuple[ImagingConfig, str | None]:
     """Generates imaging configuration for a multi-plane (coupled planes) visual behavior behavior-ophys acquisition.
 
     See Visual Behavior Technical White Paper
     SECTION E: IN VIVO 2-PHOTON CALCIUM IMAGING. HARDWARE & INSTRUMENTATION
     which often references methods from de Vries et al., 2020
+
+    Each of the 4 coupled-plane groups is normally a pair imaged simultaneously at two
+    different depths of the same targeted structure (a dataset-wide invariant: coupled
+    planes in a group always share their targeted structure). When a group has only one
+    plane in the published data, its coupled partner failed QC and was dropped; a
+    placeholder (dummy) ``CoupledPlane`` is emitted for the missing partner (unknown depth,
+    same targeted structure) so the surviving plane's ``coupled_plane_index`` references a
+    valid partner, and a note naming the dropped plane is returned for the data stream.
 
     Args:
         microscope_name: The name of the microscope used for imaging.
@@ -312,7 +350,9 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
             imaging_plane_depth: The depth of the imaging plane.
 
     Returns:
-        An ImagingConfig object representing the imaging configuration for the plane.
+        A ``(ImagingConfig, notes)`` tuple: the imaging configuration, and a notes string
+        documenting any dummy planes added for QC-dropped coupled partners (``None`` if every
+        group was complete).
     """
 
     # Sanity check that all planes have the same basic parameters
@@ -340,61 +380,62 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
     imaging_plane_dimensions: list[int] = first_imaging_plane_info["imaging_plane_dimensions"]
 
     planes = list()
+    dropped_plane_notes: list[str] = []
     for group_index, imaging_plane_group in enumerate(grouped_imaging_planes):
         if len(imaging_plane_group) == 0:
             continue  # skip empty groups
+
+        # Each group's two coupled planes occupy fixed indices [2g, 2g+1]; coupled planes
+        # are imaged at two different depths, so each uses its own plane's depth/structure.
+        first_plane_index = group_index * 2
+        second_plane_index = first_plane_index + 1
+
         if len(imaging_plane_group) == 1:
-            # TODO create dummy coupled plane - could infer from other days. Indicate in the closest Notes that plane X failed QC and is therefore not in the data.
-            # only one plane in this group, so just add it as a regular Plane
-            first_plane_index = group_index * 2
-            imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]
-            imaging_plane_targeted_structure = imaging_plane_group[0]["imaging_plane_targeted_structure"]
-            plane = CoupledPlane(
-                depth=imaging_plane_depth,
-                depth_unit=SizeUnit.UM,
-                power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
-                power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
-                targeted_structure=imaging_plane_targeted_structure,
+            # The coupled partner failed QC and is absent from the published data. Emit the
+            # surviving plane plus a placeholder (dummy) CoupledPlane for the missing partner,
+            # so the surviving plane's coupled_plane_index references a real partner (the
+            # schema requires a valid int; a -1/self index would be wrong). Coupled planes in
+            # a group always share their targeted structure (dataset-wide invariant), so the
+            # dummy inherits it; its true depth is unknown, hence the -1 sentinel.
+            surviving = imaging_plane_group[0]
+            planes.append(_build_coupled_plane(
+                depth=surviving["imaging_plane_depth"],
+                targeted_structure=surviving["imaging_plane_targeted_structure"],
                 plane_index=first_plane_index,
-                coupled_plane_index=-1,  # TODO what to put here if there is no coupled plane? @Saskia
-                power_ratio=1.0,  # TODO Add power ratio (required) based on number of planes and power sharing. @Saskia
+                coupled_plane_index=second_plane_index,  # the dummy partner added just below
+            ))
+            planes.append(_build_coupled_plane(
+                depth=_UNKNOWN_DEPTH_UM,  # dropped plane's depth is unknown
+                targeted_structure=surviving["imaging_plane_targeted_structure"],  # same area as its coupled partner
+                plane_index=second_plane_index,
+                coupled_plane_index=first_plane_index,
+            ))
+            dropped_plane_notes.append(
+                f"Imaging plane group {group_index} (targeted structure "
+                f"{surviving['imaging_plane_targeted_structure_str']}): the coupled partner at "
+                f"plane_index {second_plane_index} failed QC and is not in the published data; "
+                f"it is represented by a placeholder CoupledPlane with unknown depth (-1) so the "
+                f"surviving plane at plane_index {first_plane_index} references a valid coupled partner."
             )
-            planes.append(plane)
         else:
-            first_plane_index = group_index * 2
-            second_plane_index = first_plane_index + 1
-            imaging_plane_depth = imaging_plane_group[0]["imaging_plane_depth"]
-            imaging_plane_targeted_structure = imaging_plane_group[0]["imaging_plane_targeted_structure"]
-            plane = CoupledPlane(
-                depth=imaging_plane_depth,
-                depth_unit=SizeUnit.UM,
-                power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
-                power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
-                targeted_structure=imaging_plane_targeted_structure,
+            first, second = imaging_plane_group[0], imaging_plane_group[1]
+            planes.append(_build_coupled_plane(
+                depth=first["imaging_plane_depth"],
+                targeted_structure=first["imaging_plane_targeted_structure"],
                 plane_index=first_plane_index,
                 coupled_plane_index=second_plane_index,
-                power_ratio=1.0,  # TODO Add power ratio (required) based on number of planes and power sharing. @Saskia
-            )
-            planes.append(plane)
-
-            # Second plane of the coupled pair: use the *second* plane's own depth and
-            # targeted structure (coupled planes are imaged simultaneously at two
-            # different depths, so this must index [1], not [0]).
-            imaging_plane_depth = imaging_plane_group[1]["imaging_plane_depth"]
-            imaging_plane_targeted_structure = imaging_plane_group[1]["imaging_plane_targeted_structure"]
-            plane = CoupledPlane(
-                depth=imaging_plane_depth,
-                depth_unit=SizeUnit.UM,
-                power=-1,  # TODO Add laser power (required). Might have this information for multi-plane imaging for visual behavior because there is power sharing @Saskia
-                power_unit=PowerUnit.PERCENT,  # TODO This is also required. See above comment.
-                targeted_structure=imaging_plane_targeted_structure,
-                plane_index=second_plane_index,  # NOTE this is swapped compared to the first plane above
+            ))
+            # Second plane of the pair uses the *second* plane's own depth and structure
+            # (indexed [1], not [0]) and swaps the plane/coupled indices.
+            planes.append(_build_coupled_plane(
+                depth=second["imaging_plane_depth"],
+                targeted_structure=second["imaging_plane_targeted_structure"],
+                plane_index=second_plane_index,
                 coupled_plane_index=first_plane_index,
-                power_ratio=1.0,  # TODO Add power ratio (required) based on number of planes and power sharing. @Saskia
-            )
-            planes.append(plane)
+            ))
 
-    return create_imaging_config(microscope_name, imaging_plane, imaging_plane_dimensions, planes)
+    notes = " ".join(dropped_plane_notes) if dropped_plane_notes else None
+    return create_imaging_config(microscope_name, imaging_plane, imaging_plane_dimensions, planes), notes
 
 
 def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]) -> Acquisition:
@@ -434,7 +475,9 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
     # ImagingConfig.device_name points at the instrument's microscope component.
     microscope_name = microscope_name_for_equipment(device.name)  # e.g. "Scientifica 1" or "Multiscope"
 
-    # Determine if single-plane or multi-plane based on device
+    # Determine if single-plane or multi-plane based on device. imaging_stream_notes records
+    # any dummy planes added for QC-dropped mesoscope coupled partners (None otherwise).
+    imaging_stream_notes = None
     if re.match(r"CAM2P\.\d", device.name):
         # single-plane ophys sessions use the Scientifica rig
         assert len(nwbfiles) == 1, "Single-plane sessions should have exactly one NWB file"
@@ -454,7 +497,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         for nwbfile_plane, session_info_plane in zip(nwbfiles, session_infos):
             imaging_plane_info = process_nwb_imaging_plane(nwbfile_plane, session_info_plane, is_single_plane)
             imaging_plane_info_all.append(imaging_plane_info)
-        imaging_config = get_multiplane_imaging_config(microscope_name, imaging_plane_info_all)
+        imaging_config, imaging_stream_notes = get_multiplane_imaging_config(microscope_name, imaging_plane_info_all)
     else:
         raise ValueError(f"Unknown device: {device.name}")
 
@@ -466,6 +509,11 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         behavior_video_devices.append(device_names["face_camera"])
 
     subject_id = get_subject_id(nwbfile, session_info=session_info)
+
+    # Corrected UTC acquisition start (the raw NWB session_start_time is Pacific-local
+    # mislabeled UTC on the imaging rigs; see utils.get_session_start_time). Every
+    # NWB-relative time below is re-anchored to this value.
+    session_start_time = get_session_start_time(nwbfile, session_info=session_info)
 
     # Only include a LickSpoutConfig when a per-reward volume is available. Passive (and
     # other no-reward) ophys sessions deliver no rewards, so get_individual_reward_volume
@@ -490,8 +538,8 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
     acquisition = Acquisition(
         subject_id=subject_id,
         specimen_id=None,
-        acquisition_start_time=get_session_start_time(nwbfile, session_info=session_info),
-        acquisition_end_time=get_data_stream_end_time(nwbfile),
+        acquisition_start_time=session_start_time,
+        acquisition_end_time=get_data_stream_end_time(nwbfile, session_start_time),
         # protocol.io DOI is not recorded in these NWB files (nwbfile.protocol is None
         # for all VB sub-experiment types); keep None until a protocol id is available.
         protocol_id=[nwbfile.protocol] if nwbfile.protocol else None,
@@ -502,11 +550,13 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
             DataStream(
-                stream_start_time=get_data_stream_start_time(nwbfile),
-                stream_end_time=get_data_stream_end_time(nwbfile),
+                stream_start_time=get_data_stream_start_time(nwbfile, session_start_time),
+                stream_end_time=get_data_stream_end_time(nwbfile, session_start_time),
                 modalities=get_modalities(nwbfile),
                 code=None,
-                notes=None,
+                # Notes any dummy CoupledPlane(s) added for mesoscope coupled partners that
+                # failed QC (see get_multiplane_imaging_config); None when every group is complete.
+                notes=imaging_stream_notes,
                 active_devices=[
                     microscope_name,
                     device_names["laser"],     # excitation laser ("Ti-Saph")
@@ -527,10 +577,13 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
                 ],
             ),
         ],
+        # The behavior+ophys sessions run the same visual change-detection task as the
+        # behavior-only sessions, so the single change-detection StimulusEpoch is built with
+        # the shared helper (identical trials / task_parameters / stimulus structure).
         # TODO - handle different stimulus sets for the different training stages
         stimulus_epochs=[
-            # TODO consult StimulusEpoch objects from acquisition_visual_behavior_ophys_behavior.py
-        ], 
+            build_change_detection_stimulus_epoch(nwbfile, session_info, session_start_time),
+        ],
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,

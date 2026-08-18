@@ -46,7 +46,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from mindscope_to_nwb_zarr.aind_data_schema.utils import DATA_ASSET_NAME_DATETIME_FORMAT
+from mindscope_to_nwb_zarr.aind_data_schema.utils import (
+    DATA_ASSET_NAME_DATETIME_FORMAT,
+    get_session_start_time,
+)
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.metadata_generation import (
     behavior_session_nwb_url,
     ophys_experiment_nwb_url,
@@ -227,7 +230,10 @@ def process_session(index: int) -> dict:
                 raise last_exc
 
             result["n_planes"] = len(nwbfiles)
-            start_time = nwbfiles[0].session_start_time
+            # Corrected UTC acquisition start (matches the asset-folder name written by
+            # data_description; the raw NWB session_start_time is Pacific-local mislabeled
+            # UTC on the imaging rigs -- see utils.get_session_start_time).
+            start_time = get_session_start_time(nwbfiles[0], session_infos[0])
             # Snapshot warnings emitted while reading the NWB(s) (e.g. hdmf's deprecated
             # schema warnings); the generate loop below clears the buffer per attempt.
             stream_warnings = list(caught)
