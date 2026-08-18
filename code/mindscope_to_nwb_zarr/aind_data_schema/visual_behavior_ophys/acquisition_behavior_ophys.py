@@ -1,6 +1,8 @@
 """Generates acquisition metadata for visual behavior ophys behavior+ophys sessions"""
 
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -211,6 +213,7 @@ def process_nwb_imaging_plane(nwbfile: NWBFile, session_info: pd.Series, is_sing
         imaging_plane_targeted_structure_str=imaging_plane_targeted_structure_str,
         imaging_plane_depth=imaging_plane_depth,
         imaging_plane_group=int(ophys_behavior_metadata.imaging_plane_group) if not is_single_plane else None,
+        ophys_container_id=int(session_info["ophys_container_id"]),  # FoV id; used to recover a dropped coupled partner's depth
     )
 
 
@@ -300,10 +303,124 @@ def get_single_plane_imaging_config(microscope_name: str, imaging_plane_info: di
 
 
 # Depth (um) recorded on a dummy CoupledPlane that stands in for a coupled partner which
-# failed QC and is absent from the published data: the dropped plane's true depth is unknown
-# (coupled planes sit at two different depths), so it carries the same -1 sentinel used for
-# the unrecorded laser power elsewhere in this imaging config.
+# failed QC and is absent from the published data, when the partner's depth cannot be
+# recovered from other sessions (see infer_dropped_coupled_plane_depth). Coupled planes sit
+# at two different depths, so the true depth is unknown; it carries the same -1 sentinel used
+# for the unrecorded laser power elsewhere in this imaging config.
 _UNKNOWN_DEPTH_UM = -1.0
+
+# Source-of-truth session table listing every published ophys experiment (one imaging plane)
+# with its container/depth/group. parents[4] is the repo root (this file is
+# code/mindscope_to_nwb_zarr/aind_data_schema/visual_behavior_ophys/).
+_OPHYS_EXPERIMENT_TABLE = (
+    Path(__file__).resolve().parents[4]
+    / "data" / "visual-behavior-ophys" / "project_metadata" / "ophys_experiment_table.csv"
+)
+
+
+# Separation (um) below which two mesoscope depths are treated as the same imaging plane
+# (per-session drift, < ~30 um) and above which they are the two distinct depths of a coupled
+# pair (>= ~65 um apart dataset-wide). Used to cluster depths and to match a surviving plane
+# to a depth pair.
+_DEPTH_CLUSTER_TOL_UM = 30
+
+
+def _cluster_depths(depths: list) -> list:
+    """Collapse depths (um) into sorted drift-robust representative clusters."""
+    ordered = sorted(depths)
+    clusters: list[list[int]] = []
+    for d in ordered:
+        if clusters and d - clusters[-1][-1] <= _DEPTH_CLUSTER_TOL_UM:
+            clusters[-1].append(d)
+        else:
+            clusters.append([d])
+    return [int(round(np.median(c))) for c in clusters]
+
+
+def _slot_of(project_code: str, imaging_plane_group: int) -> int:
+    """The coupled-depth 'slot' a group belongs to (groups that share a depth pair).
+
+    In the 2-area ``VisualBehaviorMultiscope`` config, VISp groups {0,1} mirror VISl groups
+    {2,3} at the same depth pairs (group ``i`` and ``i+2`` share a slot -- verified
+    dataset-wide, 20/20 fully-observed slots agree), so the slot is ``group % 2``. In the
+    ``VisualBehaviorMultiscope4areasx2d`` config every area is imaged at the same single depth
+    pair, so all groups share one slot.
+    """
+    if project_code == "VisualBehaviorMultiscope4areasx2d":
+        return 0
+    return int(imaging_plane_group) % 2
+
+
+@lru_cache(maxsize=None)
+def _partner_depth_map(table_path: str) -> dict:
+    """Map each mesoscope container (FoV) to its coupled partner's depth (um) + provenance.
+
+    A plane's depth is a stable property of its container across the subject's sessions (it
+    drifts only a few um, so the per-container median is the representative depth). The depth
+    of a coupled partner that failed QC is recovered in two tiers, preferring direct evidence:
+
+    * ``'partner'`` -- the exact coupled partner container was imaged in a complete (2-plane)
+      group in some session; its representative depth is used.
+    * ``'protocol'`` -- the partner container was never imaged, but the subject's coupled-depth
+      protocol fixes the pair: within a slot (see :func:`_slot_of`) the two depths are shared
+      across visual areas, so the missing depth is the slot's *other* depth. Used only when
+      the slot resolves to exactly two depths and the surviving depth matches one of them.
+
+    Returns ``{container_id: (depth_um, source)}``; containers whose partner depth cannot be
+    resolved are absent (the caller falls back to the -1 'unknown' sentinel).
+    """
+    df = pd.read_csv(
+        table_path,
+        usecols=["equipment_name", "project_code", "mouse_id", "ophys_session_id",
+                 "imaging_plane_group", "ophys_container_id", "imaging_depth"],
+    )
+    meso = df[df["equipment_name"] == "MESO.1"]
+    container_depth = meso.groupby("ophys_container_id")["imaging_depth"].median().round().astype(int).to_dict()
+
+    result: dict = {}
+
+    # Tier 1 ('partner'): direct coupled partner from complete (2-plane) groups.
+    for _key, group in meso.groupby(["ophys_session_id", "imaging_plane_group"]):
+        containers = group["ophys_container_id"].unique().tolist()
+        if len(containers) == 2:
+            a, b = containers
+            result[int(a)] = (container_depth[b], "partner")
+            result[int(b)] = (container_depth[a], "partner")
+
+    # Tier 2 ('protocol'): for containers with no direct partner, use the subject's slot depth
+    # pair (reconstructed from all its containers across areas/sessions).
+    containers = meso[["project_code", "mouse_id", "imaging_plane_group", "ophys_container_id"]].drop_duplicates("ophys_container_id")
+    slot_depths: dict = {}
+    for _, row in containers.iterrows():
+        slot = (int(row["mouse_id"]), _slot_of(row["project_code"], row["imaging_plane_group"]))
+        slot_depths.setdefault(slot, []).append(container_depth[row["ophys_container_id"]])
+    slot_pair = {k: _cluster_depths(v) for k, v in slot_depths.items()}
+
+    for _, row in containers.iterrows():
+        c = int(row["ophys_container_id"])
+        if c in result:
+            continue  # already have a direct partner
+        pair = slot_pair.get((int(row["mouse_id"]), _slot_of(row["project_code"], row["imaging_plane_group"])), [])
+        if len(pair) != 2:
+            continue  # slot not resolved to a clean two-depth pair -> leave unknown
+        d_s = container_depth[c]
+        others = [d for d in pair if abs(d - d_s) > _DEPTH_CLUSTER_TOL_UM]
+        if len(others) == 1:
+            result[c] = (others[0], "protocol")
+
+    return result
+
+
+def infer_dropped_coupled_plane_depth(container_id, table_path: Path = _OPHYS_EXPERIMENT_TABLE):
+    """``(depth_um, source)`` of the coupled partner of ``container_id``, or ``(None, None)``.
+
+    See :func:`_partner_depth_map` for the two inference tiers (``'partner'`` = direct,
+    ``'protocol'`` = subject depth-protocol). Returns ``(None, None)`` when the table is
+    unavailable or the partner depth cannot be resolved from any session of the subject.
+    """
+    if not Path(table_path).exists():
+        return None, None
+    return _partner_depth_map(str(table_path)).get(int(container_id), (None, None))
 
 
 def _build_coupled_plane(depth: float, targeted_structure: CCFv3, plane_index: int,
@@ -396,8 +513,12 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
             # so the surviving plane's coupled_plane_index references a real partner (the
             # schema requires a valid int; a -1/self index would be wrong). Coupled planes in
             # a group always share their targeted structure (dataset-wide invariant), so the
-            # dummy inherits it; its true depth is unknown, hence the -1 sentinel.
+            # dummy inherits it. Its depth is recovered from the coupled partner imaged in
+            # other sessions of this subject when available (a plane's depth is a stable
+            # property of its container/FoV); otherwise it falls back to the -1 sentinel.
             surviving = imaging_plane_group[0]
+            inferred_depth, depth_source = infer_dropped_coupled_plane_depth(surviving["ophys_container_id"])
+            dummy_depth = inferred_depth if inferred_depth is not None else _UNKNOWN_DEPTH_UM
             planes.append(_build_coupled_plane(
                 depth=surviving["imaging_plane_depth"],
                 targeted_structure=surviving["imaging_plane_targeted_structure"],
@@ -405,17 +526,30 @@ def get_multiplane_imaging_config(microscope_name: str, imaging_plane_info_all: 
                 coupled_plane_index=second_plane_index,  # the dummy partner added just below
             ))
             planes.append(_build_coupled_plane(
-                depth=_UNKNOWN_DEPTH_UM,  # dropped plane's depth is unknown
+                depth=dummy_depth,
                 targeted_structure=surviving["imaging_plane_targeted_structure"],  # same area as its coupled partner
                 plane_index=second_plane_index,
                 coupled_plane_index=first_plane_index,
             ))
+            if depth_source == "partner":
+                depth_note = (
+                    f"its depth ({inferred_depth} um) was inferred from the coupled partner "
+                    f"imaged in other sessions of this subject"
+                )
+            elif depth_source == "protocol":
+                depth_note = (
+                    f"its depth ({inferred_depth} um) was inferred from this subject's coupled-depth "
+                    f"protocol (the paired depth imaged in other groups/areas of the same subject)"
+                )
+            else:
+                depth_note = "its depth is unknown (-1); the coupled partner's depth is not recorded for this subject"
             dropped_plane_notes.append(
                 f"Imaging plane group {group_index} (targeted structure "
                 f"{surviving['imaging_plane_targeted_structure_str']}): the coupled partner at "
                 f"plane_index {second_plane_index} failed QC and is not in the published data; "
-                f"it is represented by a placeholder CoupledPlane with unknown depth (-1) so the "
-                f"surviving plane at plane_index {first_plane_index} references a valid coupled partner."
+                f"it is represented by a placeholder CoupledPlane so the surviving plane at "
+                f"plane_index {first_plane_index} references a valid coupled partner, and "
+                f"{depth_note}."
             )
         else:
             first, second = imaging_plane_group[0], imaging_plane_group[1]
