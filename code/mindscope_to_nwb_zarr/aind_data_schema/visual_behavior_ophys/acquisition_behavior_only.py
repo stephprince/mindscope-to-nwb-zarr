@@ -219,16 +219,20 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
 
     acquisition = Acquisition(
         subject_id=subject_id,
-        specimen_id=None,
         acquisition_start_time=session_start_time,
         acquisition_end_time=get_data_stream_end_time(nwbfile, session_start_time),
-        # protocol.io DOI is not recorded in these NWB files (nwbfile.protocol is None
-        # for all VB sub-experiment types); keep None until a protocol id is available.
-        protocol_id=[nwbfile.protocol] if nwbfile.protocol else None,
         ethics_review_id=get_ethics_review_id(subject_id),
         instrument_id=get_instrument_id(nwbfile, session_info=session_info),
-        acquisition_type=nwbfile.session_description, # TODO - confirm consistent across experiments or if better option
+        # session_description is the session-stage string (e.g. "OPHYS_1_images_A",
+        # "TRAINING_1_gratings"); confirmed dataset-wide to equal session_info["session_type"]
+        # (== the stimulus epoch's training_protocol_name), so it is a consistent acquisition_type.
+        acquisition_type=nwbfile.session_description,
         notes=None,
+        # Acquisition frame is bregma ARI. NOTE: a behavior-only session can run on any
+        # physical rig, and the mesoscope Instrument intentionally declares its own frame as
+        # BREGMA_ALS (to stay consistent with other mesoscope experiments), so on a
+        # behavior-only mesoscope session the acquisition (ARI) and instrument (ALS) frames
+        # differ by design -- see visual_behavior_ophys/instrument.py build_mesoscope_instrument.
         global_coordinate_system=CoordinateSystemLibrary.BREGMA_ARI,
         data_streams=[
             DataStream(
@@ -251,7 +255,6 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
             animal_weight_prior=None,
             animal_weight_post=None,
             weight_unit=MassUnit.G,
-            anaesthesia=None,
             mouse_platform_name=RUNNING_DISC_NAME,  # matches the instrument's Disc
             reward_consumed_total=get_total_reward_volume(nwbfile), # TODO - check if calculation is sufficient
             reward_consumed_unit=VolumeUnit.ML

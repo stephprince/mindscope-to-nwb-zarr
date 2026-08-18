@@ -542,6 +542,12 @@ def build_mesoscope_instrument(equipment_name: str, modification_date: date = _M
     The microscope component name is the per-rig name from ``MICROSCOPE_NAMES``
     (``"Multiscope"``), matched by the ``ImagingConfig.device_name`` written by
     ``acquisition_behavior_ophys.py``.
+
+    Coordinate system: the mesoscope instrument **intentionally** uses ``BREGMA_ALS`` (its
+    own ALS frame), to stay consistent with how other mesoscope experiments describe this
+    rig. The Acquisition's ``global_coordinate_system`` is ``BREGMA_ARI`` (shared with the
+    behavior-box and single-plane 2P rigs), so on mesoscope sessions the instrument (ALS) and
+    acquisition (ARI) frames differ by design -- this is not an unreconciled inconsistency.
     """
     coordinate_system = CoordinateSystem(
         name="BREGMA_ALS",
