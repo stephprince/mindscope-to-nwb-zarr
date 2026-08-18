@@ -19,10 +19,10 @@ Pipeline input:
     A single zipped AIND metadata folder mounted at
     data/visual-behavior-neuropixels-metadata-only/, named for the session's data asset
     (e.g. 506940_2020-02-28_11-11-17_nwb_2026-08-17_09-57-27.zip). The metadata is unzipped
-    into results/<session name>/, the session kind and id are read from its
-    data_description.json tags (an ecephys_session_id tag marks an ecephys session; a
-    behavior-only session carries only a behavior_session_id) to fetch the NWB files from
-    S3, and the Zarr store is written inside that folder as
+    into results/<session name>/, the session kind is read from its data_description.json
+    modalities (an ecephys modality marks a Neuropixels session; otherwise behavior-only)
+    and the download id from the matching linkage-id tag, the NWB files are fetched from S3,
+    and the Zarr store is written inside that folder as
     results/<session name>/<session name>.nwb.zarr. Mirrors the Visual Coding Ephys pipeline.
 """
 
@@ -52,7 +52,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-behavior-neuropixels-metad
 # other job is a no-op (nothing downloaded or converted), so the pipeline can be validated
 # on a single session without spending compute on all sessions. Set to None for production,
 # where every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = "506940_2020-02-28_11-11-17_nwb_2026-08-17_09-57-27.zip"
+TEST_ONLY_ZIP_NAME = "506940_2020-08-17_22-21-49_nwb_2026-08-17_11-02-56.zip"
 
 S3_BUCKET = "s3://visual-behavior-neuropixels-data"
 S3_DATA_PATH = "visual-behavior-neuropixels"
@@ -245,12 +245,17 @@ def convert_session_to_zarr(
 def _session_from_metadata(metadata_dir: Path) -> tuple[str, int]:
     """Resolve the session kind and download id from an unzipped AIND metadata folder.
 
-    The ``data_description.json`` written by the metadata pipeline tags each asset with the
-    session's linkage ids (see ``visual_behavior_ephys/data_description.py``): every session
-    carries ``"behavior_session_id: <id>"``, and a session with an ecephys recording also
-    carries ``"ecephys_session_id: <id>"``. An asset with an ecephys id is a
-    ``behavior_ephys`` session downloaded by its ecephys id; otherwise it is a
-    ``behavior``-only session downloaded by its behavior id.
+    The ``data_description.json`` written by the metadata pipeline records the session's
+    modalities and tags each asset with its linkage ids (see
+    ``visual_behavior_ephys/data_description.py``). The session **kind is read from the
+    modalities**: an ``ecephys`` modality means the session has a Neuropixels recording, so
+    its NWBs live under ``behavior_ecephys_sessions/<ecephys_session_id>/``; otherwise it is
+    a behavior-only session under ``behavior_only_sessions/<behavior_session_id>/``.
+
+    The ``ecephys_session_id`` tag alone is **not** a reliable discriminator: many
+    behavior-only session rows also carry an ``ecephys_session_id`` (the id of the mouse's
+    separate recording day), so classifying by that tag would misroute those sessions to the
+    ecephys path (only ~153 of ~812 tagged assets are actually ecephys sessions).
 
     Returns
     -------
@@ -266,6 +271,12 @@ def _session_from_metadata(metadata_dir: Path) -> tuple[str, int]:
     with open(data_description_path) as f:
         data_description = json.load(f)
 
+    # Modalities are AIND Modality objects ({"name": ..., "abbreviation": "ecephys"}).
+    modalities = {
+        (m.get("abbreviation") if isinstance(m, dict) else m)
+        for m in data_description.get("modalities", [])
+    }
+
     # Tags are "<key>: <value>" strings (see data_description._build_tags).
     ids = {}
     for tag in data_description.get("tags", []):
@@ -273,14 +284,22 @@ def _session_from_metadata(metadata_dir: Path) -> tuple[str, int]:
             key, value = tag.split(":", 1)
             ids[key.strip()] = value.strip()
 
-    if ids.get("ecephys_session_id"):
-        return "behavior_ephys", int(ids["ecephys_session_id"])
-    if ids.get("behavior_session_id"):
-        return "behavior", int(ids["behavior_session_id"])
-    raise RuntimeError(
-        f"No 'ecephys_session_id'/'behavior_session_id' tag found in {data_description_path} "
-        f"(tags: {data_description.get('tags')})."
-    )
+    if "ecephys" in modalities:
+        ecephys_session_id = ids.get("ecephys_session_id")
+        if not ecephys_session_id:
+            raise RuntimeError(
+                f"{data_description_path} has an ecephys modality but no 'ecephys_session_id' "
+                f"tag (tags: {data_description.get('tags')})."
+            )
+        return "behavior_ephys", int(ecephys_session_id)
+
+    behavior_session_id = ids.get("behavior_session_id")
+    if not behavior_session_id:
+        raise RuntimeError(
+            f"No 'behavior_session_id' tag found in {data_description_path} "
+            f"(tags: {data_description.get('tags')})."
+        )
+    return "behavior", int(behavior_session_id)
 
 
 def convert_visual_behavior_ephys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
