@@ -22,10 +22,10 @@ no training protocol for that field to match. The passive replay and the passive
 stimuli (flash / gabor / spontaneous) are split per block and carry no task metadata.
 
 Every VBN visual epoch also drops the redundant ``stimulus_name`` stimulus parameter (the
-per-presentation template names are already in ``stimulus_template_name``) and summarizes
-the jittery per-presentation ``duration`` column -- a scalar when effectively constant,
-otherwise dropped (the raw per-row values remain in the NWB). Both are VBN-only: the other
-Mindscope datasets have no ``duration`` column and keep their existing parameter shape.
+per-presentation template names are already in ``stimulus_template_name``). The jittery
+per-presentation ``duration`` column is not a stimulus property and is dropped for all
+datasets in the shared ``get_visual_stimulation_parameters`` (only VBN has the column, so
+this is a no-op elsewhere; the raw per-row values remain in the NWB).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -141,11 +141,11 @@ def _vbn_ethics_review_id(subject_id) -> list[str]:
     return [VBN_ETHICS_REVIEW_ID]
 
 
-# The change-detection task (the "Change detection - Active" epoch) carries a jittery
-# per-presentation ``duration`` column and a redundant ``stimulus_name`` parameter; these
-# are collapsed/dropped for every VBN visual epoch. Only VBN's presentation tables have the
-# ``duration`` column, so this handling is scoped here rather than in the shared helper.
-_VBN_COLLAPSE_OR_DROP_PARAMETERS = {"duration"}
+# The ``stimulus_name`` stimulus parameter is redundant (the per-presentation template
+# names are already in ``stimulus_template_name`` and the epoch/VisualStimulation
+# ``stimulus_name`` fields), so it is dropped for every VBN visual epoch. (The jittery
+# per-presentation ``duration`` column, present only in VBN, is not a stimulus property and
+# is dropped for all datasets in the shared ``get_visual_stimulation_parameters``.)
 _VBN_DROP_PARAMETERS = {"stimulus_name"}
 
 # Prior-experience descriptors of the change-detection task, recorded as stimulus parameters
@@ -207,9 +207,10 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
     (``active == False``) and the passive mapping stimuli (tables with no active rows, e.g.
     flash / gabor / spontaneous) are split per ``stimulus_block`` into their own epochs and
     carry no task metadata, mirroring the Visual Coding Neuropixels pipeline. Every visual
-    epoch drops the redundant ``stimulus_name`` parameter and summarizes the jittery
-    ``duration`` column. A single "Optotagging" epoch driven by the 473 nm laser is appended
-    when the session has optotagging data (ecephys sessions).
+    epoch drops the redundant ``stimulus_name`` parameter; the jittery ``duration`` column is
+    dropped in the shared helper (not a stimulus property). A single "Optotagging" epoch
+    driven by the 473 nm laser is appended when the session has optotagging data (ecephys
+    sessions).
 
     Parameters
     ----------
@@ -250,7 +251,6 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                     active_devices=[STIMULUS_MONITOR_NAME],  # the stimulus monitor in the instrument
                     extra_parameters=_vbn_task_stimulus_parameters(session_info),
                     drop_parameters=_VBN_DROP_PARAMETERS,
-                    collapse_or_drop_parameters=_VBN_COLLAPSE_OR_DROP_PARAMETERS,
                     training_protocol_name=None,
                     curriculum_status=_vbn_curriculum_status(session_info),
                 )
@@ -267,7 +267,6 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                         session_info=None,
                         active_devices=[STIMULUS_MONITOR_NAME],
                         drop_parameters=_VBN_DROP_PARAMETERS,
-                        collapse_or_drop_parameters=_VBN_COLLAPSE_OR_DROP_PARAMETERS,
                     )
                 )
         else:
@@ -283,7 +282,6 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                         session_info=None,
                         active_devices=[STIMULUS_MONITOR_NAME],
                         drop_parameters=_VBN_DROP_PARAMETERS,
-                        collapse_or_drop_parameters=_VBN_COLLAPSE_OR_DROP_PARAMETERS,
                     )
                 )
 

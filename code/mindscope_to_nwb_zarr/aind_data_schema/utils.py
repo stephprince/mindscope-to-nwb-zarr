@@ -617,8 +617,7 @@ def warn_if_too_few_presentations(stimulus_type: str, num_presentations: int,
 
 
 def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFrame,
-                                      drop_parameters: set = None,
-                                      collapse_or_drop_parameters: set = None) -> VisualStimulation:
+                                      drop_parameters: set = None) -> VisualStimulation:
     """Extract visual stimulation parameters from an intervals table.
 
     Parameters
@@ -633,14 +632,6 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
         ``{"stimulus_name"}`` -- the per-presentation template names are already carried
         by ``stimulus_template_name`` and the ``VisualStimulation.stimulus_name`` / epoch
         ``stimulus_name`` fields. Off by default (other datasets keep the full set).
-    collapse_or_drop_parameters : set, optional
-        Numeric parameter keys to summarize instead of listing per presentation: the
-        column is rounded to the millisecond and de-duplicated; if a single value remains
-        it is stored as a scalar, otherwise the key (and its ``*_unit``) is dropped
-        entirely (the genuinely per-presentation values remain available in the NWB
-        intervals table). Used for ``{"duration"}`` in Visual Behavior Neuropixels, whose
-        presentation tables carry a jittery per-row ``duration`` column absent from the
-        other datasets. Off by default.
 
     Returns
     -------
@@ -648,12 +639,16 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
         Visual stimulation object with extracted parameters
     """
     # TODO - determine if there are any other parameters to include or better units
+    # ``duration`` is intentionally excluded: it is a per-presentation timing value, not a
+    # stimulus property, and the other datasets carry no such column. Only the Visual
+    # Behavior Neuropixels presentation tables have it (as a jittery per-row float), so it
+    # is dropped rather than recorded here (the raw values remain in the NWB intervals
+    # table).
     possible_parameters_and_units = {
         "orientation": "degrees",
         "spatial_frequency": "cycles/degree",
         "temporal_frequency": "Hz",
         "contrast": "percent",
-        "duration": "S",
         "phase": None,
         "size": None,
         "image_name": None,
@@ -684,20 +679,6 @@ def get_visual_stimulation_parameters(table_key: str, intervals_table: pd.DataFr
             parameters.update({param_key: parameter_values})
             if param_unit is not None:
                 parameters.update({f"{param_key}_unit": param_unit})
-
-    # Summarize jittery per-presentation numeric columns (e.g. VBN 'duration'): round to
-    # the millisecond and de-duplicate; keep a single scalar when the value is effectively
-    # constant, otherwise drop it (the raw per-row values remain in the NWB intervals
-    # table). Recomputed from the source column so microsecond jitter collapses cleanly.
-    for param_key in (collapse_or_drop_parameters or set()):
-        if param_key not in intervals_table.columns:
-            continue
-        unique_rounded = intervals_table[param_key].round(3).dropna().unique().tolist()
-        if len(unique_rounded) == 1:
-            parameters[param_key] = unique_rounded[0]
-        else:
-            parameters.pop(param_key, None)
-            parameters.pop(f"{param_key}_unit", None)
 
     # Drop parameters that are redundant with another field (e.g. 'stimulus_name', already
     # captured by stimulus_template_name and the stimulus_name fields).
@@ -735,7 +716,6 @@ def convert_intervals_to_visual_stimulus_epoch(stimulus_name: str, table_key: st
                                                stimulus_template_name: list = None,
                                                notes: str = None,
                                                drop_parameters: set = None,
-                                               collapse_or_drop_parameters: set = None,
                                                training_protocol_name=_DERIVE_FROM_SESSION_INFO,
                                                curriculum_status=_DERIVE_FROM_SESSION_INFO) -> StimulusEpoch:
     """Build a single visual ``StimulusEpoch`` from one stimulus-presentation intervals table.
@@ -780,9 +760,6 @@ def convert_intervals_to_visual_stimulus_epoch(stimulus_name: str, table_key: st
     drop_parameters : set, optional
         Passed through to ``get_visual_stimulation_parameters`` -- stimulus-parameter keys
         to omit as redundant (e.g. ``{"stimulus_name"}``).
-    collapse_or_drop_parameters : set, optional
-        Passed through to ``get_visual_stimulation_parameters`` -- numeric keys to collapse
-        to a scalar or drop when jittery (e.g. ``{"duration"}``).
     training_protocol_name : str or None, optional
         Overrides the epoch's ``training_protocol_name``. When left unset it is derived from
         ``session_info["session_type"]`` (or None when ``session_info`` is None), the default
@@ -812,7 +789,6 @@ def convert_intervals_to_visual_stimulus_epoch(stimulus_name: str, table_key: st
     visual_stimulation = get_visual_stimulation_parameters(
         table_key, intervals_table,
         drop_parameters=drop_parameters,
-        collapse_or_drop_parameters=collapse_or_drop_parameters,
     ).model_dump()
     if stimulus_template_name is not None:
         visual_stimulation['stimulus_template_name'] = stimulus_template_name
