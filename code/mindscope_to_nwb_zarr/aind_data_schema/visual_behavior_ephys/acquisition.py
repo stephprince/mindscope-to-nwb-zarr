@@ -14,10 +14,18 @@ optotagging epoch is omitted.
 Stimulus epochs (see ``get_stimulation_epochs``) follow the Visual Coding Neuropixels
 approach of one epoch per contiguous ``stimulus_block``, with one Visual-Behavior-specific
 addition: the change-detection *behavior task* block (the presentation table's
-``active == True`` rows) is emitted as a single epoch carrying the session's
-``training_protocol_name`` and ``curriculum_status``; the passive replay and the passive
-mapping stimuli (flash / gabor / spontaneous) are split per block and carry no task
-metadata.
+``active == True`` rows) is emitted as a single epoch. That active epoch records the
+session number as its ``curriculum_status`` and the animal's prior-experience descriptors
+(experience_level, prior_exposures_to_image_set / _omissions / _session_type) as stimulus
+parameters; its ``training_protocol_name`` is left empty because the VBN Procedures define
+no training protocol for that field to match. The passive replay and the passive mapping
+stimuli (flash / gabor / spontaneous) are split per block and carry no task metadata.
+
+Every VBN visual epoch also drops the redundant ``stimulus_name`` stimulus parameter (the
+per-presentation template names are already in ``stimulus_template_name``) and summarizes
+the jittery per-presentation ``duration`` column -- a scalar when effectively constant,
+otherwise dropped (the raw per-row values remain in the NWB). Both are VBN-only: the other
+Mindscope datasets have no ``duration`` column and keep their existing parameter shape.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -133,26 +141,83 @@ def _vbn_ethics_review_id(subject_id) -> list[str]:
     return [VBN_ETHICS_REVIEW_ID]
 
 
+# The change-detection task (the "Change detection - Active" epoch) carries a jittery
+# per-presentation ``duration`` column and a redundant ``stimulus_name`` parameter; these
+# are collapsed/dropped for every VBN visual epoch. Only VBN's presentation tables have the
+# ``duration`` column, so this handling is scoped here rather than in the shared helper.
+_VBN_COLLAPSE_OR_DROP_PARAMETERS = {"duration"}
+_VBN_DROP_PARAMETERS = {"stimulus_name"}
+
+# Prior-experience descriptors of the change-detection task, recorded as stimulus parameters
+# on the active behavior epoch instead of being packed into the curriculum_status string.
+# Sourced from ecephys_sessions.csv / behavior_sessions.csv: experience_level is present
+# only for ecephys rows and prior_exposures_to_session_type only for behavior rows, so
+# whichever are absent from a given row are simply skipped. image_set is intentionally not
+# among these -- it is already carried by the presentation table's own image_set column, so
+# repeating the (often disagreeing, NaN-for-gratings) session-table image_set here would
+# duplicate it.
+_TASK_EXPERIENCE_COLUMNS = [
+    "experience_level",
+    "prior_exposures_to_image_set",
+    "prior_exposures_to_omissions",
+    "prior_exposures_to_session_type",
+]
+
+
+def _clean_value(value):
+    """Coerce a session-table cell to a JSON-friendly scalar: None for missing/NaN, a plain
+    Python int for integer-valued numbers (numpy or float), otherwise the value itself."""
+    if pd.isna(value):
+        return None
+    if hasattr(value, "item"):  # numpy scalar -> Python scalar
+        value = value.item()
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def _vbn_task_stimulus_parameters(session_info: pd.Series) -> dict:
+    """Prior-experience descriptors (experience_level, prior_exposures_*) to merge into the
+    active behavior epoch's ``stimulus_parameters`` (see ``_TASK_EXPERIENCE_COLUMNS``)."""
+    return {
+        column: _clean_value(session_info[column])
+        for column in _TASK_EXPERIENCE_COLUMNS
+        if column in session_info.index
+    }
+
+
+def _vbn_curriculum_status(session_info: pd.Series) -> str | None:
+    """Curriculum status for the active behavior epoch: the session number as a string
+    (``curriculum_status`` is an Optional[str]), or None when the session number is absent."""
+    if "session_number" not in session_info.index:
+        return None
+    value = _clean_value(session_info["session_number"])
+    return None if value is None else str(value)
+
+
 def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[StimulusEpoch]:
     """
     Extract stimulus epochs from NWB file intervals tables, one per contiguous block.
 
     A presentation table's ``active == True`` rows are the change-detection *behavior task*;
-    they are emitted as a single "Change detection - Active" epoch that carries the session's
-    ``training_protocol_name`` and ``curriculum_status`` (passed via ``session_info``). The
-    passive replay (``active == False``) and the passive mapping stimuli (tables with no
-    active rows, e.g. flash / gabor / spontaneous) are split per ``stimulus_block`` into
-    their own epochs and carry no task metadata (``session_info=None``), mirroring the
-    Visual Coding Neuropixels pipeline. A single "Optotagging" epoch driven by the 473 nm
-    laser is appended when the session has optotagging data (ecephys sessions).
+    they are emitted as a single "Change detection - Active" epoch whose ``curriculum_status``
+    is the session number and whose ``stimulus_parameters`` include the animal's
+    prior-experience descriptors (from ``session_info``); its ``training_protocol_name`` is
+    left empty (no VBN training protocol in Procedures to match). The passive replay
+    (``active == False``) and the passive mapping stimuli (tables with no active rows, e.g.
+    flash / gabor / spontaneous) are split per ``stimulus_block`` into their own epochs and
+    carry no task metadata, mirroring the Visual Coding Neuropixels pipeline. Every visual
+    epoch drops the redundant ``stimulus_name`` parameter and summarizes the jittery
+    ``duration`` column. A single "Optotagging" epoch driven by the 473 nm laser is appended
+    when the session has optotagging data (ecephys sessions).
 
     Parameters
     ----------
     nwbfile : NWBFile
         NWB file containing intervals tables
     session_info : pd.Series
-        Session metadata row (drives training_protocol_name / curriculum_status on the
-        active behavior epoch)
+        Session metadata row (drives curriculum_status and the prior-experience stimulus
+        parameters on the active behavior epoch)
 
     Returns
     -------
@@ -170,8 +235,10 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
         has_active_task = "active" in df.columns and bool((df["active"] == True).any())  # noqa: E712
 
         if has_active_task:
-            # The change-detection behavior task: one epoch for the active block, carrying
-            # the session's training protocol + curriculum (via session_info).
+            # The change-detection behavior task: one epoch for the active block. It carries
+            # the session number as curriculum_status and the prior-experience descriptors as
+            # stimulus parameters; training_protocol_name is forced empty because the VBN
+            # Procedures define no training protocol for the field to match.
             active_df = df[df["active"] == True]  # noqa: E712
             stimulation_epochs.append(
                 convert_intervals_to_visual_stimulus_epoch(
@@ -179,8 +246,13 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                     table_key=table_key,
                     intervals_table=active_df,
                     nwbfile=nwbfile,
-                    session_info=session_info,
+                    session_info=None,  # task metadata set explicitly below, not derived from the CSV
                     active_devices=[STIMULUS_MONITOR_NAME],  # the stimulus monitor in the instrument
+                    extra_parameters=_vbn_task_stimulus_parameters(session_info),
+                    drop_parameters=_VBN_DROP_PARAMETERS,
+                    collapse_or_drop_parameters=_VBN_COLLAPSE_OR_DROP_PARAMETERS,
+                    training_protocol_name=None,
+                    curriculum_status=_vbn_curriculum_status(session_info),
                 )
             )
             # The passive replay, split per contiguous block; no task metadata.
@@ -194,6 +266,8 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                         nwbfile=nwbfile,
                         session_info=None,
                         active_devices=[STIMULUS_MONITOR_NAME],
+                        drop_parameters=_VBN_DROP_PARAMETERS,
+                        collapse_or_drop_parameters=_VBN_COLLAPSE_OR_DROP_PARAMETERS,
                     )
                 )
         else:
@@ -208,6 +282,8 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
                         nwbfile=nwbfile,
                         session_info=None,
                         active_devices=[STIMULUS_MONITOR_NAME],
+                        drop_parameters=_VBN_DROP_PARAMETERS,
+                        collapse_or_drop_parameters=_VBN_COLLAPSE_OR_DROP_PARAMETERS,
                     )
                 )
 
