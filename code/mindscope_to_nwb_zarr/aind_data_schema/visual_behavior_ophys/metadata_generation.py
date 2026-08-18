@@ -7,7 +7,6 @@ Behavior-only sessions live under ``behavior_sessions/`` and ophys sessions unde
 are read, so even multi-GB imaging files are cheap to open for metadata.
 """
 
-import traceback
 import pandas as pd
 
 from pathlib import Path
@@ -64,18 +63,6 @@ def stream_nwb_from_s3(url: str):
     io = NWBHDF5IO(file=h5_file)
     nwbfile = io.read()
     return nwbfile, io, h5_file, file_handle
-
-
-def open_local_nwb(path: Path):
-    """Open a local NWB (HDF5) file, returning ``(nwbfile, io)``.
-
-    Unlike :func:`pynwb.read_nwb`, this exposes the ``NWBHDF5IO`` so the caller can
-    close it. The batch runner opens thousands of files, so leaving them open leaks
-    handles; the caller must close ``io`` when done.
-    """
-    io = NWBHDF5IO(str(path), mode="r", load_namespaces=True)
-    nwbfile = io.read()
-    return nwbfile, io
 
 
 def generate_behavior_only_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path):
@@ -223,91 +210,3 @@ def generate_single_session_metadata(
             file_handle.close()
 
     print(f"Done. Metadata written under {output_dir}")
-
-
-def generate_all_session_metadata(data_dir: Path, results_dir: Path) -> None:
-    """
-    Iterate through all sessions in the mounted data directory and generate session metadata.
-
-    The S3 bucket s3://visual-behavior-ophys-data is mounted at data_dir/visual-behavior-ophys.
-    Iterates through all sessions in the behavior_session_table.csv and generates metadata JSON files.
-
-    Parameters
-    ----------
-    data_dir : Path
-        Path to data directory where S3 bucket is mounted
-    results_dir : Path
-        Path to directory to save output metadata JSON files
-    """
-    output_dir = results_dir / "visual-behavior-ophys-metadata"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Mounted data path
-    mounted_data_path = data_dir / "visual-behavior-ophys"
-    cache_dir = mounted_data_path / "project_metadata"
-
-    # Load session tables
-    behavior_session_table = pd.read_csv(cache_dir / "behavior_session_table.csv")
-    ophys_experiment_table = pd.read_csv(cache_dir / "ophys_experiment_table.csv")
-
-    print(f"Found {len(behavior_session_table)} behavior sessions")
-
-    for row_index, row in behavior_session_table.iterrows():
-        behavior_session_id = int(row['behavior_session_id'])
-        print(f"\nProcessing behavior session {behavior_session_id} (row {row_index}) ...")
-
-        open_ios = []  # NWBHDF5IO handles to close in finally (avoids leaking file handles)
-        try:
-            # Determine if this is a behavior-only or behavior+ophys session
-            if pd.isna(row['ophys_experiment_id']):
-                # Behavior-only session
-                nwb_file_path = mounted_data_path / "behavior_sessions" / f"behavior_session_{behavior_session_id}.nwb"
-                if not nwb_file_path.exists():
-                    print(f"NWB file not found: {nwb_file_path}. Skipping.")
-                    continue
-
-                nwbfile, io = open_local_nwb(nwb_file_path)
-                open_ios.append(io)
-                generate_behavior_only_session_metadata(nwbfile, row, output_dir)
-            else:
-                # Behavior + ophys session
-                # Parse all ophys_experiment_ids from string format "[123, 456, 789]" or single int
-                ids_str = str(row['ophys_experiment_id']).strip('[]').strip()
-                all_ophys_exp_ids = [int(x.strip()) for x in ids_str.split(',')]
-
-                # Build list of NWB files and session infos for each plane
-                nwbfiles = []
-                session_infos = []
-                for ophys_experiment_id in all_ophys_exp_ids:
-                    nwb_path = mounted_data_path / "behavior_ophys_experiments" / f"behavior_ophys_experiment_{ophys_experiment_id}.nwb"
-                    if not nwb_path.exists():
-                        print(f"  NWB file not found: {nwb_path}. Skipping plane.")
-                        continue
-
-                    # Get session info for this ophys experiment from ophys_experiment_table
-                    exp_info = ophys_experiment_table.query("ophys_experiment_id == @ophys_experiment_id")
-                    if len(exp_info) != 1:
-                        print(f"  Could not find unique entry in ophys_experiment_table for {ophys_experiment_id}. Skipping plane.")
-                        continue
-
-                    nwbfile, io = open_local_nwb(nwb_path)
-                    open_ios.append(io)
-                    nwbfiles.append(nwbfile)
-                    session_infos.append(exp_info.iloc[0])
-
-                if len(nwbfiles) == 0:
-                    print(f"No valid NWB files found for session. Skipping.")
-                    continue
-
-                print(f"  Found {len(nwbfiles)} plane(s)")
-                generate_ophys_session_metadata(nwbfiles, session_infos, output_dir)
-
-        except Exception as e:
-            print(f"Error generating metadata for session {behavior_session_id}: {e}")
-            traceback.print_exc()
-            continue
-        finally:
-            for io in open_ios:
-                io.close()
-
-    print("\nDone generating metadata!")

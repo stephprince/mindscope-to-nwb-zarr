@@ -238,7 +238,6 @@ def _build_reward_spout() -> LickSpout:
 # ---------------------------------------------------------------------------
 # Illumination LEDs (behavior + eye monitoring)
 #
-# Ported from the reference behavior-camera instrument (instrument_behavior_camera.py).
 # Behavior illumination (740 nm) is used wherever a body/behavior camera is present (all
 # three rigs); eye illumination (850 nm) only where an eye camera is present (2P +
 # mesoscope, not the behavior box).
@@ -248,7 +247,7 @@ def _build_behavior_illumination() -> list:
     """The 740 nm behavior-monitoring illumination LED, its lens, and bandpass filter.
 
     The Thorlabs LB1092-B-ML is a lens; the 747 nm bandpass is a separate filter (the
-    whitepaper conflates them -- see instrument_behavior_camera.py).
+    whitepaper conflates the two into one component).
     """
     return [
         LightEmittingDiode(

@@ -18,7 +18,6 @@ Session structure (on DANDI):
 Only the processed NWB file is needed for metadata generation.
 """
 
-import traceback
 import pandas as pd
 
 from pathlib import Path
@@ -169,64 +168,3 @@ def generate_session_metadata(nwbfile, session_info: pd.Series, output_dir: Path
     # Optionally collapse the per-session folder into a single zip in output_dir.
     if zip_output:
         zip_session_metadata(session_output_dir, output_dir)
-
-
-def generate_all_session_metadata(data_dir: Path, results_dir: Path, zip_output: bool = False) -> None:
-    """
-    Iterate through all sessions and generate session metadata by streaming from DANDI.
-
-    The S3 bucket s3://allen-brain-observatory is mounted at data_dir/allen-brain-observatory.
-    Reads experiment metadata from allen-brain-observatory/visual-coding-2p/ophys_experiments.json.
-
-    Parameters
-    ----------
-    data_dir : Path
-        Path to data directory where S3 bucket is mounted
-    results_dir : Path
-        Path to directory to save output metadata JSON files
-    zip_output : bool, optional
-        When True, each session's metadata files are bundled into a single per-session zip
-        so the output directory holds only one zip per session (see
-        ``generate_session_metadata``). Defaults to False.
-    """
-    output_dir = results_dir / "visual-coding-ophys-metadata"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load ophys experiment metadata from mounted S3 bucket
-    metadata_path = data_dir / "allen-brain-observatory" / "visual-coding-2p" / "ophys_experiments.json"
-    ophys_experiment_metadata = pd.read_json(metadata_path)
-
-    print(f"Found {len(ophys_experiment_metadata)} ophys experiments")
-
-    for row_index, experiment_row in ophys_experiment_metadata.iterrows():
-        experiment_id = experiment_row['id']
-        print(f"\nProcessing experiment {experiment_id} (row {row_index}) ...")
-
-        try:
-            # Build DANDI asset path
-            asset_path = get_dandi_asset_path(experiment_row)
-            print(f"  Streaming from DANDI: {asset_path}")
-
-            # Stream NWB file from DANDI
-            nwbfile, io, h5_file, file_handle = stream_nwb_from_dandi(asset_path)
-
-            try:
-                # Generate metadata
-                generate_session_metadata(
-                    nwbfile=nwbfile,
-                    session_info=experiment_row,
-                    output_dir=output_dir,
-                    zip_output=zip_output,
-                )
-            finally:
-                # Clean up handles
-                io.close()
-                h5_file.close()
-                file_handle.close()
-
-        except Exception as e:
-            print(f"Error generating metadata for experiment {experiment_id}: {e}")
-            traceback.print_exc()
-            continue
-
-    print("\nDone generating metadata!")
