@@ -1,5 +1,6 @@
 """Generates acquisition metadata for visual behavior ophys behavior-only sessions"""
 
+import re
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -48,33 +49,57 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
 )
 
 
+def _parse_grating_orientations(control_descriptions: list) -> list[float]:
+    """Parse grating orientations (degrees) from a grating template's ``control_description``.
+
+    The Visual Behavior ``grating`` stimulus template names each orientation
+    ``gratings_<deg>`` (e.g. ``"gratings_0.0"``, ``"gratings_90.0"``). Returns the parsed
+    degrees in order. Raises ``ValueError`` on any entry that does not match, so an
+    unexpected format fails loudly rather than silently mislabeling orientations.
+    """
+    orientations = []
+    for desc in control_descriptions:
+        match = re.fullmatch(r"gratings?_(-?\d+(?:\.\d+)?)", str(desc))
+        if not match:
+            raise ValueError(
+                f"Unexpected grating control_description entry {desc!r}; expected 'gratings_<degrees>'."
+            )
+        orientations.append(float(match.group(1)))
+    return orientations
+
+
 def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.Series) -> VisualStimulation:
     """Extract visual stimulation information from NWB file"""
+    task_parameters = nwbfile.lab_meta_data["task_parameters"]
     stimulus_parameters = {
-        # TODO update for different stages
-        # TODO confirm grating_orientations in nwbfile.stimulus_template["grating"].control_description ("gratings_0.0", "gratings_90.0", etc.)
-        "grating_orientations": [0.0, 90.0, 180.0, 270.0], 
-        "grating_orientation_unit": "degrees",
-        "distribution": nwbfile.lab_meta_data["task_parameters"].stimulus_distribution,
-        "duration_sec": nwbfile.lab_meta_data["task_parameters"].stimulus_duration_sec,
-        "blank_duration_sec": nwbfile.lab_meta_data["task_parameters"].blank_duration_sec,
-        "n_stimulus_frames": nwbfile.lab_meta_data["task_parameters"].n_stimulus_frames,
-        "response_window_sec": nwbfile.lab_meta_data["task_parameters"].response_window_sec,
-        "omitted_flash_fraction": nwbfile.lab_meta_data["task_parameters"].omitted_flash_fraction,
-        # TODO Cannot find the below information in the data or whitepaper
-        # "grating_spatial_frequencies": [0.02, 0.04, 0.08, 0.16, 0.32],
-        # "grating_spatial_frequency_unit": "cycles/degree",
+        "distribution": task_parameters.stimulus_distribution,
+        "duration_sec": task_parameters.stimulus_duration_sec,
+        "blank_duration_sec": task_parameters.blank_duration_sec,
+        "n_stimulus_frames": task_parameters.n_stimulus_frames,
+        "response_window_sec": task_parameters.response_window_sec,
+        "omitted_flash_fraction": task_parameters.omitted_flash_fraction,
+        # NOTE: grating spatial frequencies are not recorded in the data or whitepaper.
     }
+
+    # Record the individual template image names from whichever stimulus template the
+    # session used ("grating" on gratings-stage sessions, a natural-images set otherwise);
+    # grating orientations are only meaningful for the grating template, so they are added
+    # only then -- image-set sessions get no (previously hard-coded, inapplicable) orientations.
+    stimulus_template_name: list = []
+    for name, template in nwbfile.stimulus_template.items():
+        control_descriptions = getattr(template, "control_description", None)
+        if control_descriptions is None:
+            continue
+        control_descriptions = control_descriptions[:].tolist()
+        stimulus_template_name.extend(control_descriptions)
+        if name == "grating":
+            stimulus_parameters["grating_orientations"] = _parse_grating_orientations(control_descriptions)
+            stimulus_parameters["grating_orientation_unit"] = "degrees"
+
     # Convert any numpy types to native Python types for serialization
     for key, value in stimulus_parameters.items():
         if isinstance(value, (np.integer, np.floating, np.ndarray)):
             stimulus_parameters[key] = value.tolist()
-
-    # Get stimulus template names if available
-    # TODO confirm other stimulus types
-    stimulus_template_name = []
-    if "grating" in nwbfile.stimulus_template:
-        stimulus_template_name = nwbfile.stimulus_template["grating"].control_description[:].tolist()
 
     visual_stimulation = VisualStimulation(
         stimulus_name=session_info["image_set"],  # e.g., "gratings" or "images_A"
