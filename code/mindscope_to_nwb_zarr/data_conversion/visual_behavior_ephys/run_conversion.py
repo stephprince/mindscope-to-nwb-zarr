@@ -52,7 +52,7 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-behavior-neuropixels-metad
 # other job is a no-op (nothing downloaded or converted), so the pipeline can be validated
 # on a single session without spending compute on all sessions. Set to None for production,
 # where every job converts its mounted zip.
-TEST_ONLY_ZIP_NAME = "506940_2020-08-17_22-21-49_nwb_2026-08-17_11-02-56.zip"
+TEST_ONLY_ZIP_NAME = None
 
 S3_BUCKET = "s3://visual-behavior-neuropixels-data"
 S3_DATA_PATH = "visual-behavior-neuropixels"
