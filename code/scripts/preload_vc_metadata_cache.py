@@ -1,6 +1,6 @@
 """Preload the AIND metadata-service cache for all Visual Coding subjects (ophys + ephys).
 
-Like scripts/preload_aind_metadata_cache.py (Visual Behavior), but for the two Visual
+Like scripts/preload_vb_ophys_metadata_cache.py (Visual Behavior Ophys), but for the two Visual
 Coding pipelines. The metadata-service response for a subject does not change between runs
 and the same subject recurs across many sessions, so this fetches each unique subject's
 subject + procedures records once and writes them to the shared on-disk cache

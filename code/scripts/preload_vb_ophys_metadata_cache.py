@@ -9,9 +9,9 @@ to the slow metadata service) and can safely run with many workers.
 
 Usage
 -----
-    uv run python scripts/preload_aind_metadata_cache.py
-    uv run python scripts/preload_aind_metadata_cache.py --workers 4
-    uv run python scripts/preload_aind_metadata_cache.py --force   # refetch even if cached
+    uv run python scripts/preload_vb_ophys_metadata_cache.py
+    uv run python scripts/preload_vb_ophys_metadata_cache.py --workers 4
+    uv run python scripts/preload_vb_ophys_metadata_cache.py --force   # refetch even if cached
 """
 import argparse
 import sys

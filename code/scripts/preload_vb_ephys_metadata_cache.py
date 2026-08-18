@@ -1,6 +1,6 @@
 """Preload the AIND metadata-service cache for all Visual Behavior Neuropixels subjects.
 
-Like scripts/preload_aind_metadata_cache.py (Visual Behavior Ophys), but for the Visual
+Like scripts/preload_vb_ophys_metadata_cache.py (Visual Behavior Ophys), but for the Visual
 Behavior *Ephys* (neuropixels) dataset. The dataset has thousands of sessions but only a
 few hundred subjects, and a subject's metadata-service response does not change between
 runs, so this fetches each unique subject's subject + procedures records once and writes
