@@ -17,7 +17,9 @@ Session structure:
 """
 
 from pathlib import Path
+import json
 import warnings
+import zipfile
 
 from hdmf_zarr.nwb import NWBZarrIO
 import pandas as pd
@@ -30,7 +32,17 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
-INPUT_FILE_DIR = root_dir.parent / "data" / "visual-behavior-ophys-inputs"
+# Mount point (on Code Ocean) of the metadata-only data asset: one zip per session, each
+# named for the session's AIND data asset (the zip's stem is the "session name"). Produced
+# by scripts/run_all_vb_ophys.py --zip. Mirrors the VBN / Visual Coding pipelines.
+METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-behavior-ophys-metadata-only"
+
+# TEST TOGGLE: each Code Ocean pipeline job mounts exactly one session zip. When this is
+# set to a zip filename, only the job whose mounted zip matches it does any work; every
+# other job is a no-op (nothing downloaded or converted), so the pipeline can be validated
+# on a single session without spending compute on all sessions. Set to None for production,
+# where every job converts its mounted zip.
+TEST_ONLY_ZIP_NAME = None
 
 S3_BUCKET = "s3://visual-behavior-ophys-data"
 S3_DATA_PATH = "visual-behavior-ophys"
@@ -319,35 +331,94 @@ def get_session_info_from_row(row: pd.Series) -> dict:
         }
 
 
-def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path:
-    """Convert NWB HDF5 file to Zarr.
+def _behavior_session_id_from_metadata(metadata_dir: Path) -> int:
+    """Read the ``behavior_session_id`` from a session's unzipped ``data_description.json``.
 
-    Reads the input placeholder file from INPUT_FILE_DIR (a file named with a row index),
-    uses that index to look up the session in the behavior session table, determines
-    the session type (behavior-only, single-plane ophys, or multiplane ophys),
-    downloads the actual NWB files from S3, and converts accordingly.
+    The AIND data description tags each asset with a ``"behavior_session_id: <id>"`` string
+    (see ``aind_data_schema.visual_behavior_ophys.data_description._build_tags``). That id is
+    the key into ``behavior_session_table.csv`` used to resolve the session kind and its NWB
+    file(s).
+    """
+    data_description_path = metadata_dir / "data_description.json"
+    if not data_description_path.exists():
+        raise RuntimeError(
+            f"data_description.json not found in {metadata_dir}; cannot resolve the session."
+        )
+    with open(data_description_path) as f:
+        data_description = json.load(f)
+
+    # Tags are "<key>: <value>" strings (see data_description._build_tags).
+    for tag in data_description.get("tags", []):
+        if isinstance(tag, str) and tag.startswith("behavior_session_id:"):
+            return int(tag.split(":", 1)[1].strip())
+
+    raise RuntimeError(
+        f"No 'behavior_session_id' tag found in {data_description_path} "
+        f"(tags: {data_description.get('tags')})."
+    )
+
+
+def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Path) -> Path | None:
+    """Convert a Visual Behavior Ophys session's NWB HDF5 file(s) to Zarr.
+
+    The pipeline input is a single zipped AIND metadata folder mounted at
+    ``METADATA_ZIP_DIR`` (``data/visual-behavior-ophys-metadata-only`` on Code Ocean), named
+    for the session's data asset. This (mirroring the VBN / Visual Coding pipelines):
+
+    1. unzips that metadata folder into ``results_dir/<session name>/``,
+    2. reads the ``behavior_session_id`` from the unzipped ``data_description.json`` tags,
+    3. looks up the session kind (behavior-only / single-plane / multiplane) and its ophys
+       experiment id(s) in ``behavior_session_table.csv`` (downloaded from S3),
+    4. downloads the session's NWB file(s) from S3, and
+    5. exports them to ``results_dir/<session name>/<session name>.nwb.zarr``.
 
     Args:
-        results_dir: Directory to save the converted Zarr file.
+        results_dir: Directory to unzip the metadata into and to write the Zarr store.
         scratch_dir: Directory to download NWB files to.
 
     Returns:
-        Path to the converted Zarr file.
+        Path to the converted Zarr directory store, or ``None`` if the job is a no-op because
+        its mounted zip does not match ``TEST_ONLY_ZIP_NAME`` (in which case an empty
+        placeholder file named for the session is written to ``results_dir``).
     """
-    # Confirm there is exactly one input file in the input directory
-    input_files = list(INPUT_FILE_DIR.iterdir())
-    if len(input_files) != 1:
-        raise RuntimeError(
-            f"Expected exactly one input file in {INPUT_FILE_DIR}, "
-            f"found {len(input_files)} files."
+    # Each pipeline job mounts exactly one session zip.
+    zip_files = sorted(p for p in METADATA_ZIP_DIR.iterdir() if p.suffix == ".zip")
+    if not zip_files:
+        raise RuntimeError(f"No metadata zip found in {METADATA_ZIP_DIR}.")
+    metadata_zip = zip_files[0]
+
+    # TEST no-op: when a target zip is hardcoded, only that session's job does work; every
+    # other job does no download/conversion. It still writes an empty placeholder file
+    # (named for the session) to results so the Code Ocean job produces output.
+    if TEST_ONLY_ZIP_NAME is not None and metadata_zip.name != TEST_ONLY_ZIP_NAME:
+        results_dir.mkdir(parents=True, exist_ok=True)
+        placeholder = results_dir / metadata_zip.stem
+        placeholder.touch()
+        print(
+            f"[TEST_ONLY_ZIP_NAME] Mounted zip {metadata_zip.name} is not the test target "
+            f"{TEST_ONLY_ZIP_NAME}; skipping conversion (wrote empty placeholder "
+            f"{placeholder.name})."
         )
-    input_file = input_files[0]
+        return None
 
-    # Parse row index from filename
-    row_index = int(input_file.name)
-    print(f"Processing row index {row_index} ...")
+    # The zip stem is the session's data asset name; the Zarr store is named after it.
+    session_name = metadata_zip.stem
+    print(f"Metadata zip: {metadata_zip.name} (session name: {session_name})")
 
-    # Download behavior session table metadata
+    # Unzip the metadata folder into results/<session name>/.
+    metadata_out_dir = results_dir / session_name
+    metadata_out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Unzipping metadata into {metadata_out_dir} ...")
+    with zipfile.ZipFile(metadata_zip) as zf:
+        zf.extractall(metadata_out_dir)
+
+    # Resolve the behavior_session_id from the unzipped data description tags.
+    behavior_session_id = _behavior_session_id_from_metadata(metadata_out_dir)
+    print(f"behavior_session_id: {behavior_session_id}")
+
+    # Download the behavior session table from S3 and locate this session's row (the table
+    # gives the session kind and, for ophys sessions, the full list of per-plane experiment
+    # ids -- the metadata's ophys_experiment_id tag only carries the first plane).
     print("Downloading behavior session table metadata from S3 ...")
     b = q3.Bucket(S3_BUCKET)
     session_metadata_path = f"{S3_DATA_PATH}/project_metadata/behavior_session_table.csv"
@@ -355,27 +426,26 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
     b.fetch(session_metadata_path, csv_download_path.as_posix())
     behavior_session_table = pd.read_csv(csv_download_path)
 
-    # Get the row at the specified index
-    if row_index < 0 or row_index >= len(behavior_session_table):
+    matches = behavior_session_table.query("behavior_session_id == @behavior_session_id")
+    if len(matches) != 1:
         raise RuntimeError(
-            f"Row index {row_index} out of range. "
-            f"Table has {len(behavior_session_table)} rows (0-{len(behavior_session_table)-1})."
+            f"Expected exactly one row for behavior_session_id {behavior_session_id} in "
+            f"behavior_session_table.csv, found {len(matches)}."
         )
-    row = behavior_session_table.iloc[row_index]
+    row = matches.iloc[0]
 
-    # Determine session type from the row
+    # Determine session type from the row.
     session_info = get_session_info_from_row(row)
     session_type = session_info["session_type"]
-    behavior_session_id = session_info["behavior_session_id"]
-
     print(f"Session type: {session_type}, behavior_session_id: {behavior_session_id}")
+
+    # Zarr directory store named after the zipped session name, written inside the unzipped
+    # metadata folder so each session's metadata and Zarr live together.
+    zarr_path = metadata_out_dir / f"{session_name}.nwb.zarr"
 
     if session_type == "behavior":
         # Behavior-only session - download from S3
         hdf5_path = download_behavior_session_from_s3(behavior_session_id, scratch_dir)
-
-        zarr_filename = f"behavior_session_{behavior_session_id}.nwb.zarr"
-        zarr_path = results_dir / zarr_filename
         print(f"Converting behavior-only session to {zarr_path} ...")
         convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path, zarr_path)
 
@@ -383,9 +453,6 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
         # Single-plane ophys session - download from S3
         ophys_experiment_id = session_info["all_ophys_experiment_ids"][0]
         hdf5_path = download_ophys_experiment_from_s3(ophys_experiment_id, scratch_dir)
-
-        zarr_filename = f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
-        zarr_path = results_dir / zarr_filename
         print(f"Converting single-plane ophys session to {zarr_path} ...")
         convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path, zarr_path)
 
@@ -395,9 +462,6 @@ def convert_visual_behavior_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: P
             download_ophys_experiment_from_s3(exp_id, scratch_dir)
             for exp_id in session_info["all_ophys_experiment_ids"]
         ]
-
-        zarr_filename = f"behavior_ophys_session_{behavior_session_id}.nwb.zarr"
-        zarr_path = results_dir / zarr_filename
         print(f"Converting multiplane session ({len(all_hdf5_paths)} planes) to {zarr_path} ...")
         combine_multiplane_nwb_to_zarr(all_hdf5_paths[0], all_hdf5_paths[1:], zarr_path)
 

@@ -49,26 +49,35 @@ The AIND metadata (`data_description` / `subject` / `acquisition` / `procedures`
 
 ### Batch Conversion using Pipelines
 
-Each dataset has a `create_inputs.py` module that generates numbered input files for pipeline parallelization.
+All four datasets use a **metadata-zip-driven** pipeline: the per-session AIND metadata zips
+(produced by `scripts/run_all_*.py --zip`, one `<data asset name>.zip` per session) are the
+pipeline input. Each parallel job mounts exactly **one** zip, and `run_conversion.py` unzips
+it, reads the session id from `data_description.json`, downloads that session's source NWB(s),
+converts to Zarr, and writes the store **next to** the metadata as
+`results/<session name>/<session name>.nwb.zarr`.
 
-1. **Generate input files locally:**
+1. **Generate the metadata zips locally** (see *AIND Metadata Extraction* below), e.g.:
    ```bash
    cd code
-   uv run python -m mindscope_to_nwb_zarr.data_conversion.<dataset_module>.create_inputs
+   uv run python scripts/run_all_vb_ophys.py --zip
    ```
-   Where `<dataset_module>` is one of: `visual_behavior_ephys`, `visual_behavior_ophys`, `visual_coding_ephys`, `visual_coding_ophys`
+   This writes one zip per session to `code/metadata_results/<dataset>-metadata-only/`.
 
-2. **Create a Code Ocean data asset** with the generated input files
+2. **Create a Code Ocean data asset** from that directory of per-session zips (its name must
+   match the `METADATA_ZIP_DIR` mount in the dataset's `run_conversion.py`, e.g.
+   `visual-behavior-ophys-metadata-only`).
 
 3. **Create a pipeline:**
    - Add the capsule
-   - Map paths from the data asset to the capsule
+   - Map the metadata-zip data asset to the capsule (one zip per parallel job)
    - Connect to a results bucket
    - Set parameter: `--dataset "<dataset_name>"`
 
-4. **Run the pipeline**
+4. **Run the pipeline.** For a single-session validation run, set `TEST_ONLY_ZIP_NAME` in the
+   dataset's `run_conversion.py` to the target zip's filename (every other job becomes a
+   no-op that writes an empty placeholder); set it back to `None` for production.
 
-Consider reconfiguring the pipeline to look like this [Example Hyperparameter Search Pipeline](https://codeocean.allenneuraldynamics.org/capsule/3709372/tree/v1) instead of creating input data assets.
+Consider reconfiguring the pipeline to look like this [Example Hyperparameter Search Pipeline](https://codeocean.allenneuraldynamics.org/capsule/3709372/tree/v1).
 
 
 ## Project Structure
@@ -80,10 +89,8 @@ mindscope-to-nwb-zarr/
 │   ├── mindscope_to_nwb_zarr/
 │   │   ├── data_conversion/              # HDF5 to Zarr conversion
 │   │   │   ├── conversion_utils.py       # Shared utilities
-│   │   │   ├── create_input_utils.py     # Pipeline input file generation
 │   │   │   ├── visual_behavior_ephys/
-│   │   │   │   ├── run_conversion.py     # Main conversion function
-│   │   │   │   └── create_inputs.py      # Pipeline input generation
+│   │   │   │   └── run_conversion.py     # Main conversion function
 │   │   │   ├── visual_behavior_ophys/
 │   │   │   ├── visual_coding_ephys/
 │   │   │   └── visual_coding_ophys/
@@ -150,6 +157,8 @@ The per-dataset subsections below document the source data, every transformation
 
 ### Visual Behavior Ophys (conversion)
 **Source data** — HDF5 NWB files from `s3://visual-behavior-ophys-data` (`.../behavior_ophys_experiments` and `.../behavior_sessions`); metadata from `behavior_session_table.csv`. **4782 sessions** total: behavior-only, single-plane ophys, or multiscope ophys (up to 8 NWB files, one per imaging plane).
+
+**Run model.** Like VBN and Visual Coding, the conversion is **metadata-zip-driven**: each Code Ocean job mounts one per-session metadata zip from the `visual-behavior-ophys-metadata-only` data asset (produced by `run_all_vb_ophys.py --zip`), unzips it, reads the `behavior_session_id` from `data_description.json`, looks up the session kind and per-plane experiment ids in `behavior_session_table.csv` (from S3), downloads the NWB(s), and writes `results/<session name>/<session name>.nwb.zarr` next to the metadata. `run_conversion.py`'s `TEST_ONLY_ZIP_NAME` gates a single-session validation run (`None` in production).
 
 **Transformations** (schema 2.9.0 from 2.6.0-alpha)
 - Combined multiscope sessions (multiple single-plane NWB files) into a single Zarr output, renaming per-plane objects with a `_plane_X` suffix (`imaging_plane_1`, `ophys_plane_1`, `OphysBehaviorMetadata` → `_plane_1`, etc.). `X` is 1-indexed by the experiment order in `behavior_session_table.csv`.
