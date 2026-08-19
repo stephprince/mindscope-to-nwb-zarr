@@ -115,11 +115,7 @@ def add_missing_visual_behavior_ephys_descriptions(nwbfile: NWBFile) -> None:
     # Add units table description
     if hasattr(nwbfile, 'units') and nwbfile.units is not None:
         nwbfile.units.fields['description'] = (
-            "Units identified from spike sorting using Kilosort2. "
-            "Note that unlike the data from the Visual Coding Neuropixels pipeline, "
-            "for which potential noise units were filtered from the released "
-            "dataset, we have elected to return all units for the Visual Behavior "
-            "Neuropixels dataset."
+            "Units identified from spike sorting using Kilosort2."
         )
 
     return nwbfile
