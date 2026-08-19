@@ -43,6 +43,7 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 )
 from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys._units_allensdk_metadata import (
     add_allensdk_unit_columns,
+    null_unregistered_electrode_ccf_coordinates,
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
@@ -237,6 +238,14 @@ def convert_session_to_zarr(
             # sessions (no units table).
             print("Adding AllenSDK unit metadata columns ...")
             add_allensdk_unit_columns(nwbfile)
+
+            # Fix the electrodes table CCF coordinates (x/y/z = AP/DV/LR): the source NWB already
+            # carries the correct coordinates on registered channels, but stores channels that were
+            # never registered to the CCF as an all-axes (0,0,0) sentinel (7 of 153 ecephys
+            # sessions, each entirely unregistered). Map that sentinel to NaN in place. No-op for
+            # behavior-only sessions (no electrodes table).
+            print("Nulling unregistered electrode CCF coordinates ...")
+            null_unregistered_electrode_ccf_coordinates(nwbfile)
 
             # Fix VectorIndex dtypes to be uint64
             print("Fixing VectorIndex dtypes ...")

@@ -21,6 +21,15 @@ likewise joins a released per-unit CSV onto the units table (see
 Column names match the AllenSDK VBN units table verbatim (e.g. ``structure_acronym`` /
 ``structure_id`` -- note VBN uses the un-prefixed names, unlike Visual Coding's
 ``ecephys_structure_*``). The metric columns the NWB already has are left untouched.
+
+This module also fixes the *electrodes* table CCF coordinates: the source NWB already carries the
+correct ``x``/``y``/``z`` (AP/DV/LR) on registered channels (verified equal to the released
+``channels.csv`` on every channel across the dataset), but stores channels that were never
+registered to the CCF as ``(0, 0, 0)`` on all three axes rather than the Visual Coding Neuropixels
+``-1000`` sentinel (7 of the 153 ecephys sessions are entirely unregistered). Because the NWB is
+already correct on registered channels, no external re-source is needed:
+``null_unregistered_electrode_ccf_coordinates`` maps that all-axes-zero sentinel to NaN in place so
+those channels are not stored as a false CCF-origin location.
 """
 import warnings
 from functools import lru_cache
@@ -143,3 +152,65 @@ def add_allensdk_unit_columns(nwbfile, url: str = UNITS_CSV_URL) -> int:
         added += 1
     print(f"  added {added} AllenSDK unit columns to the units table ({len(unit_ids)} units).")
     return added
+
+
+# --- electrodes: CCF "not registered" sentinel -> NaN ------------------------------------------
+# The electrodes table x/y/z axes are the Allen CCFv3 anterior-posterior / dorsal-ventral /
+# left-right coordinates. The source VBN NWB already carries the correct coordinates on registered
+# channels (verified equal to the released channels.csv on every channel across the dataset), so no
+# external re-source is needed -- the only fix is mapping the "not registered to CCF" sentinel,
+# which the NWB stores as (0, 0, 0) on all three axes, to NaN.
+_ELECTRODE_CCF_AXES = ("x", "y", "z")
+_ELECTRODE_CCF_AXIS_DESCRIPTIONS = {
+    "x": (
+        "Anterior-posterior position of this channel in the Allen CCFv3 (microns); NaN if the "
+        "channel was not registered to the CCF."
+    ),
+    "y": (
+        "Dorsal-ventral position of this channel in the Allen CCFv3 (microns); NaN if the channel "
+        "was not registered to the CCF."
+    ),
+    "z": (
+        "Left-right (medial-lateral) position of this channel in the Allen CCFv3 (microns); NaN if "
+        "the channel was not registered to the CCF."
+    ),
+}
+
+
+def null_unregistered_electrode_ccf_coordinates(nwbfile) -> int:
+    """Map the electrodes table's ``(0, 0, 0)`` "not registered to CCF" sentinel to NaN, in place.
+
+    The source Visual Behavior Neuropixels NWB electrodes table already carries the correct Allen
+    CCFv3 coordinates (``x``/``y``/``z`` = anterior-posterior / dorsal-ventral / left-right) on
+    registered channels -- verified exactly equal to the released ``channels.csv`` on every channel
+    across the dataset -- so nothing needs to be re-sourced. The only issue is that channels which
+    were never registered to the CCF are stored as ``(0, 0, 0)`` on all three axes (the CCF origin
+    corner, non-physical for brain tissue) rather than NaN. Registration is per session: 7 of the
+    153 ecephys sessions are *entirely* unregistered (every channel ``(0, 0, 0)``) and the rest have
+    no zero-sentinel channels. This overwrites those all-axes-zero rows with NaN so unregistered
+    channels read as "unknown", mirroring the Visual Coding Neuropixels electrode fix (which maps its
+    all-axes ``-1000`` sentinel to NaN). A real ``0`` on a single axis is preserved -- only
+    all-three-zero is treated as the sentinel. No-op (returns 0) for behavior-only sessions (no
+    electrodes table). Returns the number of electrodes nulled.
+    """
+    if nwbfile.electrodes is None:
+        return 0
+    missing = [a for a in _ELECTRODE_CCF_AXES if a not in nwbfile.electrodes.colnames]
+    if missing:
+        raise RuntimeError(f"electrodes table is missing expected column(s): {missing}.")
+
+    coords = {a: np.asarray(nwbfile.electrodes[a].data[:], dtype=float) for a in _ELECTRODE_CCF_AXES}
+    unregistered = np.logical_and.reduce([coords[a] == 0 for a in _ELECTRODE_CCF_AXES])
+    n_unreg = int(unregistered.sum())
+
+    for axis, data in coords.items():
+        data[unregistered] = np.nan
+        # WARNING: overwrite the existing VectorData values in place (same workaround as
+        # fix_vector_index_dtypes); validation is performed afterwards on the exported Zarr.
+        nwbfile.electrodes[axis]._Data__data = data
+        nwbfile.electrodes[axis].fields["description"] = _ELECTRODE_CCF_AXIS_DESCRIPTIONS[axis]
+    print(
+        f"  nulled the (0,0,0) 'not registered to CCF' sentinel on {n_unreg}/{len(coords['x'])} "
+        f"electrodes (x/y/z set to NaN)."
+    )
+    return n_unreg
