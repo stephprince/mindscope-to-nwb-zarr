@@ -29,6 +29,8 @@ this is a no-op elsewhere; the raw per-row values remain in the NWB).
 """
 
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from pynwb import NWBFile
 import pandas as pd
@@ -186,12 +188,44 @@ def _vbn_task_stimulus_parameters(session_info: pd.Series) -> dict:
     }
 
 
+# curriculum_status is the animal's *continuous* behavioral session number -- the non-reset
+# count in behavior_sessions.csv. For ecephys sessions session_info is the ecephys_sessions.csv
+# row, whose ``session_number`` is the *reset* ephys-recording-day number (1/2, not the
+# curriculum position), so the number is always resolved from behavior_sessions.csv by
+# behavior_session_id (a no-op for behavior-only sessions, whose session_info already is that
+# row). Generation is always local, so the project_metadata CSVs are on disk (as in instrument.py).
+_PROJECT_METADATA = Path(__file__).resolve().parents[4] / "data" / "visual-behavior-neuropixels" / "project_metadata"
+
+
+@lru_cache(maxsize=1)
+def _behavior_session_numbers() -> dict:
+    """Map ``behavior_session_id`` -> behavioral ``session_number`` (the continuous, non-reset count)."""
+    df = pd.read_csv(
+        _PROJECT_METADATA / "behavior_sessions.csv",
+        usecols=["behavior_session_id", "session_number"],
+    )
+    return dict(zip(df["behavior_session_id"].astype("int64"), df["session_number"]))
+
+
 def _vbn_curriculum_status(session_info: pd.Series) -> str | None:
-    """Curriculum status for the active behavior epoch: the session number as a string
-    (``curriculum_status`` is an Optional[str]), or None when the session number is absent."""
-    if "session_number" not in session_info.index:
+    """Curriculum status for the active behavior epoch: the animal's continuous behavioral
+    session number as a string (``curriculum_status`` is an Optional[str]).
+
+    Resolved from behavior_sessions.csv by ``behavior_session_id`` so ecephys sessions use the
+    same non-reset curriculum count as behavior-only sessions, rather than the ecephys table's
+    reset ephys-recording-day number. Raises if the session's behavior_session_id is missing
+    from behavior_sessions.csv (every session has one), so a broken join fails loudly.
+    """
+    bsid = _clean_value(session_info.get("behavior_session_id"))
+    if bsid is None:
         return None
-    value = _clean_value(session_info["session_number"])
+    numbers = _behavior_session_numbers()
+    if int(bsid) not in numbers:
+        raise ValueError(
+            f"behavior_session_id {int(bsid)} not found in behavior_sessions.csv; "
+            f"cannot resolve the curriculum_status session number."
+        )
+    value = _clean_value(numbers[int(bsid)])
     return None if value is None else str(value)
 
 
@@ -210,7 +244,8 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
     epoch drops the redundant ``stimulus_name`` parameter; the jittery ``duration`` column is
     dropped in the shared helper (not a stimulus property). A single "Optotagging" epoch
     driven by the 473 nm laser is appended when the session has optotagging data (ecephys
-    sessions).
+    sessions). The returned epochs are sorted **chronologically by start time** (they are built
+    in NWB-intervals-table order, which is not the order the stimuli ran).
 
     Parameters
     ----------
@@ -319,6 +354,13 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series) -> list[St
             curriculum_status=None,
         )
         stimulation_epochs.append(opto_stim_epoch)
+
+    # Emit the epochs in chronological order. They are built in NWB-intervals-table order
+    # (Natural_Images active/passive, then flash, gabor, spontaneous, with optotagging
+    # appended last), which does not match the order the stimuli actually ran -- the passive
+    # mapping stimuli (flash / gabor / spontaneous) are interleaved in time. Sorting by start
+    # time makes the list read as the session unfolded.
+    stimulation_epochs.sort(key=lambda epoch: epoch.stimulus_start_time)
 
     return stimulation_epochs
 

@@ -25,16 +25,17 @@ from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_en
 
 # Columns tagged onto the asset when present and non-null in session_info. The row is
 # either an ecephys_sessions row (ecephys sessions) or a behavior_sessions row
-# (behavior-only sessions); the two share most of these, and columns absent from a given
-# table (e.g. project_code, which is only in ecephys_sessions) are simply skipped.
+# (behavior-only sessions); columns absent from a given table are simply skipped.
 #
-# These are Allen LIMS linkage IDs / project descriptors not otherwise captured in the
-# metadata. Fields already represented elsewhere are intentionally excluded: mouse_id
-# (DataDescription.subject_id / subject.json), sex / genotype (subject.json), and
-# session_type -- the session_type is already the Acquisition.acquisition_type
-# (nwbfile.session_description), so tagging it here too would be redundant and confusing.
+# These are the Allen LIMS linkage IDs (ecephys/behavior session ids) not otherwise captured
+# in the metadata -- they live *only* in these tags, and the conversion pipeline reads them to
+# resolve which S3 files to fetch. Fields already represented elsewhere are intentionally
+# excluded: mouse_id (DataDescription.subject_id / subject.json), sex / genotype
+# (subject.json), session_type (== the Acquisition.acquisition_type / nwbfile.session_description),
+# and project_code -- the ecephys-only project_code is the constant "NeuropixelVisualBehavior"
+# for every session and duplicates DataDescription.project_name, so tagging it adds no
+# information and was dropped.
 _TAG_COLUMNS = [
-    "project_code",
     "ecephys_session_id",
     "behavior_session_id",
 ]
@@ -43,9 +44,10 @@ _TAG_COLUMNS = [
 def _format_tag_value(value) -> str:
     """Render a tag value, coercing integer-valued ids to a plain int string.
 
-    Numeric linkage-id columns (e.g. ecephys_session_id) are read as float when the column
-    contains NaNs, so an id would otherwise render with a trailing ".0"
-    (``1040871931.0``). String columns (e.g. project_code) pass through unchanged.
+    Numeric linkage-id columns (ecephys_session_id / behavior_session_id) are read as float
+    when the column contains NaNs, so an id would otherwise render with a trailing ".0"
+    (``1040871931.0``); such integer-valued floats are coerced to a plain int string. Any
+    non-numeric value passes through unchanged.
     """
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
