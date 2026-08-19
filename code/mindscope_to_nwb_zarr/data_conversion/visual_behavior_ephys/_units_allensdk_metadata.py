@@ -192,6 +192,9 @@ def null_unregistered_electrode_ccf_coordinates(nwbfile) -> int:
     all-axes ``-1000`` sentinel to NaN). A real ``0`` on a single axis is preserved -- only
     all-three-zero is treated as the sentinel. No-op (returns 0) for behavior-only sessions (no
     electrodes table). Returns the number of electrodes nulled.
+
+    See the README (Visual Behavior Ephys conversion) for why these 7 sessions are unregistered
+    yet still carry structure_acronym labels (confirmed by Corbett Bennett, 2026-08-19).
     """
     if nwbfile.electrodes is None:
         return 0
