@@ -54,13 +54,9 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-behavior-neuropixels-metad
 # TEST TOGGLE: each Code Ocean pipeline job mounts exactly one session zip. When this is
 # set to a zip filename, only the job whose mounted zip matches it exactly does any work;
 # every other job is a no-op (nothing downloaded or converted), so the pipeline can be run
-# on a single session without spending compute on all sessions. Set to None for production,
-# where every job converts its mounted zip.
-#
-# Currently targeting subject 506940's last session (2020-08-18, ecephys_session 1044016459).
-# This is the exact metadata-zip filename produced by the full metadata run; regenerating the
-# metadata would change the trailing packaging date, so update this value to match if so.
-TEST_ONLY_ZIP_NAME = "506940_2020-08-18_23-08-19_nwb_2026-08-18_21-27-29.zip"
+# on a single session without spending compute on all sessions. None (production) means every
+# job converts its mounted zip.
+TEST_ONLY_ZIP_NAME = None
 
 S3_BUCKET = "s3://visual-behavior-neuropixels-data"
 S3_DATA_PATH = "visual-behavior-neuropixels"
