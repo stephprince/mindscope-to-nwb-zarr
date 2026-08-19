@@ -41,6 +41,9 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     add_missing_descriptions,
     fix_vector_index_dtypes,
 )
+from mindscope_to_nwb_zarr.data_conversion.visual_behavior_ephys._units_allensdk_metadata import (
+    add_allensdk_unit_columns,
+)
 
 root_dir = Path(__file__).parent.parent.parent.parent
 # Mount point (on Code Ocean) of the metadata-only data asset: one zip per session, each
@@ -227,6 +230,13 @@ def convert_session_to_zarr(
             print("Adding missing descriptions ...")
             add_missing_descriptions(nwbfile)
             add_missing_visual_behavior_ephys_descriptions(nwbfile)
+
+            # Backfill the AllenSDK units-table columns (per-unit CCF position, brain structure,
+            # probe/channel ids, channel geometry, waveform_halfwidth) so the archived units
+            # table carries all the information the AllenSDK returns. No-op for behavior-only
+            # sessions (no units table).
+            print("Adding AllenSDK unit metadata columns ...")
+            add_allensdk_unit_columns(nwbfile)
 
             # Fix VectorIndex dtypes to be uint64
             print("Fixing VectorIndex dtypes ...")
