@@ -264,6 +264,10 @@ def get_stimulation_epochs(nwbfile: NWBFile, session_info: pd.Series,
         )
         stimulation_epochs.append(opto_stim_epoch)
 
+    # Return the epochs in chronological order: they are built per presentation table (then
+    # split per block), with the optotagging epoch appended last, which is not time order.
+    stimulation_epochs.sort(key=lambda epoch: epoch.stimulus_start_time)
+
     return stimulation_epochs
 
 

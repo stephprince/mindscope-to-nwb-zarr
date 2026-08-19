@@ -281,6 +281,10 @@ def get_stimulus_epochs(nwbfile: NWBFile, session_info: pd.Series | None = None)
             )
             stimulus_epochs.append(stim_epoch)
 
+    # Return the epochs in chronological order (they are built per stimulus block, which is
+    # not necessarily time order).
+    stimulus_epochs.sort(key=lambda epoch: epoch.stimulus_start_time)
+
     return stimulus_epochs
 
 
