@@ -39,6 +39,8 @@ from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
 from mindscope_to_nwb_zarr.data_conversion.visual_coding_ephys._units_analysis_metrics import (
     add_electrode_structure_ids,
     add_unit_analysis_metrics,
+    add_unit_channel_columns,
+    replace_electrode_z_with_ccf_left_right,
     resolve_session_type,
 )
 
@@ -230,12 +232,19 @@ def convert_session_to_zarr(
 
             # Add the AllenSDK per-unit visual-response analysis metrics (RF, tuning, running
             # modulation, per-stimulus firing rates, etc.) that are absent from the source NWB,
-            # plus the numeric CCF structure id on the electrodes table. Streamed from the public
-            # ecephys-cache CSVs (no AllenSDK dependency); see _units_analysis_metrics.py.
+            # plus per-unit channel-derived columns (CCF coordinates, brain structure and on-probe
+            # geometry, joined from the unit's peak channel), the numeric CCF structure id on the
+            # electrodes table, and a correction of the electrodes 'z' column (a packaging error
+            # left it duplicating 'y' instead of the left-right CCF coordinate). Streamed from the
+            # public ecephys-cache CSVs (no AllenSDK dependency); see _units_analysis_metrics.py.
             if session_type is not None:
                 print(f"Adding unit analysis metrics ({session_type}) ...")
                 add_unit_analysis_metrics(nwbfile, session_type)
+            print("Adding per-unit CCF coordinates, brain structure, and probe geometry ...")
+            add_unit_channel_columns(nwbfile)
             add_electrode_structure_ids(nwbfile)
+            print("Correcting electrodes 'z' with the CCF left-right coordinate ...")
+            replace_electrode_z_with_ccf_left_right(nwbfile)
 
             # Fix VectorIndex dtypes to be uint64
             print("Fixing VectorIndex dtypes ...")

@@ -23,16 +23,16 @@ Use <= 3 workers: the AIND metadata service returns empty bodies under higher co
 Usage
 -----
     uv run python scripts/run_all_vc_ephys.py                 # all 58 sessions
-    uv run python scripts/run_all_vc_ephys.py --zip           # 58 zips in metadata_results/visual_coding_ephys
+    uv run python scripts/run_all_vc_ephys.py --zip           # 58 zips in metadata_results/visual-coding-neuropixels-metadata-only
     uv run python scripts/run_all_vc_ephys.py --workers 3
     uv run python scripts/run_all_vc_ephys.py --limit 3       # first 3 pending (smoke test)
     uv run python scripts/run_all_vc_ephys.py --sessions 715093703 767871931
     uv run python scripts/run_all_vc_ephys.py --no-retry-failed
 
 With --zip, each session's five metadata files are bundled into a single
-<data asset name>.zip written to code/metadata_results/visual_coding_ephys/ (the loose
-files are staged under scratch and the run report stays in _report), so that directory
-ends up holding only the 58 per-session zips.
+<data asset name>.zip written to code/metadata_results/visual-coding-neuropixels-metadata-only/
+(the loose files are staged under scratch and the run report stays in _report), so that
+directory ends up holding only the 58 per-session zips.
 """
 import argparse
 import json
@@ -79,7 +79,9 @@ SUMMARY_JSON = REPORT_DIR / "summary.json"
 # Deliverable directory for the zipped metadata (one zip per session, nothing else).
 # Used when --zip is passed; the loose per-session files are staged under OUTPUT_DIR and
 # the report goes to REPORT_DIR (a sibling), so this directory ends up holding only the 58 zips.
-DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual_coding_ephys"
+# Named to match the Code Ocean metadata-only data asset the Zarr conversion pipeline mounts at
+# data/visual-coding-neuropixels-metadata-only (see visual_coding_ephys/run_conversion.py).
+DELIVERABLE_DIR = HERE.parent / "metadata_results" / "visual-coding-neuropixels-metadata-only"
 STAGING_DIR = OUTPUT_DIR / "_staging"
 
 S3_NWB_URL_TEMPLATE = (
@@ -292,7 +294,8 @@ def main() -> int:
     parser.add_argument("--no-retry-failed", dest="retry_failed", action="store_false")
     parser.add_argument("--zip", dest="zip", action="store_true",
                         help="bundle each session's 5 files into one zip in "
-                             "metadata_results/visual_coding_ephys (dir holds only the 58 zips)")
+                             "metadata_results/visual-coding-neuropixels-metadata-only "
+                             "(dir holds only the 58 zips)")
     parser.set_defaults(retry_failed=True)
     args = parser.parse_args()
 

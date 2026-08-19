@@ -7,17 +7,33 @@ present in the source NWB ``units`` table. AllenSDK is incompatible with this re
 (it needs pynwb 2.x), but the metrics are published as plain CSV data products on the same public
 S3 bucket, so they can be streamed and attached with no AllenSDK dependency.
 
-This module also backfills the numeric ``ecephys_structure_id`` on the electrodes table from the
-published ``channels.csv`` (the NWB electrodes table already carries the structure *acronym* as
-``location`` but not the numeric CCF id).
+This module also backfills, from the published ``channels.csv``:
+  * the numeric ``ecephys_structure_id`` on the *electrodes* table (the NWB electrodes table
+    already carries the structure *acronym* as ``location`` but not the numeric CCF id);
+  * per-*unit* channel-derived columns copied from each unit's peak channel -- CCF coordinates,
+    brain structure (``ecephys_structure_id`` + ``ecephys_structure_acronym``) and on-probe
+    geometry (``probe_horizontal_position``, ``probe_vertical_position``, ``ecephys_probe_id``).
+    The source NWB units table carries only ``peak_channel_id``; AllenSDK's units table adds these
+    by merging units to channels on that key (``EcephysSession._build_units_table``), which this
+    reproduces, so the archived units table carries the same channel-derived columns AllenSDK
+    returns; and
+  * a correction to the electrodes table ``z`` column: the source NWBs have a packaging error in
+    which ``z`` duplicates ``y`` (both hold the dorsal-ventral coordinate) instead of the
+    left-right (medial-lateral) coordinate, so ``z`` is overwritten with the true
+    ``left_right_ccf_coordinate`` from ``channels.csv``.
+
+The ``-1000`` "not registered to CCF" sentinel used by ``channels.csv`` is mapped to NaN wherever
+these coordinates are attached (units and the corrected electrode ``z``), matching the NWB's NaN
+for registered-but-out-of-brain channels.
 
 Join keys (validated on real sessions): the analysis-metrics CSV is keyed by ``ecephys_unit_id``
 which equals the NWB ``units.id``; ``channels.csv`` is keyed by channel id which equals the NWB
-``electrodes.id``. The metrics files are dataset-wide (all units of a session type), so they are
-reindexed to the session's unit ids; units with no metrics row (a small per-session fraction,
-including some noise units) receive NaN.
+``electrodes.id`` and the units' ``peak_channel_id``. The metrics files are dataset-wide (all units
+of a session type), so they are reindexed to the session's unit ids; units with no metrics row (a
+small per-session fraction, including some noise units) receive NaN.
 """
 import warnings
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -165,6 +181,25 @@ def add_unit_analysis_metrics(nwbfile, session_type: str, s3_cache: str = S3_CAC
     return n_matched
 
 
+# --- channels.csv (shared by the electrode + unit backfills) -----------------------------------
+_CHANNELS_PROVENANCE = (
+    " Source: Allen Brain Observatory Neuropixels channels.csv "
+    "(joined to the unit's peak_channel_id)."
+)
+
+
+@lru_cache(maxsize=2)
+def _load_channels(s3_cache: str = S3_CACHE_HTTPS) -> pd.DataFrame:
+    """Load the published ``channels.csv`` (dataset-wide), indexed by channel id.
+
+    Cached so the electrode-structure and unit-CCF backfills fetch this ~6 MB CSV only once per
+    conversion. Callers only reindex (never mutate) the returned frame, so sharing is safe.
+    """
+    url = f"{s3_cache}/channels.csv"
+    print(f"Loading channels table from {url} ...")
+    return pd.read_csv(url).set_index("id")
+
+
 # --- electrodes: numeric structure id ----------------------------------------------------------
 def add_electrode_structure_ids(nwbfile, s3_cache: str = S3_CACHE_HTTPS) -> int:
     """Add numeric ``ecephys_structure_id`` to the electrodes table from ``channels.csv``.
@@ -180,11 +215,9 @@ def add_electrode_structure_ids(nwbfile, s3_cache: str = S3_CACHE_HTTPS) -> int:
         warnings.warn("electrodes already has 'ecephys_structure_id'; skipping.")
         return 0
 
-    url = f"{s3_cache}/channels.csv"
-    print(f"Loading channel structure ids from {url} ...")
-    channels = pd.read_csv(url).set_index("id")
+    channels = _load_channels(s3_cache)
     if "ecephys_structure_id" not in channels.columns:
-        raise RuntimeError(f"'ecephys_structure_id' column missing from {url}.")
+        raise RuntimeError(f"'ecephys_structure_id' column missing from {s3_cache}/channels.csv.")
 
     electrode_ids = np.asarray(nwbfile.electrodes.id[:])
     structure_id = pd.to_numeric(
@@ -201,4 +234,206 @@ def add_electrode_structure_ids(nwbfile, s3_cache: str = S3_CACHE_HTTPS) -> int:
         data=structure_id,
     )
     print(f"  set ecephys_structure_id for {n_known}/{len(electrode_ids)} electrodes.")
+    return n_known
+
+
+# --- units: CCF coordinates + brain structure --------------------------------------------------
+# Numeric per-unit columns copied from the unit's peak channel, with descriptions. This mirrors the
+# AllenSDK units table, which adds these by merging units to channels on peak_channel_id
+# (EcephysSession._build_units_table). Coordinates and the numeric structure id are floats (NaN
+# where the peak channel is out of brain / unregistered); the structure acronym is handled
+# separately as a string column.
+_UNIT_CCF_NUMERIC_COLUMNS = {
+    "anterior_posterior_ccf_coordinate": (
+        "Anterior-posterior position of this unit's peak channel in the Allen CCFv3 (microns); "
+        "NaN if the channel is out of brain or unregistered."
+    ),
+    "dorsal_ventral_ccf_coordinate": (
+        "Dorsal-ventral position of this unit's peak channel in the Allen CCFv3 (microns); "
+        "NaN if the channel is out of brain or unregistered."
+    ),
+    "left_right_ccf_coordinate": (
+        "Left-right position of this unit's peak channel in the Allen CCFv3 (microns); "
+        "NaN if the channel is out of brain or unregistered."
+    ),
+    "ecephys_structure_id": (
+        "Allen CCFv3 structure ID of the brain region containing this unit's peak channel "
+        "(numeric counterpart of the 'ecephys_structure_acronym'); NaN if the channel is out of "
+        "brain or unassigned."
+    ),
+}
+_UNIT_STRUCTURE_ACRONYM_COLUMN = "ecephys_structure_acronym"
+
+# On-probe geometry columns copied from the unit's peak channel (independent of CCF registration:
+# a channel always has a probe position even when it is not registered to the CCF). These are the
+# channel-derived columns the AllenSDK units table exposes beyond the CCF coordinates/structure.
+# Stored as float so an unmatched peak channel (absent from channels.csv) reads as NaN.
+_UNIT_CHANNEL_GEOMETRY_COLUMNS = {
+    "probe_horizontal_position": (
+        "Horizontal (across-probe) position (microns) of this unit's peak channel."
+    ),
+    "probe_vertical_position": (
+        "Distance (microns) from the probe tip to this unit's peak channel along the probe."
+    ),
+    "ecephys_probe_id": (
+        "Identifier of the Neuropixels probe that recorded this unit (the probe of its peak "
+        "channel)."
+    ),
+}
+
+# channels.csv marks a channel that was never registered to the CCF with -1000 on all three axes
+# (a non-physical sentinel, not NaN). AllenSDK's two products disagree on this and it does no
+# conversion of its own: the warehouse/CSV path (EcephysProjectCache.get_units/get_channels) exposes
+# -1000, while the NWB path (EcephysSession.units, via Channels.from_nwb reading the electrodes'
+# x/y/z) exposes NaN -- verified by streaming the source NWBs (session 760693773 unregistered -> NaN,
+# session 719161530 registered -> real coords matching the CSV). We map the sentinel to NaN so the
+# per-unit coordinates match the NWB path *and* the electrodes table in this same Zarr (which
+# inherits the NWB's NaN), rather than storing -1000, which would contradict the in-file electrodes
+# and let a downstream consumer plot -1000 as a real location. The numeric structure id / acronym are
+# independent of this sentinel (a channel can be -1000 yet still carry a coarse structure like
+# 'grey') and come through as NaN / "" on their own.
+_CCF_COORD_COLUMNS = (
+    "anterior_posterior_ccf_coordinate",
+    "dorsal_ventral_ccf_coordinate",
+    "left_right_ccf_coordinate",
+)
+_CCF_MISSING_SENTINEL = -1000
+
+
+def add_unit_channel_columns(nwbfile, s3_cache: str = S3_CACHE_HTTPS) -> int:
+    """Add per-unit peak-channel columns to ``nwbfile.units`` from ``channels.csv``.
+
+    The source NWB units table carries only ``peak_channel_id``; the CCF coordinates, brain
+    structure and on-probe geometry live on the channels/electrodes. This reproduces AllenSDK's
+    units table (``EcephysSession._build_units_table`` merges units to channels on
+    ``peak_channel_id``) by copying, from the published ``channels.csv``, each unit's peak-channel
+    CCF coordinates, numeric structure id + structure acronym, and probe geometry
+    (``probe_horizontal_position``, ``probe_vertical_position``, ``ecephys_probe_id``) so the units
+    table carries the same channel-derived columns AllenSDK returns. Numeric columns are floats (NaN
+    where the peak channel is out of brain / unregistered, or where the channel is absent from
+    channels.csv); the acronym is a string ("" where unassigned). Returns the number of units that
+    matched a channel row. Raises if the join key is missing or matches nothing (which would
+    indicate a regression).
+    """
+    if nwbfile.units is None:
+        return 0
+    if "peak_channel_id" not in nwbfile.units.colnames:
+        raise RuntimeError(
+            "units table has no 'peak_channel_id' column; cannot join channel columns from "
+            "channels.csv."
+        )
+
+    channels = _load_channels(s3_cache)
+    expected = (*_UNIT_CCF_NUMERIC_COLUMNS, _UNIT_STRUCTURE_ACRONYM_COLUMN,
+                *_UNIT_CHANNEL_GEOMETRY_COLUMNS)
+    missing = [c for c in expected if c not in channels.columns]
+    if missing:
+        raise RuntimeError(f"channels.csv is missing expected column(s): {missing}.")
+
+    # peak_channel_id is the channels.csv index (channel id); keep its integer dtype so reindex
+    # matches by value. Channels for every probe in the session are present in the file, so an
+    # unmatched id yields an all-NaN row (unit filtered out of brain / not registered).
+    peak_channel_id = np.asarray(nwbfile.units["peak_channel_id"].data[:])
+    aligned = channels.reindex(peak_channel_id)
+    n_matched = int(aligned.notna().any(axis=1).sum())
+    if n_matched == 0:
+        raise RuntimeError(
+            f"No units matched a channel row when joining on peak_channel_id "
+            f"(checked {len(peak_channel_id)} units against {s3_cache}/channels.csv); "
+            f"join key may be wrong."
+        )
+    print(
+        f"  matched {n_matched}/{len(peak_channel_id)} units to their peak channel "
+        f"({len(peak_channel_id) - n_matched} units get NaN CCF positions)."
+    )
+
+    # Coordinates as float, with the all-axes -1000 "not registered to CCF" sentinel mapped to NaN.
+    coords = aligned[list(_CCF_COORD_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+    unregistered = (coords == _CCF_MISSING_SENTINEL).all(axis=1)
+    coords[unregistered] = np.nan
+    numeric = coords.assign(
+        ecephys_structure_id=pd.to_numeric(aligned["ecephys_structure_id"], errors="coerce")
+    )
+
+    existing = set(nwbfile.units.colnames)
+    added = 0
+    for col, description in _UNIT_CCF_NUMERIC_COLUMNS.items():
+        if col in existing:
+            warnings.warn(f"units already has a column named {col!r}; skipping unit CCF position.")
+            continue
+        data = numeric[col].to_numpy(dtype=float)
+        nwbfile.units.add_column(name=col, description=description + _CHANNELS_PROVENANCE, data=data)
+        added += 1
+
+    if _UNIT_STRUCTURE_ACRONYM_COLUMN in existing:
+        warnings.warn(
+            f"units already has a column named {_UNIT_STRUCTURE_ACRONYM_COLUMN!r}; skipping."
+        )
+    else:
+        acronym = aligned[_UNIT_STRUCTURE_ACRONYM_COLUMN].fillna("").astype(str).to_numpy()
+        nwbfile.units.add_column(
+            name=_UNIT_STRUCTURE_ACRONYM_COLUMN,
+            description=(
+                "Acronym of the Allen CCFv3 brain structure containing this unit's peak channel "
+                "(the unit's recorded location); empty if the channel is out of brain or "
+                "unassigned." + _CHANNELS_PROVENANCE
+            ),
+            data=acronym,
+        )
+        added += 1
+
+    # On-probe geometry of the peak channel (probe id + position). Not subject to the CCF
+    # sentinel: a channel keeps its probe position even when unregistered to the CCF, so these are
+    # read straight from the aligned channel row (NaN only where the channel is absent entirely).
+    for col, description in _UNIT_CHANNEL_GEOMETRY_COLUMNS.items():
+        if col in existing:
+            warnings.warn(f"units already has a column named {col!r}; skipping unit probe geometry.")
+            continue
+        data = pd.to_numeric(aligned[col], errors="coerce").to_numpy(dtype=float)
+        nwbfile.units.add_column(name=col, description=description + _CHANNELS_PROVENANCE, data=data)
+        added += 1
+    print(f"  added {added} unit channel-derived columns to the units table.")
+    return n_matched
+
+
+def replace_electrode_z_with_ccf_left_right(nwbfile, s3_cache: str = S3_CACHE_HTTPS) -> int:
+    """Overwrite the electrodes table ``z`` column with the CCF left-right coordinate.
+
+    The source Visual Coding Neuropixels NWBs have a packaging error in which the electrodes table
+    ``z`` column duplicates ``y`` (both hold the dorsal-ventral CCF coordinate) instead of the
+    left-right (medial-lateral) coordinate. This overwrites ``z`` with the true
+    ``left_right_ccf_coordinate`` from the published ``channels.csv`` (joined on electrode id ==
+    channel id), mapping the ``-1000`` "not registered to CCF" sentinel to NaN so unregistered
+    channels read as NaN -- matching the NWB's NaN for ``x``/``y`` and the per-unit CCF columns in
+    this same file. Electrodes absent from channels.csv also receive NaN. Returns the number of
+    electrodes assigned a finite left-right coordinate.
+    """
+    if nwbfile.electrodes is None:
+        return 0
+    channels = _load_channels(s3_cache)
+    if "left_right_ccf_coordinate" not in channels.columns:
+        raise RuntimeError(
+            f"'left_right_ccf_coordinate' column missing from {s3_cache}/channels.csv."
+        )
+
+    electrode_ids = np.asarray(nwbfile.electrodes.id[:])
+    left_right = pd.to_numeric(
+        channels.reindex(electrode_ids)["left_right_ccf_coordinate"], errors="coerce"
+    ).to_numpy(dtype=float)
+    left_right[left_right == _CCF_MISSING_SENTINEL] = np.nan
+    n_known = int(np.isfinite(left_right).sum())
+
+    # WARNING: overwrite the existing VectorData values in place (same workaround as
+    # fix_vector_index_dtypes); validation is performed afterwards on the exported Zarr.
+    nwbfile.electrodes["z"]._Data__data = left_right
+    nwbfile.electrodes["z"].fields["description"] = (
+        "Left-right (medial-lateral) position of this channel in the Allen CCFv3 (microns); NaN if "
+        "the channel is out of brain or unregistered. Overwritten from the Allen Brain Observatory "
+        "Neuropixels channels.csv to correct a packaging error in the source NWB, in which this "
+        "column duplicated the dorsal-ventral coordinate ('y')."
+    )
+    print(
+        f"  replaced electrodes 'z' with left_right_ccf_coordinate for "
+        f"{n_known}/{len(electrode_ids)} electrodes (rest NaN)."
+    )
     return n_known
