@@ -250,16 +250,14 @@ def convert_session_to_zarr(
             print("Fixing VectorIndex dtypes ...")
             fix_vector_index_dtypes(nwbfile)
 
-            # NOTE: The original NWB HDF5 files for Visual Coding - Neuropixels use NWB schema 2.2.0
+            # NOTE: The original NWB HDF5 files for Visual Coding - Neuropixels use NWB schema 2.2.2,
             # where the "filtering" column (VectorData dataset) of the electrodes table is specified
             # as a float32 dtype. However, the dataset in the file contains string values. This means
-            # the original NWB HDF5 file is invalid and the current pynwb validator raises
-            # this as a validation error. The earlier version of the validator did not catch this 
-            # validation error. In NWB schema 2.4.0, the "filtering" column was 
-            # updated to be a variable-length string dtype. When exporting the original NWB file to 
-            # Zarr using NWBZarrIO and PyNWB 3.1.2 which uses NWB schema 2.9.0, the "filtering" 
-            # column is read as a string dataset and written to Zarr as a string dataset without error
-            # or loss of data, so no special handling is needed here.
+            # the original NWB HDF5 file is technically invalid: the current pynwb validator raises
+            # this as a validation error (older validators did not catch it). NWB schema 2.4.0 later
+            # redefined the "filtering" column as a variable-length string dtype. On export to Zarr
+            # via NWBZarrIO, the "filtering" column is read and written as a string dataset without
+            # error or loss of data, so no special handling is needed here.
 
             # Export to Zarr
             print(f"Exporting to Zarr file {zarr_path} ...")

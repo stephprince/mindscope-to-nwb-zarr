@@ -13,9 +13,8 @@ session (its behavior_session_id appears in ecephys_sessions.csv) is processed a
 (visual_behavior_ephys/metadata_generation.py) makes exactly this choice from a mounted S3
 bucket; locally we stream instead and drive the same production generator + fetch functions.
 
-Because visual_behavior_ephys has no instrument module yet, the metadata set is four files
-(data_description / subject / acquisition / procedures); instrument.json is intentionally
-not expected. subject/procedures are fail-loud: an unreachable metadata service or an
+The metadata set is five files (data_description / subject / acquisition / procedures /
+instrument). subject/procedures are fail-loud: an unreachable metadata service or an
 NWB/LIMS disagreement raises, which the retry loop / completeness gate surface as a FAILED
 session rather than silently writing partial output.
 

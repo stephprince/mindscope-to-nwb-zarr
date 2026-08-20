@@ -1,6 +1,6 @@
 # mindscope-to-nwb-zarr
 
-This repository is set up as a Code Ocean capsule to convert Mindscope NWB files from the HDF5 format to Zarr format, extract AIND Metadata JSON files, and document changes made during the conversion process.
+This repository is set up as a Code Ocean capsule to convert Mindscope NWB files from the HDF5 format to Zarr format and to document changes made during the conversion process. The AIND metadata JSON files are **generated locally** — not in the capsule — because the AIND metadata service is only reachable on the Allen VPN, which Code Ocean cannot access. The generators bundle each session's metadata into a per-session zip; those zips are uploaded as Code Ocean data assets that become the **inputs** to the Zarr conversion pipelines (one zip per parallel job). See [Running on Code Ocean](#running-on-code-ocean) and [AIND Metadata Extraction](#aind-metadata-extraction).
 
 ## Supported Datasets
 
@@ -15,13 +15,12 @@ This repository is set up as a Code Ocean capsule to convert Mindscope NWB files
 
 ```bash
 cd code
-uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>" --metadata_only False
+uv run python run_capsule.py --dataset "<dataset_name>" --results_dir "<results_folder>"
 ```
 
 **Parameters:**
 - `--dataset`: One of: `"Visual Behavior Ephys"`, `"Visual Behavior Ophys"`, `"Visual Coding Ephys"`, `"Visual Coding Ophys"` (case-insensitive)
-- `--results_dir`: Path to output folder for converted Zarr files and metadata (default: `../results/`)
-- `--metadata_only`: Set to `True` to generate only AIND metadata JSON files (no Zarr conversion)
+- `--results_dir`: Path to output folder for the converted Zarr store and the unzipped per-session metadata (default: `../results/`)
 
 **Example:**
 ```bash
@@ -30,6 +29,8 @@ uv run python run_capsule.py --dataset "Visual Coding Ophys" --results_dir "./re
 ```
 
 **Notes:**
+- The conversion is **metadata-zip-driven**, not stand-alone: `run_capsule.py` converts whichever per-session AIND metadata zip is mounted at `data/<dataset>-metadata-only/` (it reads the session id from the zip's `data_description.json`, downloads that session's source NWB(s), converts, and writes the Zarr next to the metadata). Generate the zips first with `scripts/run_all_*.py --zip` (see [AIND Metadata Extraction](#aind-metadata-extraction)) and place one under `data/<dataset>-metadata-only/`. There is **no `--metadata_only` flag** — AIND metadata generation is a separate local step (the `run_all_*.py` scripts), not a capsule mode.
+- **`run_capsule.py` empties `--results_dir` on startup** (it deletes every file/subfolder there before converting), so point it at a dedicated output folder — not a directory holding anything you want to keep.
 - This command will create a virtual environment in `code/.venv` and a `uv.lock` file if they don't exist.
 - Windows has a 260-character path limit which may cause issues with Zarr's nested directory structure. Enable long paths in Windows or use a shorter results path.
 - Most datasets require S3 access to the source data. Visual Coding Ophys streams directly from DANDI.
@@ -107,7 +108,11 @@ mindscope-to-nwb-zarr/
 │   │   │   ├── visual_coding_ephys/
 │   │   │   └── visual_coding_ophys/
 │   │   └── pynwb_utils.py                # NWB utilities
-│   └── scripts/                          # Utility scripts
+│   ├── scripts/                          # Utility scripts
+│   ├── ndx-aibs-ecephys/                 # In-repo NWB extensions (namespace + spec)
+│   ├── ndx-aibs-stimulus-template/       #   loaded during conversion
+│   ├── ndx-aibs-visual-coding-2p/
+│   └── ndx-ellipse-eye-tracking/
 ├── data/                                 # Input files (git-ignored)
 ├── notebooks/                            # Usage examples
 └── environment/                          # Code Ocean environment
@@ -122,6 +127,9 @@ mindscope-to-nwb-zarr/
 | `scripts/get_mouse_ids_from_allensdk.py` | Download mouse ID metadata from AllensSDK |
 | `scripts/metadata_from_allensdk.py` | Extract metadata directly from AllensSDK |
 | `scripts/nwb_cached_specs_to_json.py` | Export NWB specification metadata to JSON |
+| `scripts/list_all_experiment_ids.py` | Write the sorted list of every Visual Coding 2P ophys experiment `id` (from `ophys_experiments.json`) to a CSV |
+| `scripts/extract_vc_ophys_static_gratings.py` | Cache the corrected Visual Coding 2P `static_gratings` stimulus tables via AllenSDK (one CSV per experiment), for the conversion's upstream-bug fix |
+| `scripts/shrink_zarr_for_sharing.py` | Shrink an NWB-Zarr for sharing by stripping large array chunk data while keeping the structural `.z*` files |
 | `scripts/run_all_vb_ophys.py` | Batch-generate AIND metadata for all Visual Behavior Ophys sessions (streams from S3; use ≤3 workers on a fresh cache) |
 | `scripts/run_all_vb_ephys.py` | Batch-generate AIND metadata for all Visual Behavior Neuropixels sessions (streams from S3; use ≤3 workers, ≤2 on low-RAM machines) |
 | `scripts/run_all_vc_ophys.py` | Batch-generate AIND metadata for all Visual Coding 2P ophys sessions (streams from DANDI; use ≤3 workers) |
@@ -135,22 +143,22 @@ mindscope-to-nwb-zarr/
 
 Each conversion:
 1. Reads the source HDF5 NWB file(s) for a session with `NWBHDF5IO`.
-2. Applies dataset-specific transformations (see the per-dataset subsections below): updates the NWB schema and extensions, converts deprecated stimulus templates to `Images` containers, adds missing descriptions from the technical white papers, combines multi-probe/multi-plane files, rechunks large arrays, and applies dataset-specific data fixes.
+2. Applies dataset-specific transformations (see the per-dataset subsections below): updates the NWB schema and extensions, normalizes how stimulus templates are stored (`Images` containers for Visual Behavior; stacked 3D `ImageSeries` for Visual Coding Ophys), adds missing descriptions from the technical white papers, combines multi-probe/multi-plane files, rechunks large arrays, and applies dataset-specific data fixes.
 3. Writes the result to Zarr with `NWBZarrIO`, producing `results/<session name>/<session name>.nwb.zarr`.
 4. Optionally validates the output with nwbinspector (writing `qc/<session>.inspector_report.txt`). **This step is currently disabled for live runs** (commented out in `run_capsule.py`); the `inspect_zarr_file` helper remains available for local validation.
 
 The per-dataset subsections below document the source data, every transformation, and all data caveats. (This content was previously split across per-dataset `CHANGELOG.md` files; it is now consolidated here so it is not missed.)
 
 ### All Datasets
-- **Schema and extension updates** — the NWB schema is updated to **2.9.0** (and HDMF Common to 1.8.0 where applicable), and the in-repo NWB extensions are updated to comply: `ndx-aibs-ecephys` 0.3.0, `ndx-aibs-stimulus-template` 0.2.0, `ndx-ellipse-eye-tracking` 0.2.0, and `ndx-aibs-visual-coding-2p` 0.1.0 (each used where the dataset requires it).
-- **Stimulus templates** — deprecated `StimulusTemplate`/`ImageSeries` templates are converted to modern `Images` containers with `GrayscaleImage` and `WarpedStimulusTemplateImage` objects, and `IndexSeries` references are updated to use `indexed_images` instead of `indexed_timeseries`.
+- **Schema and extension updates** — the NWB schema is updated to **2.10.0** (and HDMF Common to 1.9.0 where applicable — these track the pinned `pynwb` 4.1.0 / `hdmf` 6.1.0, which stamp the namespace version on export), and the in-repo NWB extensions are updated to comply: `ndx-aibs-ecephys` 0.3.0, `ndx-aibs-stimulus-template` 0.2.0, `ndx-ellipse-eye-tracking` 0.2.0, and `ndx-aibs-visual-coding-2p` 0.1.0 (each used where the dataset requires it).
+- **Stimulus templates** — for the **Visual Behavior** datasets, deprecated `StimulusTemplate`/`ImageSeries` templates are converted to modern `Images` containers with `GrayscaleImage` and `WarpedStimulusTemplateImage` objects, and `IndexSeries` references are updated to use `indexed_images` instead of `indexed_timeseries`. **Visual Coding Ophys is the exception:** its image templates are instead stored as single stacked 3D `ImageSeries` (indexed via the deprecated `indexed_timeseries`) to avoid tens of thousands of tiny Zarr files — see that subsection for the rationale and trade-off.
 - **Missing descriptions** — descriptions are added for unit metrics, trials-table columns, stimulus-presentation columns, and optogenetic-stimulation tables, sourced from the technical white papers.
 - **VectorIndex dtypes** — `VectorIndex` columns are converted to `uint64` per the NWB spec.
 
 ### Visual Behavior Ephys (conversion)
 **Source data** — HDF5 NWB files from `s3://visual-behavior-neuropixels-data` (`visual-behavior-neuropixels/behavior_ecephys_sessions` and `.../behavior_only_sessions`); session lists from `behavior_sessions.csv` / `ecephys_sessions.csv`. **3424 sessions** total. Behavior+ephys sessions have a base `ecephys_session_{id}.nwb` plus multiple `probe_{id}.nwb` (LFP + CSD) files; behavior-only sessions have a single `behavior_session_{id}.nwb`.
 
-**Transformations** (schema 2.9.0 from 2.6.0-alpha)
+**Transformations** (schema 2.10.0 from 2.6.0-alpha)
 - Combined the base session file with its probe files into a single Zarr output.
 - Rechunked LFP data to `(500000, 8)` with gzip level 9 compression (~10 MB chunks) for more reliable writes to S3 from a Code Ocean pipeline.
 - Set the units-table description to note the units were identified by Kilosort2 spike sorting.
@@ -162,15 +170,15 @@ The per-dataset subsections below document the source data, every transformation
 
 **Run model.** Like VBN and Visual Coding, the conversion is **metadata-zip-driven**: each Code Ocean job mounts one per-session metadata zip from the `visual-behavior-ophys-metadata-only` data asset (produced by `run_all_vb_ophys.py --zip`), unzips it, reads the `behavior_session_id` from `data_description.json`, looks up the session kind and per-plane experiment ids in `behavior_session_table.csv` (from S3), downloads the NWB(s), and writes `results/<session name>/<session name>.nwb.zarr` next to the metadata. `run_conversion.py`'s `TEST_ONLY_ZIP_NAME` gates a single-session validation run (`None` in production).
 
-**Transformations** (schema 2.9.0 from 2.6.0-alpha)
-- Combined multiscope sessions (multiple single-plane NWB files) into a single Zarr output, renaming per-plane objects with a `_plane_X` suffix (`imaging_plane_1`, `ophys_plane_1`, `OphysBehaviorMetadata` → `_plane_1`, etc.). `X` is 1-indexed by the experiment order in `behavior_session_table.csv`.
+**Transformations** (schema 2.10.0 from 2.6.0-alpha)
+- Combined multiscope sessions (multiple single-plane NWB files) into a single Zarr output, renaming per-plane objects with a `_plane_X` suffix: the imaging plane, the `ophys` processing module, and the `metadata` `LabMetaData` object (neurodata type `OphysBehaviorMetadata`) become `imaging_plane_X` / `ophys_plane_X` / `metadata_plane_X`. `X` is 1-indexed by the experiment order in `behavior_session_table.csv`.
   - Objects duplicated across the per-plane files (stimulus table, trials, licking, …) are stored once, retaining the NWB object ID from the first experiment listed for the session.
 - Set `NWBFile.session_id` = `NWBFile.identifier` so the DANDI session name more closely resembles the original HDF5 file name.
 
 ### Visual Coding Ephys (conversion)
 **Source data** — HDF5 NWB files from `s3://allen-brain-observatory` under `visual-coding-neuropixels/ecephys-cache/`; session list from `.../sessions.csv`. **58 sessions** total. Each session has a base `session_{id}.nwb` (units, electrodes, session data) plus multiple `probe_{id}_lfp.nwb` files (LFP + CSD per probe).
 
-**Transformations** (schema 2.9.0 from 2.2.2, HDMF Common 1.8.0 from 1.1.3; extension ndx-aibs-ecephys 0.3.0)
+**Transformations** (schema 2.10.0 from 2.2.2, HDMF Common 1.9.0 from 1.1.3; extension ndx-aibs-ecephys 0.3.0)
 - Combined the base session file with its probe LFP files into a single Zarr output.
 - Rechunked LFP data to `(500000, 8)` with gzip level 9 compression (~10 MB chunks).
 - Added CSD data from the probe files into a newly created `ecephys` processing module under unique names `probe_{probe_id}_ecephys_csd`.
@@ -195,12 +203,13 @@ The per-dataset subsections below document the source data, every transformation
 ### Visual Coding Ophys (conversion)
 **Source data** — HDF5 NWB 2.0 files from the DANDI Archive, dandiset **000728**, version 0.240827.1809 (themselves converted from the original NWB 1.0 Brain Observatory files by [catalystneuro/visual-coding-to-nwb-v2](https://github.com/catalystneuro/visual-coding-to-nwb-v2) in Aug 2024). **1518 sessions**, each with two HDF5 files: one with session metadata + processed 2p data, one with raw 2p imaging. Experiment metadata comes from `s3://allen-brain-observatory/visual-coding-2p/ophys_experiments.json`.
 
-**Transformations** (schema 2.9.0 from 2.7.0; extension ndx-aibs-visual-coding-2p 0.1.0)
+**Transformations** (schema 2.10.0 from 2.7.0; extension ndx-aibs-visual-coding-2p 0.1.0)
 - Combined the processed NWB file (metadata + processed 2p data) with the raw NWB file (raw 2p imaging) into a single Zarr output. **TEMPORARY: raw 2p data is currently excluded from the export** — the raw download and the raw-acquisition merge are commented out in `run_conversion.py` (see the matching `NOTE` markers) to be re-enabled later; the exported Zarr presently contains only the processed data.
 - Changed the subject ID to the external donor name (6-digit `external_donor_name`) from the experiment metadata; files are named `sub-<donor_name>_ses-<experiment_id>_behavior+image+ophys.zarr`.
 - Added the `ndx-aibs-visual-coding-2p` extension and an `OphysExperimentMetadata` (`LabMetaData`) object carrying AllenSDK experiment metadata absent from the source NWBs.
-- Converted natural-movie `ImageSeries` templates (which had NaN rate/starting time) to `Images` containers of `GrayscaleImage` frames, updating the presentation `IndexSeries` to reference them.
-- Added `order_of_images` to existing `Images` containers (natural scenes, locally sparse noise), ordered by numeric suffix.
+- **Stored every image stimulus template as a single stacked 3D `ImageSeries`** rather than as an `Images` container holding one `Image` per frame. In the DANDI (v2) source, `locally_sparse_noise` (+ `_4deg`/`_8deg`, thousands of frames) and `natural_scenes` (~118 frames) are `Images` containers, and on the Zarr backend each `Image` becomes its own array — the `locally_sparse_noise` template alone produced **~27,000 tiny files**, dominating the store (the natural-movie templates are already `ImageSeries` in the source). `convert_images_stimulus_templates_to_imageseries` (`run_conversion.py`) restacks each such container into one `ImageSeries` of shape `(num_frames, height, width)` — frames ordered by the numeric suffix of the `Image` names — and repoints the presentation `IndexSeries` from `indexed_images` to `indexed_timeseries`; the movie templates pass through unchanged. This collapses a single store from **~32k files to ~1.5–2k**.
+  - The template `ImageSeries` keep `starting_time=NaN`/`rate=NaN` (the real presentation times live on the `IndexSeries`); this is nwbinspector-clean on timing, whereas `rate=0.0` would raise a CRITICAL `check_rate_is_not_zero`.
+  - **Trade-off:** `IndexSeries.indexed_timeseries` is deprecated in favor of `indexed_images`, so nwbinspector reports a **non-blocking** `check_index_series_points_to_image` BEST_PRACTICE_VIOLATION for these presentations — the same one the source movie templates already carry (and which the published DANDI:000728 ships). This is deliberate: the NWB schema currently offers no way to index into a single 3D image stack, so efficient storage (one array) and the `indexed_images` best practice (thousands of arrays) are mutually exclusive. Because constructing a new `IndexSeries` with `indexed_timeseries` raises in pynwb 4.1.0, the link is set by mutating the read object's fields in place. This is an interim workaround pending the proposed `ImageStack` type ([nwb-schema#711](https://github.com/NeurodataWithoutBorders/nwb-schema/issues/711)), which would make efficient stacked storage the best-practice path.
 - Rechunked the raw 2p `MotionCorrectedTwoPhotonSeries` to chunk shape `(75, 512, width)` to reduce chunk count for cloud storage (S3 COPY-rate) limits.
 
 **Data caveats / session subsets** — three fixes below repair or augment the source data, each on a subset of sessions:
@@ -231,7 +240,7 @@ The per-dataset subsections below document the source data, every transformation
    - running -> behavior
    - stimulus -> behavior (?)
 - Consider reorganizing eye tracking rig metadata to be under the `general` group or a subtype of `Device` instead of under a processing module.
-- Work with the NWB team to evaluate the efficiency and usability of storing many image objects in the Images container (e.g., natural movies, locally sparse noise) in Zarr vs storing them as a stacked array. This is particularly slow on write.
+- Work with the NWB team on **efficient indexed image stacks**. Storing many `Image` objects in an `Images` container is slow to write and explodes the Zarr file count (each image is its own array). Visual Coding Ophys now sidesteps this by storing image templates as a single stacked 3D `ImageSeries` indexed by the **deprecated** `IndexSeries.indexed_timeseries`, while the Visual Behavior datasets still use `Images` containers. The clean fix is the proposed **`ImageStack`** type ([nwb-schema#711](https://github.com/NeurodataWithoutBorders/nwb-schema/issues/711)) — a single stacked array (3D grayscale / 4D color) with a new `IndexSeries.indexed_image_stack` link and optional per-image `DynamicTable` metadata — so efficient storage and current best practice are no longer mutually exclusive. The original AllenSDK v1 Brain Observatory files stored these templates as single 3D `image_stack` datasets, a concrete motivating example.
 - Add explicit link from stimulus presentation and trials tables to the stimulus template images in the new `Images` container instead of relying on name/indices matching.
 
 ### Visual Behavior Ophys

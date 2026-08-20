@@ -167,7 +167,15 @@ def _open_session_nwbs(row: pd.Series, oet: pd.DataFrame):
     for ophys_experiment_id in all_ophys_exp_ids:
         exp_info = oet.query("ophys_experiment_id == @ophys_experiment_id")
         if len(exp_info) != 1:
-            continue  # skip planes without a unique experiment-table row
+            # Fail loud rather than silently dropping a plane: behavior_session_table lists only
+            # released (QC-passing) experiments, so every id must resolve to exactly one
+            # ophys_experiment_table row (verified across all sessions). A miss means the
+            # reference tables are inconsistent, not a QC drop.
+            raise RuntimeError(
+                f"behavior_session {int(row['behavior_session_id'])}: ophys_experiment_id "
+                f"{ophys_experiment_id} has {len(exp_info)} rows in ophys_experiment_table "
+                f"(expected exactly 1)"
+            )
         nwbfile, io, h5_file, file_handle = stream_nwb_from_s3(
             ophys_experiment_nwb_url(ophys_experiment_id)
         )

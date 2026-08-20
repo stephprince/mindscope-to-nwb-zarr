@@ -188,8 +188,15 @@ def generate_single_session_metadata(
             for ophys_experiment_id in all_ophys_exp_ids:
                 exp_info = ophys_experiment_table.query("ophys_experiment_id == @ophys_experiment_id")
                 if len(exp_info) != 1:
-                    print(f"  Could not find unique ophys_experiment_table entry for {ophys_experiment_id}. Skipping plane.")
-                    continue
+                    # Fail loud rather than silently dropping a plane: behavior_session_table
+                    # lists only released (QC-passing) experiments, so every id must resolve to
+                    # exactly one ophys_experiment_table row (verified across all sessions). A
+                    # miss means the reference tables are inconsistent, not a QC drop.
+                    raise ValueError(
+                        f"behavior_session {behavior_session_id}: ophys_experiment_id "
+                        f"{ophys_experiment_id} has {len(exp_info)} rows in ophys_experiment_table "
+                        f"(expected exactly 1)"
+                    )
                 print(f"  Streaming ophys experiment {ophys_experiment_id} from S3 ...")
                 nwbfile, io, h5_file, file_handle = stream_nwb_from_s3(
                     ophys_experiment_nwb_url(ophys_experiment_id)
