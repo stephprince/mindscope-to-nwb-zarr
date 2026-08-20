@@ -28,11 +28,11 @@ from pathlib import Path
 
 from hdmf_zarr import ZarrDataIO
 from hdmf_zarr.nwb import NWBZarrIO
+import numpy as np
 import pandas as pd
 from pynwb import NWBHDF5IO, NWBFile, get_class, load_namespaces
-from pynwb.base import ImageReferences
 from pynwb.epoch import TimeIntervals
-from pynwb.image import GrayscaleImage, Images
+from pynwb.image import Images, ImageSeries, IndexSeries
 import quilt3 as q3
 
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import H5DatasetDataChunkIterator
@@ -49,6 +49,9 @@ METADATA_ZIP_DIR = root_dir.parent / "data" / "visual-coding-ophys-metadata-only
 # other job is a no-op (writes an empty placeholder, converts nothing), so the pipeline can be
 # validated on a single session without spending compute on all 1518. Set to None for
 # production, where every job converts its mounted zip.
+# (For a single-session validation of the stimulus-template -> ImageSeries change, set this to an
+# LSN session's zip, e.g. three_session_C2 experiment 566752133 / donor 283147, whose exact zip
+# name depends on the current metadata data asset's packaging timestamp.)
 TEST_ONLY_ZIP_NAME = None
 
 S3_BUCKET = "s3://allen-brain-observatory"
@@ -189,139 +192,97 @@ def download_visual_coding_ophys_files_from_dandi(
     return (processed_download_path, raw_download_path)
 
 
-def add_order_of_images_to_existing_images_containers(nwbfile: NWBFile) -> None:
-    """Add order_of_images to existing Images containers that don't have it.
+def convert_images_stimulus_templates_to_imageseries(nwbfile: NWBFile) -> None:
+    """Restack Images-based stimulus templates into a single 3D ImageSeries.
 
-    Some stimulus templates (e.g., natural_scenes_template, locally_sparse_noise_template)
-    are already stored as Images containers but may be missing the order_of_images field.
-    This function adds order_of_images based on sorting image names by the numeric suffix.
+    In the input (DANDI 000728) files, some stimulus templates are stored as an
+    Images container holding one Image per frame: locally_sparse_noise_template
+    (plus its _4deg/_8deg variants) with thousands of frames, and
+    natural_scenes_template with ~118. On the Zarr backend every Image becomes its
+    own array, so a single such container produces tens of thousands of tiny files.
+    This function restacks each Images container into one 3D ImageSeries of shape
+    (num_frames, height, width) -- the representation the natural movie templates
+    already use in the input files -- and repoints the presentation IndexSeries from
+    ``indexed_images`` to ``indexed_timeseries``.
 
-    For example, images named "NaturalScene1", "NaturalScene2", ..., "NaturalScene117"
-    will be ordered numerically (1, 2, ..., 117).
+    Frames are ordered by the numeric suffix of the Image names (e.g.
+    "LocallySparseImage0", "LocallySparseImage1", ...), i.e. the order the Images
+    container's order_of_images would otherwise encode.
 
-    Args:
-        nwbfile: The NWBFile object to modify.
-    Returns:
-        None. The NWBFile is modified in place.
-    """
-    for template_name, stimulus_template in nwbfile.stimulus_template.items():
-        # Only process Images containers
-        if not isinstance(stimulus_template, Images):
-            continue
+    Natural movie templates are already stored as ImageSeries in the input and are
+    left untouched (only Images containers are processed).
 
-        # Skip if order_of_images already exists
-        if stimulus_template.order_of_images is not None:
-            continue
-
-        print(f"Adding order_of_images to {template_name} ...")
-
-        # Get all image names and sort by numeric suffix
-        image_names = list(stimulus_template.images.keys())
-
-        def extract_number(name: str) -> int:
-            """Extract the numeric suffix from an image name."""
-            match = re.search(r'(\d+)$', name)
-            if match:
-                return int(match.group(1))
-            return 0
-
-        # Sort image names by their numeric suffix
-        sorted_names = sorted(image_names, key=extract_number)
-
-        # Create ordered list of image references
-        ordered_images = [stimulus_template.images[name] for name in sorted_names]
-
-        # Add order_of_images to the Images container
-        order_of_images = ImageReferences(name="order_of_images", data=ordered_images)
-        stimulus_template.order_of_images = order_of_images
-
-
-def convert_natural_movie_template_imageseries_to_images(nwbfile: NWBFile) -> None:
-    """Update the natural movie stimulus template(s) in the NWB file to use an Images container.
-
-    In the original HDF5 versions of the data, stimulus template images, e.g., four
-    gratings or eight natural images, were stored in an NWB ImageSeries object where
-    the timestamps are NaN or starting time and sampling rate are NaN.
-    In the /stimulus/presentation group, a separate IndexSeries
-    object represents the times at which each image in the ImageSeries is displayed.
-    This approach of linking an IndexSeries to an ImageSeries with NaN timestamps is
-    deprecated. This function reorganizes the stimulus templates by changing the
-    ImageSeries to an ordered set of Image objects in an Images container, and
-    changing the IndexSeries to link to this Images container.
+    Timing: the ImageSeries stores ``starting_time=nan`` and ``rate=nan``; the
+    template has no meaningful time base and the real presentation times live on the
+    IndexSeries. This passes nwbinspector with no timing warnings -- note that
+    ``rate=0.0`` raises a CRITICAL check_rate_is_not_zero, and a real rate would
+    assert false timing.
 
     Args:
         nwbfile: The NWBFile object to modify.
     Returns:
         None. The NWBFile is modified in place.
     """
+    def extract_number(name: str) -> int:
+        """Extract the trailing integer from an image name (used to order frames)."""
+        match = re.search(r'(\d+)$', name)
+        return int(match.group(1)) if match else 0
 
-    # Define the natural movie templates to process
-    natural_movie_templates = [
-        ("natural_movie_one", "NaturalMovieOne"),
-        ("natural_movie_two", "NaturalMovieTwo"),
-        ("natural_movie_three", "NaturalMovieThree"),
+    # Movie templates already reference this device; reuse or create it for parity.
+    if "StimulusDisplay" in nwbfile.devices:
+        stimulus_device = nwbfile.devices["StimulusDisplay"]
+    else:
+        stimulus_device = nwbfile.create_device(name="StimulusDisplay")
+
+    # Snapshot the Images templates first, since we mutate stimulus_template below.
+    images_templates = [
+        (name, template)
+        for name, template in nwbfile.stimulus_template.items()
+        if isinstance(template, Images)
     ]
 
-    # Confirm at least one natural movie template exists
-    found_templates = [
-        name
-        for name, _ in natural_movie_templates
-        if name in nwbfile.stimulus_template
-    ]
-    assert found_templates, (
-        "Expected at least one natural movie stimulus template "
-        "(natural_movie_one, natural_movie_two, or natural_movie_three) "
-        "in NWBFile"
-    )
+    for template_name, images_template in images_templates:
+        # Order frames by numeric suffix and stack them into a single 3D array.
+        sorted_names = sorted(images_template.images.keys(), key=extract_number)
+        ordered_images = [images_template.images[name] for name in sorted_names]
+        stacked_data = np.stack([image.data[:] for image in ordered_images], axis=0)
 
-    for template_name, image_prefix in natural_movie_templates:
-        # Check if this natural movie template exists in the file
-        if template_name not in nwbfile.stimulus_template:
-            continue
+        # Find the presentation IndexSeries indexing this template before swapping it.
+        linked_presentations = [
+            stimulus
+            for stimulus in nwbfile.stimulus.values()
+            if isinstance(stimulus, IndexSeries) and stimulus.indexed_images is images_template
+        ]
 
-        stimulus_template = nwbfile.stimulus_template[template_name]
-        assert stimulus_template.__class__.__name__ == "ImageSeries", \
-            f"Expected stimulus_template '{template_name}' to be of type ImageSeries"
-
-        # Find the corresponding stimulus presentation IndexSeries
-        stimulus_name = f"{template_name}_stimulus"
-        assert stimulus_name in nwbfile.stimulus, \
-            f"Expected stimulus_presentation '{stimulus_name}' not found in NWBFile"
-        stimulus_presentation = nwbfile.stimulus[stimulus_name]
-        assert stimulus_presentation.__class__.__name__ == "IndexSeries", \
-            f"Expected stimulus_presentation '{stimulus_name}' to be of type IndexSeries"
-
-        # Create new Image objects for each frame in the stimulus template
-        # NOTE: This can take about 5 minutes for natural movie one with 900 frames
-        images = []
-        print(f"Converting {template_name} stimulus template frames to Images container ...")
-        for i in range(stimulus_template.data.shape[0]):
-            image_frame = GrayscaleImage(
-                name=f"{image_prefix}_{i}",
-                data=stimulus_template.data[i],
-                description="A single frame of a natural movie presented to the subject.",
-            )
-            images.append(image_frame)
-
-        # Create new Images container
-        images_container = Images(
-            name=stimulus_template.name,
-            description=stimulus_template.description,
-            images=images,
-            order_of_images=ImageReferences(name="order_of_images", data=images),
+        print(
+            f"Restacking {template_name} from {len(ordered_images)} Image objects "
+            f"into a single {stacked_data.shape} ImageSeries ..."
         )
 
-        # Remove old stimulus template
+        image_series = ImageSeries(
+            name=template_name,
+            description=images_template.description,
+            data=stacked_data,
+            unit="n.a.",
+            # No meaningful time base on the template; real times live on the
+            # IndexSeries. nan avoids the CRITICAL check_rate_is_not_zero that
+            # rate=0.0 would raise, without asserting a false rate.
+            starting_time=np.nan,
+            rate=np.nan,
+            device=stimulus_device,
+        )
+
+        # Replace the Images container with the ImageSeries under the same name.
         nwbfile.stimulus_template.pop(template_name)
+        nwbfile.add_stimulus_template(image_series)
 
-        # Add new stimulus template
-        nwbfile.add_stimulus_template(images_container)
-
-        # Update IndexSeries reference
-        # WARNING: This approach modifies an attribute that should not be
-        # able to be reset. Validation should always be performed afterwards.
-        stimulus_presentation.fields['indexed_timeseries'] = None
-        stimulus_presentation.fields['indexed_images'] = images_container
+        # Repoint each presentation from indexed_images to indexed_timeseries.
+        # WARNING: mutating these fields in place bypasses the deprecation guard that
+        # blocks constructing a new IndexSeries with indexed_timeseries. Validation
+        # should always be performed afterwards.
+        for presentation in linked_presentations:
+            presentation.fields['indexed_images'] = None
+            presentation.fields['indexed_timeseries'] = image_series
 
 
 def rebuild_static_gratings_from_cache(nwbfile: NWBFile, experiment_id: int) -> None:
@@ -520,12 +481,11 @@ def convert_visual_coding_ophys_hdf5_to_zarr(results_dir: Path, scratch_dir: Pat
         metadata = OphysExperimentMetadata(name="ophys_experiment_metadata", ophys_experiment_metadata=experiment_row.to_json())
         base_nwbfile.add_lab_meta_data(metadata)
 
-        # Change stimulus_template to Image objects in Images container
-        convert_natural_movie_template_imageseries_to_images(base_nwbfile)
-
-        # Add order_of_images to existing Images containers that don't have it
-        # (e.g., natural_scenes_template, locally_sparse_noise_template)
-        add_order_of_images_to_existing_images_containers(base_nwbfile)
+        # Restack the Images-based stimulus templates (locally_sparse_noise* and
+        # natural_scenes) into single 3D ImageSeries to avoid tens of thousands of
+        # tiny Zarr files. The natural movie templates are already ImageSeries in the
+        # input and pass through unchanged.
+        convert_images_stimulus_templates_to_imageseries(base_nwbfile)
 
         # Rebuild the static_gratings stimulus table from the AllenSDK-derived cache. The
         # DANDI (v2) file truncates it to 3 rows (upstream bug #49); this restores the full
