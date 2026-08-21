@@ -27,11 +27,15 @@ from mindscope_to_nwb_zarr.pynwb_utils import get_modalities, get_data_stream_en
 #
 # These are Allen LIMS linkage IDs / project descriptors not otherwise captured in the
 # metadata. Fields already represented elsewhere are intentionally excluded: mouse_id
-# (DataDescription.subject_id / subject.json), and targeted_structure and imaging_depth
-# (the acquisition's imaging plane config).
+# (DataDescription.subject_id / subject.json); targeted_structure and imaging_depth (the
+# acquisition's imaging plane config); and session_type (already the acquisition's
+# acquisition_type = nwbfile.session_description -- verified dataset-wide -- so tagging it here
+# would duplicate it, matching how the Visual Behavior Neuropixels pipeline omits it). Unlike
+# VBN, project_code is kept: it is a real per-session descriptor here (VisualBehavior /
+# VisualBehaviorTask1B / VisualBehaviorMultiscope / VisualBehaviorMultiscope4areasx2d), not the
+# constant project name.
 _TAG_COLUMNS = [
     "project_code",
-    "session_type",
     "ophys_session_id",
     "ophys_container_id",
     "behavior_session_id",

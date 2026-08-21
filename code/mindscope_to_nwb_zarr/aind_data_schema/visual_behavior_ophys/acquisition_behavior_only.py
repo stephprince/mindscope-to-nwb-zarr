@@ -39,14 +39,44 @@ from mindscope_to_nwb_zarr.aind_data_schema.utils import (
     get_total_reward_volume,
     get_individual_reward_volume,
     get_reward_volume_notes,
-    get_curriculum_status,
     get_ethics_review_id,
+    convert_intervals_to_visual_stimulus_epoch,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument import (
     REWARD_SPOUT_NAME,
     RUNNING_DISC_NAME,
     STIMULUS_MONITOR_NAME,
 )
+
+
+# Prior-experience descriptors of the change-detection task, recorded as stimulus parameters
+# on the epoch instead of being packed into the ``curriculum_status`` string -- mirroring the
+# Visual Behavior Neuropixels pipeline (see ``visual_behavior_ephys/acquisition.py``). Sourced
+# from the session table (behavior_session_table for behavior-only sessions,
+# ophys_experiment_table for ophys sessions; both carry these columns). ``image_set`` is
+# intentionally excluded -- it is already the ``VisualStimulation.stimulus_name`` -- so it is
+# not duplicated here.
+_TASK_EXPERIENCE_COLUMNS = [
+    "experience_level",
+    "prior_exposures_to_image_set",
+    "prior_exposures_to_omissions",
+    "prior_exposures_to_session_type",
+]
+
+
+def _clean_value(value):
+    """Coerce a session-table cell to a JSON-friendly scalar: None for missing/NaN, a plain
+    Python int for integer-valued numbers (numpy or float), otherwise the value itself.
+
+    Mirrors the identically named helper in the Visual Behavior Neuropixels pipeline.
+    """
+    if pd.isna(value):
+        return None
+    if hasattr(value, "item"):  # numpy scalar -> Python scalar
+        value = value.item()
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 def _parse_grating_orientations(control_descriptions: list) -> list[float]:
@@ -96,6 +126,14 @@ def get_visual_stimulation(nwbfile: NWBFile, session_info: pd.Series) -> VisualS
             stimulus_parameters["grating_orientations"] = _parse_grating_orientations(control_descriptions)
             stimulus_parameters["grating_orientation_unit"] = "degrees"
 
+    # The animal's prior-experience descriptors (experience_level, prior_exposures_*) are
+    # recorded as stimulus parameters rather than packed into the curriculum_status string,
+    # mirroring Visual Behavior Neuropixels (see _TASK_EXPERIENCE_COLUMNS). image_set is not
+    # repeated -- it is already this VisualStimulation's stimulus_name.
+    for column in _TASK_EXPERIENCE_COLUMNS:
+        if column in session_info.index:
+            stimulus_parameters[column] = _clean_value(session_info[column])
+
     # Convert any numpy types to native Python types for serialization
     for key, value in stimulus_parameters.items():
         if isinstance(value, (np.integer, np.floating, np.ndarray)):
@@ -137,6 +175,18 @@ def build_change_detection_stimulus_epoch(
     """
     visual_stimulation = get_visual_stimulation(nwbfile, session_info)
 
+    # The change-detection task uses static gratings in the early training stages
+    # (TRAINING_0/1/2, image_set == "gratings") and natural images thereafter, so name the
+    # epoch by the stimulus it actually used rather than hard-coding "natural images".
+    # image_set is the session table's authoritative label (and this VisualStimulation's
+    # stimulus_name); dataset-wide it agrees exactly with the NWB carrying a "grating" template
+    # / "grating_presentations" intervals table (gratings) vs a natural-images template.
+    stimulus_name = (
+        "Change detection gratings"
+        if session_info["image_set"] == "gratings"
+        else "Change detection natural images"
+    )
+
     # The trial start/stop times are seconds relative to the session start. The change
     # detection task spans from the earliest trial (or grating presentation, on early
     # gratings-stage sessions) to the latest.
@@ -154,7 +204,7 @@ def build_change_detection_stimulus_epoch(
     return StimulusEpoch(
         stimulus_start_time=session_start_time + timedelta(seconds=start_offset),
         stimulus_end_time=session_start_time + timedelta(seconds=stop_offset),
-        stimulus_name="Change detection natural images",
+        stimulus_name=stimulus_name,
         code=Code(
             url="None",      # stimulus code source not recorded (matches VBN / VC ephys)
             version="None",  # stimulus code version not recorded
@@ -165,9 +215,95 @@ def build_change_detection_stimulus_epoch(
         notes=None,
         active_devices=[STIMULUS_MONITOR_NAME],  # the stimulus monitor in the instrument
         configurations=list(),
-        training_protocol_name=session_info["session_type"],  # e.g., "TRAINING_0_gratings_autorewards_15min"
-        curriculum_status=get_curriculum_status(session_info),
+        # training_protocol_name is left empty (mirrors Visual Behavior Neuropixels): the schema
+        # expects it to name a protocol defined in the Procedures, but the Visual Behavior
+        # Procedures (surgeries/craniotomies from LIMS) define none. The session stage
+        # (session_type, e.g. "OPHYS_1_images_A") is still recorded as the acquisition_type.
+        training_protocol_name=None,
+        # curriculum_status is left empty: unlike VBN -- whose session_number is a continuous
+        # behavioral session count carrying information no other field has -- the Visual Behavior
+        # Ophys session_number is just the ophys-stage index (the N in "OPHYS_N"), which is
+        # already fully encoded in session_type / acquisition_type, so recording it here would
+        # be redundant. The animal's experience descriptors (experience_level, prior_exposures_*)
+        # are still carried as stimulus parameters (see get_visual_stimulation).
+        curriculum_status=None,
     )
+
+
+def _passive_epoch_kind(stimulus_name: str) -> str | None:
+    """Classify a presentation table's ``stimulus_name`` as a passive (non-task) block.
+
+    Returns ``"spontaneous"`` for the gray-screen blocks, ``"movie"`` for the final natural-movie
+    block, or ``None`` for the change-detection *task* table (natural images / gratings), which is
+    built separately by :func:`build_change_detection_stimulus_epoch`. These are the only stimulus
+    tables the Visual Behavior Ophys NWBs carry.
+    """
+    if stimulus_name == "spontaneous":
+        return "spontaneous"
+    if stimulus_name.startswith("natural_movie"):
+        return "movie"
+    return None
+
+
+def build_stimulus_epochs(
+    nwbfile: NWBFile, session_info: pd.Series, session_start_time: datetime
+) -> list[StimulusEpoch]:
+    """Build the chronological list of ``StimulusEpoch``s for a Visual Behavior Ophys session.
+
+    Every session has exactly one change-detection *task* block (natural images or gratings),
+    emitted with the full task/curriculum metadata by :func:`build_change_detection_stimulus_epoch`.
+    The habituation and imaging sessions (``OPHYS_*``) additionally record passive blocks -- the
+    pre/mid gray "spontaneous" screens and the final ``natural_movie_one`` block -- each carried in
+    its own presentation table with a ``stimulus_block`` column. Those are emitted as one epoch per
+    contiguous ``stimulus_block`` (spontaneous spans two: blocks 0 and 2), with **no** task/curriculum
+    metadata, mirroring the per-block passive epochs of the VBN / Visual Coding pipelines. Training
+    sessions have only the task block, so they yield the single change-detection epoch. The returned
+    list is sorted chronologically by start time (as the session unfolded: gray -> task -> gray -> movie).
+
+    Fails loud (raises) if a presentation table cannot be classified or if there is not exactly one
+    change-detection task table, so an unexpected NWB layout is surfaced rather than silently dropped.
+    """
+    epochs = [build_change_detection_stimulus_epoch(nwbfile, session_info, session_start_time)]
+
+    task_tables = 0
+    for table_key, table in nwbfile.intervals.items():
+        if table_key == "trials":
+            continue  # behavioral trials, not a stimulus-presentation table
+        df = table.to_dataframe()
+        names = df["stimulus_name"].dropna().unique().tolist() if "stimulus_name" in df.columns else []
+        if len(names) != 1:
+            raise ValueError(
+                f"Presentation table {table_key!r} has {len(names)} distinct stimulus_name value(s) "
+                f"({names}); expected exactly one to classify the block."
+            )
+        kind = _passive_epoch_kind(names[0])
+        if kind is None:
+            task_tables += 1  # the change-detection task block, already built above
+            continue
+        # One epoch per contiguous stimulus_block (the spontaneous table holds blocks 0 and 2).
+        blocks = df.groupby("stimulus_block", sort=True) if "stimulus_block" in df.columns else [(None, df)]
+        for _block_id, block_df in blocks:
+            epochs.append(
+                convert_intervals_to_visual_stimulus_epoch(
+                    stimulus_name=names[0].replace("_", " ").title(),  # "Spontaneous" / "Natural Movie One"
+                    table_key=table_key,
+                    intervals_table=block_df,
+                    nwbfile=nwbfile,
+                    session_info=None,  # passive block: no training_protocol_name / curriculum_status
+                    session_start_time=session_start_time,
+                    active_devices=[STIMULUS_MONITOR_NAME],  # the stimulus monitor in the instrument
+                )
+            )
+
+    if task_tables != 1:
+        raise ValueError(
+            f"Expected exactly one change-detection task presentation table, found {task_tables}."
+        )
+
+    # Chronological order (gray -> change-detection -> gray -> movie for imaging sessions);
+    # the passive blocks are built in table order, which is not time order.
+    epochs.sort(key=lambda epoch: epoch.stimulus_start_time)
+    return epochs
 
 
 def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisition:
@@ -217,6 +353,11 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
             )
         )
 
+    # One epoch per contiguous stimulus block, sorted chronologically (behavior-only training
+    # sessions have only the change-detection task block; habituation/imaging sessions also
+    # carry the gray "spontaneous" and final natural-movie blocks). See build_stimulus_epochs.
+    stimulus_epochs = build_stimulus_epochs(nwbfile, session_info, session_start_time)
+
     acquisition = Acquisition(
         subject_id=subject_id,
         acquisition_start_time=session_start_time,
@@ -248,9 +389,7 @@ def generate_acquisition(nwbfile: NWBFile, session_info: pd.Series) -> Acquisiti
             ),
         ],
         # TODO - handle different stimulus sets for the different training stages
-        stimulus_epochs=[
-            build_change_detection_stimulus_epoch(nwbfile, session_info, session_start_time),
-        ],
+        stimulus_epochs=stimulus_epochs,
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,

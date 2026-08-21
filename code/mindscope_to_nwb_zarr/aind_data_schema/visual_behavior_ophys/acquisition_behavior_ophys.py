@@ -59,7 +59,7 @@ from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.instrument imp
     ophys_device_names,
 )
 from mindscope_to_nwb_zarr.aind_data_schema.visual_behavior_ophys.acquisition_behavior_only import (
-    build_change_detection_stimulus_epoch,
+    build_stimulus_epochs,
 )
 
 
@@ -233,7 +233,11 @@ def create_imaging_config(microscope_name: str, imaging_plane: ImagingPlane, dim
                 intended_measurement=imaging_plane.indicator,
                 detector=DetectorConfig(
                     device_name=DETECTOR_NAME,  # "PMT" in the instrument (2P + mesoscope)
-                    exposure_time=0.1,
+                    # No exposure time: the PMT is a point detector with no camera-style
+                    # exposure (imaging is resonant-scanner 2P at 31/11 Hz), and no true value
+                    # is recorded in the NWB. Matches the Visual Coding Ophys pipeline, which
+                    # omits it for the same reason. (Previously a placeholder 0.1 s -- larger
+                    # than the ~32 ms frame period -- carried over from a draft TODO.)
                     trigger_type=TriggerType.INTERNAL,
                 ),
                 light_sources=[
@@ -669,6 +673,12 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
             )
         )
 
+    # One epoch per contiguous stimulus block, sorted chronologically: the change-detection task
+    # block plus (on imaging/habituation sessions) the gray "spontaneous" and final natural-movie
+    # blocks. See acquisition_behavior_only.build_stimulus_epochs. The behavior data (trials,
+    # stimulus presentations) is shared across planes, so the first plane's NWB is used.
+    stimulus_epochs = build_stimulus_epochs(nwbfile, session_info, session_start_time)
+
     acquisition = Acquisition(
         subject_id=subject_id,
         acquisition_start_time=session_start_time,
@@ -720,9 +730,7 @@ def generate_acquisition(nwbfiles: list[NWBFile], session_infos: list[pd.Series]
         # behavior-only sessions, so the single change-detection StimulusEpoch is built with
         # the shared helper (identical trials / task_parameters / stimulus structure).
         # TODO - handle different stimulus sets for the different training stages
-        stimulus_epochs=[
-            build_change_detection_stimulus_epoch(nwbfile, session_info, session_start_time),
-        ],
+        stimulus_epochs=stimulus_epochs,
         subject_details=AcquisitionSubjectDetails(
             animal_weight_prior=None,
             animal_weight_post=None,

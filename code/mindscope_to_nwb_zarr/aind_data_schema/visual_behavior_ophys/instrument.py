@@ -214,8 +214,16 @@ def _build_stimulus_monitor() -> Monitor:
     )
 
 
-def _build_reward_spout() -> LickSpout:
-    """The reward spout / lick sensor assembly shared by all three rigs."""
+def _build_reward_spout(lick_sensor_type: LickSensorType = LickSensorType.PIEZOELECTIC) -> LickSpout:
+    """The reward spout / lick sensor assembly shared by all three rigs.
+
+    ``lick_sensor_type`` defaults to ``PIEZOELECTIC`` -- the value recorded in the (frozen)
+    reference instrument files -- which is kept for the Visual Behavior Neuropixels rigs, which
+    reuse this builder via a bare call. The Visual Behavior Ophys rigs pass ``CAPACITIVE``: the VB
+    2P technical whitepaper describes lick detection as capacitive ("a lick spout for response
+    detection via a capacitive sensor ... an Arduino for capacitive change lick detection"),
+    whereas the reference files (intentionally not updated) record piezoelectric.
+    """
     return LickSpout(
         name=REWARD_SPOUT_NAME,
         manufacturer=Organization.HAMILTON,
@@ -224,14 +232,18 @@ def _build_reward_spout() -> LickSpout:
         solenoid_valve=Device(
             name="Solenoid valve",
             manufacturer=Organization.NRESEARCH_INC,
-            model="161K011",
+            model="161K011",  # whitepaper: solenoid (NI Research, #161K011)
         ),
+        # The TE Connectivity 1007079-1 is a piezo-film part, so both the manufacturer and model
+        # apply only to the piezoelectric sensor (Visual Behavior Neuropixels, which reuses this
+        # builder). They are omitted for the capacitive sensor (Visual Behavior Ophys), which the
+        # VB 2P whitepaper describes without a sensor manufacturer or model number.
         lick_sensor=Device(
             name="Lick sensor",
-            manufacturer=Organization.TE_CONNECTIVITY,
-            model="1007079-1",
+            manufacturer=Organization.TE_CONNECTIVITY if lick_sensor_type == LickSensorType.PIEZOELECTIC else None,
+            model="1007079-1" if lick_sensor_type == LickSensorType.PIEZOELECTIC else None,
         ),
-        lick_sensor_type=LickSensorType.PIEZOELECTIC,
+        lick_sensor_type=lick_sensor_type,
     )
 
 
@@ -373,7 +385,7 @@ def build_behavior_instrument(equipment_name: str, modification_date: date = _BE
                 ),
             ),
             *_build_behavior_illumination(),  # 740 nm body/behavior-camera illumination
-            _build_reward_spout(),
+            _build_reward_spout(LickSensorType.CAPACITIVE),  # capacitive lick sensor per the VB 2P whitepaper
         ],
     )
 
@@ -419,7 +431,9 @@ def build_2p_instrument(equipment_name: str, modification_date: date = _CAM2P_MO
             ),
             Detector(
                 name=DETECTOR_NAME,
-                manufacturer=Organization.UNKNOWN,
+                # VB 2P whitepaper, Section E: the Scientifica rig uses Hamamatsu
+                # photomultiplier tubes ("photomultiplier tubes, Hamamatsu").
+                manufacturer=Organization.HAMAMATSU,
                 detector_type=DetectorType.PMT,
                 data_interface=DataInterface.OTHER,
                 notes="Unknown data interface",
@@ -492,7 +506,7 @@ def build_2p_instrument(equipment_name: str, modification_date: date = _CAM2P_MO
             ),
             *_build_behavior_illumination(),  # 740 nm body/behavior-camera illumination
             *_build_eye_illumination(),        # 850 nm eye-camera illumination
-            _build_reward_spout(),
+            _build_reward_spout(LickSensorType.CAPACITIVE),  # capacitive lick sensor per the VB 2P whitepaper
         ],
     )
 
@@ -714,11 +728,14 @@ def build_mesoscope_instrument(equipment_name: str, modification_date: date = _M
                 wavelength=910,
                 wavelength_unit=SizeUnit.NM,
                 manufacturer=Organization.COHERENT_SCIENTIFIC,
-                model="Chameleon Vision",
+                # The Multiscope uses a Chameleon Ultra II (VB 2P whitepaper, Section E:
+                # "a Ti:Sapphire ultrafast laser (Chameleon Ultra II, Coherent)"), unlike the
+                # single-plane Scientifica rig, which uses a Chameleon Vision.
+                model="Chameleon Ultra II",
             ),
             *_build_behavior_illumination(),  # 740 nm body/behavior-camera illumination
             *_build_eye_illumination(),        # 850 nm eye-camera illumination
-            _build_reward_spout(),
+            _build_reward_spout(LickSensorType.CAPACITIVE),  # capacitive lick sensor per the VB 2P whitepaper
             Microscope(
                 name=microscope_name_for_equipment(equipment_name),
                 manufacturer=Organization.CUSTOM,
