@@ -3,7 +3,7 @@ import traceback
 from typing import Any, Iterable, Optional
 import warnings
 
-from numcodecs import GZip
+from numcodecs import GZip, Blosc
 import numpy as np
 from hdmf.common.table import VectorIndex
 from hdmf.data_utils import GenericDataChunkIterator
@@ -40,7 +40,88 @@ class H5DatasetDataChunkIterator(GenericDataChunkIterator):
         return self.dataset.dtype
 
 
-def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> None:
+# ~10 MB per chunk balances Zarr object count (Code Ocean caps the S3 COPY rate per prefix, so
+# too many chunks triggers 503 Slow Down) against read granularity; matches the LFP rechunk
+# target in the ephys pipelines.
+RECHUNK_TARGET_BYTES = 10 * 1024 * 1024
+# Only rechunk arrays large enough to otherwise span several sub-target chunks (smaller arrays are
+# already a single chunk, so there is nothing to gain).
+_RECHUNK_MIN_BYTES = 2 * 1024 * 1024
+
+
+def _target_chunk_shape(shape, itemsize: int, target_bytes: int = RECHUNK_TARGET_BYTES) -> tuple:
+    """Chunk shape of about ``target_bytes``: keep every axis but the first whole and split axis 0.
+
+    For a ``(time, roi)`` trace or a ``(height, width)`` image this yields one chunk spanning all
+    columns and as many rows as fit in ``target_bytes`` (clamped to the full extent), i.e. 1-2
+    chunks for the ophys arrays instead of the tens the default chunker produces.
+    """
+    trailing = 1
+    for s in shape[1:]:
+        trailing *= s
+    rows = max(1, target_bytes // max(1, trailing * itemsize))
+    return (min(shape[0], rows),) + tuple(shape[1:])
+
+
+def _default_rechunk_compressor() -> Blosc:
+    """Blosc/zstd level 5 -- a good size/speed balance for the ophys traces and template images
+    (the source arrays are already Blosc-compressed, so this preserves the codec family)."""
+    return Blosc(cname="zstd", clevel=5)
+
+
+def rechunk_large_timeseries_data(
+    nwbfile: NWBFile,
+    target_bytes: int = RECHUNK_TARGET_BYTES,
+    min_bytes: int = _RECHUNK_MIN_BYTES,
+    compressor: Optional[Any] = None,
+) -> list[str]:
+    """Rechunk large ``TimeSeries``-style ``.data`` arrays to about ``target_bytes`` per chunk.
+
+    The default hdmf-zarr chunking produces many small (tens-to-hundreds of KB) chunks for the
+    Visual Behavior Ophys traces (dF/F, event detection, corrected/demixed/neuropil fluorescence)
+    and other long timeseries -- e.g. the event-detection array alone can become ~600 tiny chunk
+    files. That explodes the Zarr object count, which is a problem for cloud storage (see
+    ``RECHUNK_TARGET_BYTES``). This wraps each large ``.data`` (the arrays stored under
+    ``fields['data']`` -- ``TimeSeries`` and subclasses) in a ~10 MB ``ZarrDataIO``. The data is
+    copied byte-for-byte (only the chunking/compressor change), so values are identical.
+
+    Only arrays whose uncompressed size exceeds ``min_bytes`` are touched; tables (compound
+    dtypes), non-array data, and already-``ZarrDataIO``-wrapped data are skipped. **Image template
+    data is not handled here** -- an ``Image`` is an hdmf ``Data`` whose payload is not a
+    ``fields['data']`` entry, and ``Image.set_data_io`` is not honored on export until the pending
+    pynwb fix is released, so template images are rechunked at construction time in
+    :func:`convert_visual_behavior_stimulus_template_to_images` (``chunk_image_data=True``) instead.
+
+    Returns the names of the arrays that were rechunked (for logging).
+    """
+    if compressor is None:
+        compressor = _default_rechunk_compressor()
+    rechunked = []
+    for obj in nwbfile.objects.values():
+        fields = getattr(obj, "fields", None)
+        if not fields or "data" not in fields:
+            continue
+        data = fields["data"]
+        if isinstance(data, ZarrDataIO):
+            continue
+        shape = getattr(data, "shape", None)
+        dtype = getattr(data, "dtype", None)
+        if not shape or dtype is None or getattr(dtype, "names", None) is not None:
+            continue  # not array-like, or a compound/table column (e.g. VectorData)
+        if getattr(data, "ndim", 0) < 1 or int(np.prod(shape)) * dtype.itemsize <= min_bytes:
+            continue
+        obj.fields["data"] = ZarrDataIO(
+            data=data[:],
+            chunks=_target_chunk_shape(shape, dtype.itemsize, target_bytes),
+            compressor=compressor,
+        )
+        rechunked.append(obj.name)
+    return rechunked
+
+
+def convert_visual_behavior_stimulus_template_to_images(
+    nwbfile: NWBFile, chunk_image_data: bool = False
+) -> None:
     """Convert Visual Behavior stimulus_template from StimulusTemplate to Images container.
 
     In the original HDF5 versions of Visual Behavior data, stimulus template images
@@ -63,6 +144,12 @@ def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> Non
 
     Args:
         nwbfile: The NWBFile object to convert.
+        chunk_image_data: When True, store each template image's data in a ~10 MB ``ZarrDataIO``
+            (whole-image / few-chunk) instead of letting hdmf-zarr auto-chunk it into many small
+            chunks (a 1200x1920 float64 image otherwise becomes ~32 chunk files). Set by the Visual
+            Behavior Ophys conversion; left False for Visual Behavior Ephys (unchanged). The
+            ``ZarrDataIO`` must be applied here, at construction, because ``Image.set_data_io`` is
+            not honored on export until the pending pynwb fix is released.
     Returns:
         None, the NWBFile object is modified in place.
     """
@@ -122,14 +209,31 @@ def convert_visual_behavior_stimulus_template_to_images(nwbfile: NWBFile) -> Non
         all_images_unwarped = []
         all_images = []
         for i in range(image_data.shape[0]):
+            unwarped_i = image_data_unwarped[i]
+            warped_i = image_data[i]
+            if chunk_image_data:
+                # Rechunk each image to ~10 MB (whole-image for the uint8 warped copies, ~2 chunks
+                # for the larger float64 unwarped) so the Zarr does not fragment each image into
+                # tens of tiny chunk files. Applied at construction (not set_data_io) -- see the
+                # chunk_image_data note in the docstring.
+                unwarped_i = ZarrDataIO(
+                    unwarped_i,
+                    chunks=_target_chunk_shape(unwarped_i.shape, unwarped_i.dtype.itemsize),
+                    compressor=_default_rechunk_compressor(),
+                )
+                warped_i = ZarrDataIO(
+                    warped_i,
+                    chunks=_target_chunk_shape(warped_i.shape, warped_i.dtype.itemsize),
+                    compressor=_default_rechunk_compressor(),
+                )
             unwarped_image = GrayscaleImage(
                 name=stimulus_template.control_description[i],
-                data=image_data_unwarped[i],
+                data=unwarped_i,
                 description=f"Unwarped stimulus template: {stimulus_template.control[i]}",
             )
             warped_image = WarpedStimulusTemplateImage(
                 name=stimulus_template.control_description[i],
-                data=image_data[i],
+                data=warped_i,
                 description=f"Warped stimulus template: {stimulus_template.control[i]}",
                 unwarped=unwarped_image,
             )

@@ -29,6 +29,7 @@ import quilt3 as q3
 from mindscope_to_nwb_zarr.data_conversion.conversion_utils import (
     add_missing_descriptions,
     convert_visual_behavior_stimulus_template_to_images,
+    rechunk_large_timeseries_data,
 )
 
 root_dir = Path(__file__).parent.parent.parent.parent
@@ -89,11 +90,17 @@ def convert_behavior_or_single_plane_nwb_to_zarr(hdf5_path: Path, zarr_path: Pat
         # Set session_id so that naming on DANDI is more similar to original NWB file
         read_nwbfile.session_id = read_nwbfile.identifier
 
-        # Change stimulus_template to Image objects in Images container
-        convert_visual_behavior_stimulus_template_to_images(read_nwbfile)
+        # Change stimulus_template to Image objects in Images container (rechunk each image to
+        # ~10 MB so the Zarr does not fragment every template image into many tiny chunk files).
+        convert_visual_behavior_stimulus_template_to_images(read_nwbfile, chunk_image_data=True)
 
         # Add missing experiment description field (from technical white paper)
         add_missing_descriptions(read_nwbfile)
+
+        # Rechunk the large ophys traces / event-detection / long timeseries to ~10 MB chunks to
+        # cut the Zarr object count (data is unchanged; see rechunk_large_timeseries_data).
+        rechunked = rechunk_large_timeseries_data(read_nwbfile)
+        print(f"Rechunked {len(rechunked)} large timeseries arrays to ~10 MB chunks.")
 
         print(f"Exporting to Zarr file {zarr_path} ...")
         with NWBZarrIO(str(zarr_path), mode='w') as export_io:
@@ -232,11 +239,17 @@ def combine_multiplane_nwb_to_zarr(
             # Set session_id so that naming on DANDI is more similar to original NWB files
             combined_nwbfile.session_id = combined_nwbfile.identifier
 
-            # Change stimulus_template to Image objects in Images container
-            convert_visual_behavior_stimulus_template_to_images(combined_nwbfile)
+            # Change stimulus_template to Image objects in Images container (rechunk each image to
+            # ~10 MB so the Zarr does not fragment every template image into many tiny chunk files).
+            convert_visual_behavior_stimulus_template_to_images(combined_nwbfile, chunk_image_data=True)
 
             # Add missing experiment description field (from technical white paper)
             add_missing_descriptions(combined_nwbfile)
+
+            # Rechunk the large ophys traces / event-detection / long timeseries to ~10 MB chunks to
+            # cut the Zarr object count (per plane; data is unchanged). See rechunk_large_timeseries_data.
+            rechunked = rechunk_large_timeseries_data(combined_nwbfile)
+            print(f"Rechunked {len(rechunked)} large timeseries arrays to ~10 MB chunks.")
 
             # Export the combined NWB file to Zarr (link_data=False copies all data)
             print(f"Exporting to Zarr file {zarr_path} ...")

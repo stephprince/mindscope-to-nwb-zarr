@@ -174,6 +174,11 @@ The per-dataset subsections below document the source data, every transformation
 - Combined multiscope sessions (multiple single-plane NWB files) into a single Zarr output, renaming per-plane objects with a `_plane_X` suffix: the imaging plane, the `ophys` processing module, and the `metadata` `LabMetaData` object (neurodata type `OphysBehaviorMetadata`) become `imaging_plane_X` / `ophys_plane_X` / `metadata_plane_X`. `X` is 1-indexed by the experiment order in `behavior_session_table.csv`.
   - Objects duplicated across the per-plane files (stimulus table, trials, licking, …) are stored once, retaining the NWB object ID from the first experiment listed for the session.
 - Set `NWBFile.session_id` = `NWBFile.identifier` so the DANDI session name more closely resembles the original HDF5 file name.
+- **Rechunked large arrays to ~10 MB to cut the Zarr object count (Visual Behavior Ophys only).** The default hdmf-zarr chunking fragments the ophys data into thousands of tiny (tens-to-hundreds of KB) chunk files, which is a problem for cloud storage (Code Ocean caps the S3 COPY rate per prefix, so too many chunks triggers 503 Slow Down). Two steps repack the biggest offenders to ~10 MB chunks (`RECHUNK_TARGET_BYTES`), byte-for-byte identical:
+  - **Long timeseries** — `rechunk_large_timeseries_data` (`conversion_utils.py`) wraps every large `TimeSeries`-style `.data` (dF/F, event detection, corrected/demixed/neuropil fluorescence, and long behavior/eye timeseries) in a `ZarrDataIO` sized to ~10 MB. The worst case, `event_detection`, drops from ~576 chunk files (`[4380, 1]`, ~34 KB each) to ~2. Tables/compound columns and small arrays are skipped.
+  - **Stimulus-template images** — `convert_visual_behavior_stimulus_template_to_images(..., chunk_image_data=True)` stores each template image's data as a ~10 MB `ZarrDataIO` (whole-image for the `uint8` warped copies, ~2 chunks for the `float64` unwarped), so a 1200×1920 image is 1–2 chunk files instead of ~32. The `ZarrDataIO` is applied **at construction** because `Image.set_data_io` is not honored on export until the pending pynwb fix ships. (Visual Behavior Ephys reuses this function but passes `chunk_image_data=False`, so its output is unchanged.)
+
+  Net effect on a single-plane session: **~2049 → ~1003 files (−51%)**, scaling with plane count on multiscope. Values are unchanged (verified equal before/after); only the chunk layout and compressor (Blosc/zstd-5) differ.
 
 ### Visual Coding Ephys (conversion)
 **Source data** — HDF5 NWB files from `s3://allen-brain-observatory` under `visual-coding-neuropixels/ecephys-cache/`; session list from `.../sessions.csv`. **58 sessions** total. Each session has a base `session_{id}.nwb` (units, electrodes, session data) plus multiple `probe_{id}_lfp.nwb` files (LFP + CSD per probe).
@@ -228,7 +233,7 @@ The per-dataset subsections below document the source data, every transformation
 ## Recommended Future Improvements for Conversion from HDF5 to Zarr
 
 ### All Datasets
-- Optimize Zarr array chunking shapes to improve read/write performance.
+- Optimize Zarr array chunking shapes to improve read/write performance. (Done for **Visual Behavior Ophys** — large timeseries and stimulus-template images are rechunked to ~10 MB; see its conversion section. The other datasets still use the default chunking, apart from the ephys LFP rechunk.)
 - Add missing descriptions for table columns and other NWB objects (see inspector reports for full information).
 - In `TimeSeries` objects that have timestamp arrays with regular sampling rates, use `starting_time` and `rate` attributes instead of storing full timestamp arrays to reduce file size.
 - Make how stimulus presentation times and parameters are stored consistent across datasets.
